@@ -1,0 +1,23 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "browser-guard"
+version = "0.1.0"
+description = "A protective shell around browser-automation MCPs"
+requires-python = ">=3.11"
+dependencies = [
+  "mcp[cli]>=1.0",
+  "selenium>=4.20",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8"]
+
+[project.scripts]
+browser-guard = "browser_guard.mcp.server:mcp.run"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["browser_guard*"]
