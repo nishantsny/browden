@@ -79,3 +79,7 @@ browser_guard/
 `web_navigator/` never imports from `mcp/`; backends are the only place
 third-party browser libraries are touched. Swap the backend by changing one
 line in `mcp/server.py`.
+
+## License
+
+[Apache License 2.0](./LICENSE).

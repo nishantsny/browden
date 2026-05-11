@@ -6,6 +6,8 @@ build-backend = "setuptools.build_meta"
 name = "browser-guard"
 version = "0.1.0"
 description = "A protective shell around browser-automation MCPs"
+license = "Apache-2.0"
+license-files = ["LICENSE"]
 requires-python = ">=3.11"
 dependencies = [
   "mcp[cli]>=1.0",
