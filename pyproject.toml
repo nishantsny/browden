@@ -1,11 +1,12 @@
 [build-system]
-requires = ["setuptools>=68", "wheel"]
+requires = ["setuptools>=77", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "browser-guard"
 version = "0.1.0"
 description = "A protective shell around browser-automation MCPs"
+authors = [{ name = "Nishant", email = "nishantsny@gmail.com" }]
 license = "Apache-2.0"
 license-files = ["LICENSE"]
 requires-python = ">=3.11"

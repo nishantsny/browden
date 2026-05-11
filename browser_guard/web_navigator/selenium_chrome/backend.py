@@ -1,11 +1,33 @@
+import os
 from pathlib import Path
 
 from ...common.page import PageInfo
-from ...dependencies.selenium import ChromeOptions, webdriver
+from ...dependencies.selenium import ChromeOptions, WebDriverWait, webdriver
 from ..interface import WebNavigatorBackend
 
-PROFILE_DIR = Path("/home/buddy/.cache/browser-guard/chrome-profile")
+
+def _default_profile_dir() -> Path:
+    """Resolve the Chrome profile path, respecting XDG_CACHE_HOME."""
+    root = os.environ.get("XDG_CACHE_HOME") or str(Path.home() / ".cache")
+    return Path(root) / "browser-guard" / "chrome-profile"
+
+
+PROFILE_DIR = _default_profile_dir()
 SINGLETON_FILES = ("SingletonLock", "SingletonCookie", "SingletonSocket")
+TITLE_WAIT_SECONDS = 3
+
+
+def _wait_for_title(drv, timeout: float = TITLE_WAIT_SECONDS) -> None:
+    """Wait briefly for the page title to populate after navigation.
+
+    drv.get() returns when the load event fires, but many pages set their
+    final title via JavaScript after that. Best-effort: don't raise if the
+    title never appears.
+    """
+    try:
+        WebDriverWait(drv, timeout).until(lambda d: bool(d.title))
+    except Exception:
+        pass
 
 
 def _clear_stale_singletons(profile_dir: Path) -> None:
@@ -66,6 +88,7 @@ class SeleniumChromeBackend(WebNavigatorBackend):
         drv.switch_to.new_window("tab")
         if url:
             drv.get(url)
+            _wait_for_title(drv)
         return PageInfo(
             id=drv.current_window_handle,
             url=drv.current_url,
@@ -86,6 +109,7 @@ class SeleniumChromeBackend(WebNavigatorBackend):
     def navigate(self, url: str) -> PageInfo:
         drv = self._drv()
         drv.get(url)
+        _wait_for_title(drv)
         return PageInfo(
             id=drv.current_window_handle,
             url=drv.current_url,

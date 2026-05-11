@@ -4,6 +4,7 @@ from browser_guard.web_navigator.selenium_chrome.backend import (
     SINGLETON_FILES,
     SeleniumChromeBackend,
     _clear_stale_singletons,
+    _default_profile_dir,
 )
 
 
@@ -49,6 +50,17 @@ def test_drv_recreates_after_dead_session(mock_webdriver):
     assert drv is alive
     dead.quit.assert_called_once()
     assert mock_webdriver.Chrome.call_count == 1  # one new driver after the dead one
+
+
+def test_default_profile_dir_honours_xdg(monkeypatch, tmp_path):
+    monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path))
+    assert _default_profile_dir() == tmp_path / "browser-guard" / "chrome-profile"
+
+
+def test_default_profile_dir_falls_back_to_home(monkeypatch, tmp_path):
+    monkeypatch.delenv("XDG_CACHE_HOME", raising=False)
+    monkeypatch.setenv("HOME", str(tmp_path))
+    assert _default_profile_dir() == tmp_path / ".cache" / "browser-guard" / "chrome-profile"
 
 
 def test_clear_stale_singletons_removes_files(tmp_path):
