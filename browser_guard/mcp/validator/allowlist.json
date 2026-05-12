@@ -1,0 +1,8 @@
+{
+  "amazon.com": [
+    "^/$",
+    "^/gp/your-account/order-history/?$",
+    "^/dp/[A-Z0-9]{10}/?$",
+    "^/[^/]+/dp/[A-Z0-9]{10}/?$"
+  ]
+}

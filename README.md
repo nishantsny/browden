@@ -23,16 +23,21 @@ backend self-heals after a dead Chrome session and clears stale
 
 ## Restrictions
 
-`navigate()` and `new_page(url=…)` run every URL through `validate_url`:
+`navigate()` and `new_page(url=…)` run every URL through `validate_url`,
+which gates against a per-host allowlist defined in
+[`browser_guard/mcp/validator/allowlist.json`](browser_guard/mcp/validator/allowlist.json).
 
 - Bare domains are normalized to `https://`.
-- Paths are allowed (`amazon.com/orders` ✓).
-- **Query strings are rejected** (`amazon.com/orders?ref=foo` ✗).
-- **Fragments are rejected** (`amazon.com/page#section` ✗).
 - A `netloc` is required.
+- The `(host, path)` pair must match a regex listed under that host. The
+  host is lower-cased and a leading `www.` is stripped before lookup.
+- For URLs that match, query strings, fragments, `&`, and spaces are
+  preserved as-is — only the host+path are gated.
+- Anything not on the allowlist is rejected.
 
 Failures raise `ValidationError`, which FastMCP surfaces as a structured
-tool error.
+tool error. Extend the allowlist by editing `allowlist.json` and adding
+the URL shape you actually need — start narrow.
 
 ## Adding to an LLM agent
 
