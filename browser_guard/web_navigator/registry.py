@@ -1,9 +1,13 @@
 """Tracks the last-access time of each open tab so idle ones can be reaped.
 
-Pure: no Selenium import. The clock is injectable (and ``now`` can be passed per
-call) so tests drive it with a fake clock instead of sleeping. All times are
-durations compared against ``time.monotonic`` — never wall-clock — so a system
-clock jump can't cause a spurious reap.
+Pure and **synchronous by contract** — no ``asyncio`` import. Async coordination
+(``asyncio.to_thread`` dispatch, the periodic reaper task) lives in
+``session.py``; this module is just a dict + a clock and must stay that way.
+
+The clock is injectable (and ``now`` can be passed per call) so tests drive it
+with a fake clock instead of sleeping. All times are durations compared against
+``time.monotonic`` — never wall-clock — so a system clock jump can't cause a
+spurious reap.
 """
 import time
 

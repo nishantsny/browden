@@ -1,9 +1,10 @@
 """Per-tab cache of parsed HTML (BeautifulSoup) with a TTL-driven auto stale-reload.
 
-Synchronous — the backend handed in is synchronous too. ``PageSession`` is
-responsible for only ever calling these methods inside ``asyncio.to_thread`` (a
-WebDriver session is not thread-safe, and a serial MCP client means there's only
-one such call in flight at a time).
+**Synchronous by contract** — no ``asyncio`` import. The backend handed in is
+synchronous too. ``PageSession`` is responsible for only ever calling these
+methods inside ``asyncio.to_thread`` (a WebDriver session is not thread-safe,
+and a serial MCP client means there's only one such call in flight at a time);
+async coordination stays in ``session.py``, never here.
 
 TTL is a duration against ``time.monotonic`` (clock injectable for tests) so a
 wall-clock jump can't make a fresh cache look stale.

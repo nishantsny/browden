@@ -31,7 +31,7 @@ async def list_pages() -> list[dict]:
 
 @mcp.tool()
 async def new_page(url: str | None = None) -> dict:
-    """Open a new tab. Optional url is validated (paths OK, no query strings)."""
+    """Open a new tab. Optional url is gated by the per-host allowlist (query strings and fragments pass through)."""
     if url:
         url = validate_url(url)
     return (await _get_session().new_page(url)).__dict__
@@ -53,7 +53,7 @@ async def select_page(page_id: str) -> dict:
 
 @mcp.tool()
 async def navigate(url: str, page_id: str) -> dict:
-    """Navigate the named tab to url. Paths allowed; query strings/fragments rejected."""
+    """Navigate the named tab to url. Url is gated by the per-host allowlist (query strings and fragments pass through)."""
     url = validate_url(url)
     result = await _get_session().navigate(url, page_id=page_id)
     return result if isinstance(result, dict) else result.__dict__

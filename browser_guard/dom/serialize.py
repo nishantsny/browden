@@ -6,6 +6,7 @@ attributes (an ad iframe's ``name``) hold 15 KB of JSON — so raw HTML and raw
 attribute values are never echoed by default; we truncate, report the true
 length, and let the caller opt in to more (``include_html`` / ``max_html_bytes``).
 """
+from ._helpers import tag_class_list
 
 ATTR_CAP = 256          # max chars per attribute value
 TEXT_CAP = 2000         # max chars of collapsed text
@@ -17,15 +18,6 @@ def _attr_value(value) -> str:
     if isinstance(value, (list, tuple)):
         return " ".join(str(v) for v in value)
     return str(value)
-
-
-def _classes(tag) -> list[str]:
-    raw = tag.get("class")
-    if not raw:
-        return []
-    if isinstance(raw, str):
-        return raw.split()
-    return list(raw)
 
 
 def element_to_node(tag, *, include_html: bool = False,
@@ -58,7 +50,7 @@ def element_to_node(tag, *, include_html: bool = False,
     node = {
         "tag": tag.name,
         "id": el_id,
-        "classes": _classes(tag),
+        "classes": tag_class_list(tag),
         "attributes": attributes,
         "text": text,
         "text_length": text_length,

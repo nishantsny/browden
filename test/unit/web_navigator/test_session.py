@@ -1,3 +1,5 @@
+import time
+
 import pytest
 
 from browser_guard.common.page import PageInfo
@@ -12,14 +14,6 @@ PAGE_HTML = """
   <div class="order-card js-card other"></div>
 </body></html>
 """
-
-
-class FakeClock:
-    def __init__(self, t=1000.0):
-        self.t = t
-
-    def __call__(self):
-        return self.t
 
 
 class FakeBackend:
@@ -90,8 +84,10 @@ class FakeBackend:
 
 
 def make_session(backend=None, clock=None):
+    """Tests that don't manipulate time can omit ``clock``; sweep_idle tests pass a
+    ``fake_clock()`` instance so they can ``clock.t += seconds`` to advance."""
     return PageSession(backend or FakeBackend(),
-                       clock=clock or FakeClock(), start_reaper=False)
+                       clock=clock or time.monotonic, start_reaper=False)
 
 
 def test_no_reaper_task_when_disabled():
@@ -284,10 +280,10 @@ async def test_select_dead_page_raises_and_drops_it():
 
 # -- idle reaper ------------------------------------------------------------
 
-def test_sweep_idle_closes_invalidates_forgets_idle_pages():
+def test_sweep_idle_closes_invalidates_forgets_idle_pages(fake_clock):
     backend = FakeBackend()
     backend.live = {"old1", "old2", "fresh"}  # all still open in Chrome
-    clock = FakeClock()
+    clock = fake_clock()
     s = make_session(backend, clock=clock)
     s._registry.touch("old1")
     s._registry.touch("old2")
@@ -304,11 +300,11 @@ def test_sweep_idle_closes_invalidates_forgets_idle_pages():
     assert "fresh" in s._registry._last_access  # not idle
 
 
-def test_sweep_idle_swallows_close_errors():
+def test_sweep_idle_swallows_close_errors(fake_clock):
     backend = FakeBackend()
     backend.live = {"only"}
     backend.close_raises = ValueError("Cannot close the last tab")
-    clock = FakeClock()
+    clock = fake_clock()
     s = make_session(backend, clock=clock)
     s._registry.touch("only")
     clock.t += IDLE_TTL_SECONDS + 1
@@ -319,9 +315,9 @@ def test_sweep_idle_swallows_close_errors():
     assert "only" not in s._registry._last_access  # still dropped from tracking
 
 
-def test_sweep_idle_is_noop_while_driver_busy():
+def test_sweep_idle_is_noop_while_driver_busy(fake_clock):
     backend = FakeBackend()
-    clock = FakeClock()
+    clock = fake_clock()
     s = make_session(backend, clock=clock)
     s._registry.touch("old")
     clock.t += IDLE_TTL_SECONDS + 1
@@ -334,10 +330,10 @@ def test_sweep_idle_is_noop_while_driver_busy():
     assert "old" in s._registry._last_access  # left for the next tick
 
 
-def test_sweep_idle_reconciles_against_live_tabs():
+def test_sweep_idle_reconciles_against_live_tabs(fake_clock):
     backend = FakeBackend()
     backend.live = {"h1"}  # only h1 is still open; "ghost" was closed in Chrome
-    clock = FakeClock()
+    clock = fake_clock()
     s = make_session(backend, clock=clock)
     s._registry.touch("h1")
     s._registry.touch("ghost")

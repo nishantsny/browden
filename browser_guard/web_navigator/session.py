@@ -98,6 +98,8 @@ class PageSession:
 
     async def close_page(self, page_id: str) -> None:
         self.sweep_idle()
+        # Only PageNotFoundError is swallowed: a last-tab ValueError (or any other backend
+        # failure) means the tab is still open, so its cache/registry entries must stay.
         try:
             await self._run_driver(self._backend.close_page, page_id)
         except PageNotFoundError:

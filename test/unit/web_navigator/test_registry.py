@@ -1,16 +1,8 @@
 from browser_guard.web_navigator.registry import PageRegistry
 
 
-class FakeClock:
-    def __init__(self, t=1000.0):
-        self.t = t
-
-    def __call__(self):
-        return self.t
-
-
-def test_idle_pages_uses_ttl_and_clock():
-    clock = FakeClock()
+def test_idle_pages_uses_ttl_and_clock(fake_clock):
+    clock = fake_clock()
     reg = PageRegistry(clock=clock)
     reg.touch("fresh")
     clock.t += 10
@@ -27,8 +19,8 @@ def test_idle_pages_uses_ttl_and_clock():
     assert reg2.idle_pages(3600) == []
 
 
-def test_touch_resets_age():
-    clock = FakeClock()
+def test_touch_resets_age(fake_clock):
+    clock = fake_clock()
     reg = PageRegistry(clock=clock)
     reg.touch("p")
     clock.t += 5000
@@ -37,16 +29,16 @@ def test_touch_resets_age():
     assert reg.idle_pages(3600) == []
 
 
-def test_forget_removes_page():
-    reg = PageRegistry(clock=FakeClock())
+def test_forget_removes_page(fake_clock):
+    reg = PageRegistry(clock=fake_clock())
     reg.touch("p")
     reg.forget("p")
     reg.forget("p")  # idempotent
     assert reg.idle_pages(0) == []
 
 
-def test_now_argument_overrides_clock():
-    reg = PageRegistry(clock=FakeClock(0.0))
+def test_now_argument_overrides_clock(fake_clock):
+    reg = PageRegistry(clock=fake_clock(0.0))
     reg.touch("p", now=100.0)
     assert reg.idle_pages(50, now=200.0) == ["p"]
     assert reg.idle_pages(50, now=120.0) == []

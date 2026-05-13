@@ -2,14 +2,6 @@ from browser_guard.common.page import PageInfo
 from browser_guard.web_navigator.soup_cache import TTL_SECONDS, SoupCache
 
 
-class FakeClock:
-    def __init__(self, t=1000.0):
-        self.t = t
-
-    def __call__(self):
-        return self.t
-
-
 class FakeBackend:
     def __init__(self):
         self.source = "<html><body><p id='x'>hi</p></body></html>"
@@ -25,9 +17,9 @@ class FakeBackend:
         return PageInfo(id=page_id or "active", url="https://www.amazon.com/", title="T", selected=True)
 
 
-def test_first_get_parses_without_reloading():
+def test_first_get_parses_without_reloading(fake_clock):
     backend = FakeBackend()
-    cache = SoupCache(clock=FakeClock())
+    cache = SoupCache(clock=fake_clock())
     soup, reloaded = cache.get_soup("p1", backend)
     assert reloaded is False
     assert backend.reload_calls == 0
@@ -35,9 +27,9 @@ def test_first_get_parses_without_reloading():
     assert soup.find(id="x").text == "hi"
 
 
-def test_fresh_entry_returns_cached_without_backend_hit():
+def test_fresh_entry_returns_cached_without_backend_hit(fake_clock):
     backend = FakeBackend()
-    cache = SoupCache(clock=FakeClock())
+    cache = SoupCache(clock=fake_clock())
     s1, _ = cache.get_soup("p1", backend)
     s2, reloaded = cache.get_soup("p1", backend)
     assert s2 is s1
@@ -45,9 +37,9 @@ def test_fresh_entry_returns_cached_without_backend_hit():
     assert backend.get_calls == 1  # not re-fetched
 
 
-def test_stale_entry_triggers_reload():
+def test_stale_entry_triggers_reload(fake_clock):
     backend = FakeBackend()
-    clock = FakeClock()
+    clock = fake_clock()
     cache = SoupCache(clock=clock)
     cache.get_soup("p1", backend)
     clock.t += TTL_SECONDS
@@ -58,9 +50,9 @@ def test_stale_entry_triggers_reload():
     assert soup.find(id="y").text == "new"
 
 
-def test_invalidate_forces_refetch():
+def test_invalidate_forces_refetch(fake_clock):
     backend = FakeBackend()
-    cache = SoupCache(clock=FakeClock())
+    cache = SoupCache(clock=fake_clock())
     cache.get_soup("p1", backend)
     cache.invalidate("p1")
     _soup, reloaded = cache.get_soup("p1", backend)
@@ -69,9 +61,9 @@ def test_invalidate_forces_refetch():
     assert backend.reload_calls == 0
 
 
-def test_force_reload_reloads_browser_and_returns_page_info():
+def test_force_reload_reloads_browser_and_returns_page_info(fake_clock):
     backend = FakeBackend()
-    cache = SoupCache(clock=FakeClock())
+    cache = SoupCache(clock=fake_clock())
     cache.get_soup("p1", backend)
     backend.source = "<html><body><p id='z'>fresh</p></body></html>"
     soup, page_info = cache.force_reload("p1", backend)

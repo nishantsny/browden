@@ -5,6 +5,7 @@ paginated slice of them). No Selenium, no serialization. Invalid CSS is raised a
 ``InvalidSelector`` for the caller to translate into a tool error.
 """
 from ..dependencies.bs4 import SelectorSyntaxError
+from ._helpers import tag_class_list
 
 LIMIT_DEFAULT = 10
 LIMIT_MAX = 50
@@ -38,15 +39,6 @@ def paginate(matches, limit: int, offset: int):
     return page, eff_limit, eff_offset, total, next_offset
 
 
-def _tag_classes(tag) -> set[str]:
-    raw = tag.get("class") if hasattr(tag, "get") else None
-    if not raw:
-        return set()
-    if isinstance(raw, str):
-        return set(raw.split())
-    return set(raw)
-
-
 def by_id(soup, element_id: str):
     """Mirror ``document.getElementById`` — document-global, one element or ``None``."""
     return soup.find(id=element_id)
@@ -55,7 +47,7 @@ def by_id(soup, element_id: str):
 def by_class(soup, class_names: str, limit: int = LIMIT_DEFAULT, offset: int = 0):
     """Mirror ``document.getElementsByClassName`` — element must carry ALL named classes."""
     required = set(class_names.split())
-    matches = soup.find_all(lambda t: required.issubset(_tag_classes(t)))
+    matches = soup.find_all(lambda t: required.issubset(tag_class_list(t)))
     return paginate(matches, limit, offset)
 
 
