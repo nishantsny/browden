@@ -116,3 +116,25 @@ class SeleniumChromeBackend(WebNavigatorBackend):
             title=drv.title,
             selected=True,
         )
+
+    def current_page_id(self) -> str:
+        return self._drv().current_window_handle
+
+    def get_page_source(self, page_id: str | None = None) -> str:
+        drv = self._drv()
+        if page_id:
+            drv.switch_to.window(page_id)
+        return drv.page_source
+
+    def reload(self, page_id: str | None = None) -> PageInfo:
+        drv = self._drv()
+        if page_id:
+            drv.switch_to.window(page_id)
+        drv.refresh()
+        _wait_for_title(drv)
+        return PageInfo(
+            id=drv.current_window_handle,
+            url=drv.current_url,
+            title=drv.title,
+            selected=True,
+        )

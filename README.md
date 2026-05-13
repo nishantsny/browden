@@ -6,7 +6,9 @@ handed the full power of a CDP or Playwright client.
 
 ## Capabilities
 
-Five tools, mapped to a swappable `WebNavigatorBackend`:
+Ten tools, mapped to a swappable `WebNavigatorBackend`.
+
+**Tabs**
 
 | Tool          | Purpose                                              |
 | ------------- | ---------------------------------------------------- |
@@ -15,6 +17,38 @@ Five tools, mapped to a swappable `WebNavigatorBackend`:
 | `close_page`  | Close a tab by id (refuses the last one).            |
 | `select_page` | Switch the active tab.                               |
 | `navigate`    | Navigate the active tab to a URL.                    |
+
+**Reading page content** — mirrors the four browser DOM-query APIs, server-side, over the rendered (post-JS) DOM:
+
+| Tool                          | Mirrors                            |
+| ----------------------------- | ---------------------------------- |
+| `get_element_by_id`           | `document.getElementById`          |
+| `get_elements_by_class_name`  | `document.getElementsByClassName`  |
+| `query_selector`              | `document.querySelector`           |
+| `query_selector_all`          | `document.querySelectorAll`        |
+| `force_reload_page`           | reload a tab + refresh its cache   |
+
+Each query targets a tab (`page_id`, defaulting to the active tab) and returns
+matched elements as plain JSON "nodes" — `tag`, `id`, `classes`, `attributes`,
+collapsed `text`, sizes (`text_length`, `html_length`, `child_count`) — with
+attribute values and text truncated to keep responses small (true lengths are
+reported; outer HTML is omitted unless you pass `include_html=true`). The list
+tools (`get_elements_by_class_name`, `query_selector_all`) are paginated
+(`limit` ≤ 50, `offset`, `next_offset`); an invalid CSS selector comes back as
+a structured tool error rather than an exception.
+
+**Caching.** The parsed DOM for a tab is cached for one hour. A query against a
+tab whose cache has expired transparently reloads that tab in the browser,
+re-parses, and tells the caller it did (`reloaded: true`); `navigate` /
+`new_page` / `close_page` invalidate the relevant tab's cache; `force_reload_page`
+busts it on demand.
+
+**Idle-tab cleanup.** A tab that goes one hour without a DOM query or navigation
+is closed and dropped from tracking, via a periodic sweep plus a lazy sweep on
+every tool call (the last remaining tab is left open). See
+[`design-docs/idle-cleanup-and-concurrency.md`](design-docs/idle-cleanup-and-concurrency.md)
+for how the reaper and the WebDriver session stay out of each other's way without
+a lock.
 
 Default backend is `SeleniumChromeBackend` using a persistent Chrome profile
 at `~/.cache/browser-guard/chrome-profile`, so logins survive restarts. The
@@ -61,8 +95,9 @@ agent to register the server.
 - [`mcp[cli]`](https://pypi.org/project/mcp/) ≥ 1.0 — FastMCP server SDK
 - [`selenium`](https://pypi.org/project/selenium/) ≥ 4.20 — bundles
   Selenium Manager, so ChromeDriver is auto-downloaded
+- [`beautifulsoup4`](https://pypi.org/project/beautifulsoup4/) ≥ 4.12 — DOM parsing for the query tools
 - Google Chrome installed on the host
-- `pytest` (dev only)
+- `pytest`, `pytest-asyncio` (dev only)
 
 Install:
 
@@ -71,19 +106,10 @@ uv venv && uv pip install -e ".[dev]"
 pytest test/unit/
 ```
 
-## Layout
+## Design docs
 
-```
-browser_guard/
-├── common/          # PageInfo dataclass
-├── dependencies/    # anti-corruption wrappers around mcp + selenium
-├── mcp/             # FastMCP server + URL validator
-└── web_navigator/   # WebNavigatorBackend interface + selenium_chrome backend
-```
-
-`web_navigator/` never imports from `mcp/`; backends are the only place
-third-party browser libraries are touched. Swap the backend by changing one
-line in `mcp/server.py`.
+- [`design-docs/layout.md`](design-docs/layout.md) — package layout and the import rules between them
+- [`design-docs/idle-cleanup-and-concurrency.md`](design-docs/idle-cleanup-and-concurrency.md) — the idle-tab reaper and the lock-free concurrency model
 
 ## License
 

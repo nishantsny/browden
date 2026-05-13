@@ -30,3 +30,15 @@ class WebNavigatorBackend(ABC):
     @abstractmethod
     def navigate(self, url: str) -> PageInfo:
         """Navigate the current tab to url. Url is pre-validated."""
+
+    @abstractmethod
+    def current_page_id(self) -> str:
+        """Return the id of the currently active tab."""
+
+    @abstractmethod
+    def get_page_source(self, page_id: str | None = None) -> str:
+        """Return the rendered HTML (post-JS DOM) of a tab; active tab if page_id is None."""
+
+    @abstractmethod
+    def reload(self, page_id: str | None = None) -> PageInfo:
+        """Reload a tab in the browser; active tab if page_id is None."""
