@@ -119,7 +119,7 @@ async def test_navigate_new_page_close_page_invalidate_cache():
     await s.get_element_by_id("logo", page_id="h1")
     assert "h1" in s._cache._entries
 
-    await s.navigate("https://www.amazon.com/")
+    await s.navigate("https://www.amazon.com/", page_id="h1")
     assert "h1" not in s._cache._entries  # navigate busted it
 
     await s.new_page("https://www.amazon.com/")
@@ -178,7 +178,7 @@ async def test_invalid_css_returns_error_dict():
 async def test_force_reload_page_reloads_and_reports():
     backend = FakeBackend()
     s = make_session(backend)
-    out = await s.force_reload_page()
+    out = await s.force_reload_page(page_id="h1")
     assert out == {"page_id": "h1", "url": "reloaded-url", "title": "reloaded-title", "reloaded": True}
     assert ("reload", "h1") in backend.calls
     assert "h1" in s._registry._last_access
@@ -217,13 +217,43 @@ async def test_force_reload_on_dead_page_returns_error():
 
 
 @pytest.mark.asyncio
-async def test_force_reload_with_no_active_tab_returns_error():
+async def test_force_reload_partial_failure_drops_supplied_page_id():
+    """reload(pid) succeeds but the subsequent get_page_source(pid) fails — the tab
+    died between the two backend calls. The supplied page_id must be dropped from
+    cache + registry, and a structured error returned. Regression: an earlier
+    implementation defaulted page_id from current_page_id() but caught the
+    exception with the *original* (None) argument, leaving the live id leaked."""
     backend = FakeBackend()
-    backend.active = "gone"
-    backend.missing.add("gone")
     s = make_session(backend)
-    res = await s.force_reload_page()
-    assert res == {"page_id": None, "error": "no active tab — open one with new_page"}
+    s._registry.touch("h2")
+    s._cache._entries["h2"] = object()  # type: ignore[assignment]
+
+    # Make get_page_source raise for h2, but leave reload working.
+    def get_page_source(page_id=None):
+        backend.calls.append(("get_page_source", page_id))
+        raise PageNotFoundError(f"tab {page_id!r} disappeared mid-reload")
+    backend.get_page_source = get_page_source
+
+    res = await s.force_reload_page(page_id="h2")
+
+    assert res == {"page_id": "h2",
+                   "error": "page h2 is no longer open — call list_pages for current tabs"}
+    assert ("reload", "h2") in backend.calls  # the partial succeeded
+    assert ("get_page_source", "h2") in backend.calls  # …and the second call failed
+    assert "h2" not in s._cache._entries  # old entry dropped
+    assert "h2" not in s._registry._last_access  # tracking dropped
+
+
+@pytest.mark.asyncio
+async def test_navigate_on_dead_page_returns_error_and_drops_it():
+    backend = FakeBackend()
+    backend.missing.add("h5")
+    s = make_session(backend)
+    s._registry.touch("h5")
+    res = await s.navigate("https://www.amazon.com/", page_id="h5")
+    assert res == {"page_id": "h5",
+                   "error": "page h5 is no longer open — call list_pages for current tabs"}
+    assert "h5" not in s._registry._last_access
 
 
 @pytest.mark.asyncio

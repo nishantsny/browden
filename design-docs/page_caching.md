@@ -122,6 +122,34 @@ alternative — verifying the handle on every query — would mean a driver
 round-trip per query, which is the cost the cache exists to avoid. Agents
 that need a guaranteed-live read have `force_reload_page`.
 
+## `force_reload_page` and the in-flight dead-handle race
+
+`SoupCache.force_reload` makes two back-to-back driver calls — `backend.reload(page_id)`
+then `backend.get_page_source(page_id)` — and the tab can disappear in the gap
+between them. When the second call raises `PageNotFoundError`, the post-state
+is still clean:
+
+- The `self._entries[page_id] = …` write is *after* `get_page_source`, so the
+  cache is never half-written. Any pre-existing stale entry for that id is
+  dropped by `PageSession._drop`; no corrupt entry replaces it.
+- `PageSession.force_reload_page` catches the exception with the supplied
+  `page_id` (no `current_page_id()` fallback to resolve), drops cache +
+  registry for that id, and returns the standard
+  `{"error": …, "page_id": page_id}` envelope. The agent sees the same dead-page
+  signal as on any other path, recovers via `list_pages`, and moves on.
+- The successful first call (`reload`) is a wasted driver round-trip — Chrome
+  handled its own teardown for the now-gone tab; there's nothing to undo. The
+  `page_info` it returned is discarded because the contract of
+  `force_reload_page` is "fresh DOM in the cache," and without `get_page_source`
+  we can't honor that.
+
+We don't probe existence before reloading (round-trip per call for a race that
+almost never fires), don't retry (the tab is gone), and don't try to salvage
+the `reload` `page_info` (no DOM to back it). The post-condition — clean cache,
+clean registry, structured error — is what we'd want even if `reload` hadn't
+happened, which is why the partial failure needs no special handling beyond
+the existing dead-handle catch.
+
 ## What's `reloaded` for the caller, really
 
 The tool envelope's `reloaded` field is a small contract:

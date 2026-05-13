@@ -52,19 +52,21 @@ async def select_page(page_id: str) -> dict:
 
 
 @mcp.tool()
-async def navigate(url: str) -> dict:
-    """Navigate the current tab. Paths allowed; query strings/fragments rejected."""
+async def navigate(url: str, page_id: str) -> dict:
+    """Navigate the named tab to url. Paths allowed; query strings/fragments rejected."""
     url = validate_url(url)
-    return (await _get_session().navigate(url)).__dict__
+    result = await _get_session().navigate(url, page_id=page_id)
+    return result if isinstance(result, dict) else result.__dict__
 
 
 # -- DOM-query tools --------------------------------------------------------
 #
 # These take a REQUIRED page_id (the id from new_page / navigate / list_pages).
-# Unlike navigate / select_page they do not default to "the active tab": the
-# active tab is shared state the human also controls, so an implicit default
-# would silently read whichever tab happens to be focused. A page_id that no
-# longer names an open tab comes back as {"error": ..., "page_id": ...}.
+# Like navigate / select_page / force_reload_page, they never default to "the
+# active tab": the active tab is shared state the human also controls, so an
+# implicit default would silently act on whichever tab happens to be focused.
+# A page_id that no longer names an open tab comes back as
+# {"error": ..., "page_id": ...}.
 
 @mcp.tool()
 async def get_element_by_id(element_id: str, page_id: str,
@@ -103,8 +105,8 @@ async def query_selector_all(css_selector: str, page_id: str,
 
 
 @mcp.tool()
-async def force_reload_page(page_id: str | None = None) -> dict:
-    """Reload a tab (the active tab if page_id is omitted) and refresh its cached DOM."""
+async def force_reload_page(page_id: str) -> dict:
+    """Reload the named tab and refresh its cached DOM."""
     return await _get_session().force_reload_page(page_id=page_id)
 
 

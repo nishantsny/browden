@@ -22,12 +22,13 @@ Concurrency model (lockless, no ``threading``):
   An ``asyncio.Lock`` around the ``to_thread`` section would close that gap but
   is out of scope (and is a lock).
 
-Tab identity: ``page_id`` is required on the DOM-query methods — they do not
+Tab identity: ``page_id`` is required on every method that acts on a specific
+tab — ``navigate``, ``force_reload_page``, and all DOM queries. None of them
 default to "the active tab", because the active tab is shared state the human
 also controls (clicking a tab in Chrome would otherwise silently redirect a
-query). A ``page_id`` that no longer names an open tab — or a missing active tab
-where one is needed — surfaces as ``{"error": ..., "page_id": ...}`` and the
-dead tab is dropped from the cache and registry on the way out.
+call). A ``page_id`` that no longer names an open tab surfaces as
+``{"error": ..., "page_id": ...}`` and the dead tab is dropped from the cache
+and registry on the way out.
 """
 import asyncio
 import time
@@ -75,9 +76,7 @@ class PageSession:
             self._registry.forget(page_id)
 
     @staticmethod
-    def _page_gone(page_id: str | None) -> dict:
-        if page_id is None:
-            return {"error": "no active tab — open one with new_page", "page_id": None}
+    def _page_gone(page_id: str) -> dict:
         return {"error": f"page {page_id} is no longer open — call list_pages for current tabs",
                 "page_id": page_id}
 
@@ -115,9 +114,17 @@ class PageSession:
             raise
         self._registry.touch(page_id)
 
-    async def navigate(self, url: str):
+    async def navigate(self, url: str, *, page_id: str):
         self.sweep_idle()
-        page = await self._run_driver(self._backend.navigate, url)
+
+        def work():
+            self._backend.select_page(page_id)
+            return self._backend.navigate(url)
+        try:
+            page = await self._run_driver(work)
+        except PageNotFoundError:
+            self._drop(page_id)
+            return self._page_gone(page_id)
         self._cache.invalidate(page.id)
         self._registry.touch(page.id)
         return page
@@ -194,20 +201,19 @@ class PageSession:
             return {"error": f"invalid CSS selector: {e}", "page_id": page_id}
         return self._list_envelope(page_id, reloaded, result, include_html, max_html_bytes)
 
-    async def force_reload_page(self, *, page_id: str | None = None) -> dict:
+    async def force_reload_page(self, *, page_id: str) -> dict:
         self.sweep_idle()
 
         def work():
-            pid = page_id if page_id is not None else self._backend.current_page_id()
-            _soup, page_info = self._cache.force_reload(pid, self._backend)
-            return pid, page_info
+            _soup, page_info = self._cache.force_reload(page_id, self._backend)
+            return page_info
         try:
-            pid, page_info = await self._run_driver(work)
+            page_info = await self._run_driver(work)
         except PageNotFoundError:
             self._drop(page_id)
             return self._page_gone(page_id)
-        self._registry.touch(pid)
-        return {"page_id": pid, "url": page_info.url, "title": page_info.title, "reloaded": True}
+        self._registry.touch(page_id)
+        return {"page_id": page_id, "url": page_info.url, "title": page_info.title, "reloaded": True}
 
     # -- serialization helpers ---------------------------------------------
 

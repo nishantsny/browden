@@ -16,7 +16,7 @@ Ten tools, mapped to a swappable `WebNavigatorBackend`.
 | `new_page`    | Open a new tab, optionally at a URL.                 |
 | `close_page`  | Close a tab by id (refuses the last one).            |
 | `select_page` | Switch the active tab.                               |
-| `navigate`    | Navigate the active tab to a URL.                    |
+| `navigate`    | Navigate a named tab to a URL.                       |
 
 **Reading page content** — mirrors the four browser DOM-query APIs, server-side, over the rendered (post-JS) DOM:
 
@@ -28,13 +28,14 @@ Ten tools, mapped to a swappable `WebNavigatorBackend`.
 | `query_selector_all`          | `document.querySelectorAll`        |
 | `force_reload_page`           | reload a tab + refresh its cache   |
 
-Each query takes a **required `page_id`** (the id returned by `new_page` /
-`navigate` / `list_pages`) — these tools deliberately do *not* default to "the
-active tab", since the active tab is shared state the human also controls, and
-an implicit default would silently read whichever tab happened to be focused.
-A `page_id` that no longer names an open tab comes back as
-`{"error": …, "page_id": …}` (and that tab is dropped from the cache); so does
-an invalid CSS selector — structured errors, not exceptions.
+Every tool that acts on a specific tab — `navigate`, `select_page`,
+`close_page`, `force_reload_page`, and all four DOM queries — takes a
+**required `page_id`** (the id returned by `new_page` / `list_pages`). None of
+them default to "the active tab", since the active tab is shared state the
+human also controls, and an implicit default would silently act on whichever
+tab happened to be focused. A `page_id` that no longer names an open tab comes
+back as `{"error": …, "page_id": …}` (and that tab is dropped from the cache);
+so does an invalid CSS selector — structured errors, not exceptions.
 
 Results are plain JSON "nodes" — `tag`, `id`, `classes`, `attributes`,
 collapsed `text`, sizes (`text_length`, `html_length`, `child_count`) — with

@@ -66,12 +66,13 @@ So a busy server keeps its state tidy on its own traffic alone.
 ### 2. Dead-handle eviction
 
 A `page_id` is a Chrome window handle, and the human shares the browser — they
-can close that tab, or click a different one, at any time. The four DOM-query
-tools therefore take a **required `page_id`** (no "active tab" default): an
-implicit default would let a human's click silently redirect a query to the
-wrong page and return wrong data with no error — the worst failure mode.
-`navigate` / `select_page` / `force_reload_page` keep acting on the active tab,
-since acting-on-focus is the actual intent there.
+can close that tab, or click a different one, at any time. Every tool that acts
+on a specific tab — `navigate`, `select_page`, `close_page`, `force_reload_page`,
+and the four DOM-query tools — therefore takes a **required `page_id`** (no
+"active tab" default): an implicit default would let a human's click silently
+redirect the call to the wrong page and return / modify the wrong tab with no
+error — the worst failure mode. Only `list_pages` and `new_page` are
+page_id-free, because they don't act on an existing specific tab.
 
 When a backend method is given a handle Chrome no longer knows, Selenium raises
 `NoSuchWindowException` (which stringifies to a multi-line driver dump). The

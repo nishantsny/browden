@@ -52,9 +52,25 @@ async def test_navigate_tool_validates_then_delegates():
     importlib.reload(server)
     session = _fake_session(navigate=PageInfo(id="h1", url="https://amazon.com", title="t", selected=True))
     with patch("browser_guard.mcp.server._get_session", return_value=session):
-        result = await server.navigate("amazon.com")
-    session.navigate.assert_awaited_once_with("https://amazon.com")  # normalized by validate_url
+        result = await server.navigate("amazon.com", "h1")
+    session.navigate.assert_awaited_once_with("https://amazon.com", page_id="h1")  # normalized by validate_url
     assert result["url"] == "https://amazon.com"
+
+
+@pytest.mark.asyncio
+async def test_navigate_tool_requires_page_id():
+    import browser_guard.mcp.server as server
+    importlib.reload(server)
+    with pytest.raises(TypeError):
+        await server.navigate("amazon.com")
+
+
+@pytest.mark.asyncio
+async def test_force_reload_page_tool_requires_page_id():
+    import browser_guard.mcp.server as server
+    importlib.reload(server)
+    with pytest.raises(TypeError):
+        await server.force_reload_page()
 
 
 @pytest.mark.asyncio
