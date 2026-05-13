@@ -19,6 +19,9 @@ class PageRegistry:
     def forget(self, page_id: str) -> None:
         self._last_access.pop(page_id, None)
 
+    def tracked_ids(self) -> list[str]:
+        return list(self._last_access)
+
     def idle_pages(self, ttl: float, now: float | None = None) -> list[str]:
         current = self._clock() if now is None else now
         return [pid for pid, ts in self._last_access.items() if current - ts >= ttl]

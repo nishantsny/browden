@@ -237,17 +237,29 @@ class PageSession:
     # -- idle reaper --------------------------------------------------------
 
     def sweep_idle(self, now: float | None = None) -> None:
-        """Close + drop tabs untouched for ``IDLE_TTL_SECONDS``. Runs on the loop thread.
+        """Reconcile against the live tabs, then close + drop the idle ones. Runs on the loop thread.
 
         Short-circuits while a driver op is in flight (``_driver_busy``): the next
-        tick (or the next tool's lazy sweep) catches those tabs. The ``close_page``
-        calls here are synchronous and briefly block the loop — bounded and rare,
-        acceptable. The last remaining tab is left open (closing the only window
-        would quit the driver) but is dropped from the cache/registry so it stops
-        being tracked until touched again.
+        tick (or the next tool's lazy sweep) catches everything. The driver calls
+        here (``list_page_ids``, ``close_page``) are synchronous and briefly block
+        the loop — bounded and rare, acceptable; ``list_page_ids`` is cheap (no
+        per-tab focus changes). The last remaining tab is left open (closing the
+        only window would quit the driver) but is still dropped from the
+        cache/registry so it stops being tracked until touched again.
         """
         if self._driver_busy:
             return
+        # Reconcile: a tab the human closed in Chrome (and the agent never
+        # touched again) is gone — drop it from tracking now rather than waiting
+        # for its idle TTL to elapse and the close_page below to no-op on it.
+        try:
+            live = set(self._backend.list_page_ids())
+        except Exception:
+            live = None  # couldn't enumerate; skip reconciliation this tick
+        if live is not None:
+            for pid in [p for p in self._registry.tracked_ids() if p not in live]:
+                self._cache.invalidate(pid)
+                self._registry.forget(pid)
         for pid in self._registry.idle_pages(IDLE_TTL_SECONDS, now=now):
             try:
                 self._backend.close_page(pid)

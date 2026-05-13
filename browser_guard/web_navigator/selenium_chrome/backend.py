@@ -100,6 +100,9 @@ class SeleniumChromeBackend(WebNavigatorBackend):
         drv.switch_to.window(current_handle)
         return pages
 
+    def list_page_ids(self) -> list[str]:
+        return list(self._drv().window_handles)
+
     def new_page(self, url: str | None = None) -> PageInfo:
         drv = self._drv()
         drv.switch_to.new_window("tab")

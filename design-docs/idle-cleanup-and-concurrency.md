@@ -23,12 +23,26 @@ The "last remaining tab" is never closed — closing the only window quits the
 driver, which is pointless — but its cache and registry entries are still
 dropped, so it stops being tracked until something touches it again.
 
+There's also a tab the *human* closes (or that crashes) while the agent isn't
+looking. That handle is now dead, but it lingers in the registry/cache until its
+idle TTL elapses (a tool that touches it sooner cleans it up — see "Tab identity
+& dead handles"). So the sweep also **reconciles** against the live tab set
+first: anything tracked that Chrome no longer reports is dropped immediately. The
+backend exposes `list_page_ids()` for this — a cheap "what tabs exist" call (just
+the handles, no per-tab focus changes), distinct from the heavier `list_pages()`
+which switches through every tab to read its url/title.
+
 ## Two triggers: lazy sweep + periodic reaper
 
-`PageSession.sweep_idle()` does the work: for each `pid` in
-`registry.idle_pages(IDLE_TTL_SECONDS)`, call `backend.close_page(pid)` (swallow
-any error — the last-tab `ValueError`, an already-closed tab, a dead session),
-then `cache.invalidate(pid)` and `registry.forget(pid)`.
+`PageSession.sweep_idle()`:
+
+1. **Reconcile.** `live = backend.list_page_ids()` (skip this step if that call
+   raises — best-effort); for every `pid` the registry tracks that isn't in
+   `live`, `cache.invalidate(pid)` + `registry.forget(pid)`.
+2. **Reap the idle.** For each `pid` in `registry.idle_pages(IDLE_TTL_SECONDS)`,
+   `backend.close_page(pid)` (swallow any error — the last-tab `ValueError`, an
+   already-closed tab, a dead session), then `cache.invalidate(pid)` +
+   `registry.forget(pid)`.
 
 It's called from two places:
 
@@ -80,10 +94,11 @@ the `await` — never inside the worker thread. While a driver op is parked in
 `if self._driver_busy: return`. So if a reaper tick fires while a tool's driver
 op is in flight, the sweep just bails and tries again next interval — it can
 never issue a WebDriver command concurrently with the in-flight one. (When
-`sweep_idle` *does* proceed, its `close_page` calls run synchronously on the
-loop thread and briefly block it. That's accepted: a driver op blocks
-*something*; here it's the loop instead of a worker thread, it's bounded, and it
-only happens when there's actually an idle tab to close.)
+`sweep_idle` *does* proceed, its driver calls — `list_page_ids` for the
+reconcile, `close_page` for each idle tab — run synchronously on the loop thread
+and briefly block it. That's accepted: a driver op blocks *something*; here it's
+the loop instead of a worker thread, it's bounded, `list_page_ids` is cheap, and
+the `close_page` loop only runs when there's actually an idle tab to close.)
 
 This is exactly the race an `RLock` around the driver would have guarded; the
 flag plus cooperative scheduling replace it.
@@ -124,6 +139,11 @@ can close that tab, or click a different one, at any time. Two consequences:
   snapshot. The dead-handle error surfaces on the next backend hit (cache miss,
   TTL-expired stale-reload, or `force_reload_page`). That's the cache behaving
   as designed: it's a deliberate snapshot, not a live view.
+
+So a closed tab is dropped from tracking by whichever happens first: a tool that
+touches it again (immediate, via the `PageNotFoundError` path) or the next
+`sweep_idle` reconcile step (within `REAP_INTERVAL_SECONDS`). Either way it never
+lingers past its idle TTL.
 
 ## Where the pieces live
 

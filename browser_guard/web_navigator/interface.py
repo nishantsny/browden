@@ -30,6 +30,10 @@ class WebNavigatorBackend(ABC):
         """Return all open tabs."""
 
     @abstractmethod
+    def list_page_ids(self) -> list[str]:
+        """Return the ids of all open tabs, cheaply (no per-tab metadata / focus changes)."""
+
+    @abstractmethod
     def new_page(self, url: str | None = None) -> PageInfo:
         """Open a new tab, optionally navigating to url."""
 

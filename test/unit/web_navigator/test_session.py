@@ -35,6 +35,7 @@ class FakeBackend:
         self.calls = []
         self.closed = []
         self.missing: set[str] = set()
+        self.live: set[str] | None = {"h1", "h2"}  # ids list_page_ids reports; None -> it raises
         self.close_raises = None  # set to an exception instance to simulate failure
 
     def _check(self, page_id):
@@ -45,6 +46,12 @@ class FakeBackend:
         self.calls.append("list_pages")
         return [PageInfo(id="h1", url="u1", title="t1", selected=True),
                 PageInfo(id="h2", url="u2", title="t2", selected=False)]
+
+    def list_page_ids(self):
+        self.calls.append("list_page_ids")
+        if self.live is None:
+            raise RuntimeError("list_page_ids unavailable")
+        return list(self.live)
 
     def new_page(self, url=None):
         self.calls.append(("new_page", url))
@@ -249,6 +256,7 @@ async def test_select_dead_page_raises_and_drops_it():
 
 def test_sweep_idle_closes_invalidates_forgets_idle_pages():
     backend = FakeBackend()
+    backend.live = {"old1", "old2", "fresh"}  # all still open in Chrome
     clock = FakeClock()
     s = make_session(backend, clock=clock)
     s._registry.touch("old1")
@@ -268,6 +276,7 @@ def test_sweep_idle_closes_invalidates_forgets_idle_pages():
 
 def test_sweep_idle_swallows_close_errors():
     backend = FakeBackend()
+    backend.live = {"only"}
     backend.close_raises = ValueError("Cannot close the last tab")
     clock = FakeClock()
     s = make_session(backend, clock=clock)
@@ -291,4 +300,33 @@ def test_sweep_idle_is_noop_while_driver_busy():
     s.sweep_idle()
 
     assert backend.closed == []
+    assert "list_page_ids" not in backend.calls  # didn't even reconcile
     assert "old" in s._registry._last_access  # left for the next tick
+
+
+def test_sweep_idle_reconciles_against_live_tabs():
+    backend = FakeBackend()
+    backend.live = {"h1"}  # only h1 is still open; "ghost" was closed in Chrome
+    clock = FakeClock()
+    s = make_session(backend, clock=clock)
+    s._registry.touch("h1")
+    s._registry.touch("ghost")
+    s._cache._entries["ghost"] = object()  # type: ignore[assignment]
+
+    s.sweep_idle()  # nothing is idle (fresh clock) — only reconciliation acts
+
+    assert "ghost" not in s._registry._last_access  # dropped: no longer a live tab
+    assert "ghost" not in s._cache._entries
+    assert "h1" in s._registry._last_access  # still open -> kept
+    assert backend.closed == []  # reconciliation never closes anything
+
+
+def test_sweep_idle_skips_reconcile_when_enumeration_fails():
+    backend = FakeBackend()
+    backend.live = None  # list_page_ids raises
+    s = make_session(backend)
+    s._registry.touch("h1")
+
+    s.sweep_idle()  # must not raise
+
+    assert "h1" in s._registry._last_access  # reconcile skipped, entry untouched

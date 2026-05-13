@@ -148,3 +148,13 @@ def test_navigate_failure_becomes_page_not_found():
     backend = _backend_with_driver(drv)
     with pytest.raises(PageNotFoundError):
         backend.navigate("https://example.com")
+
+
+@patch("browser_guard.web_navigator.selenium_chrome.backend.webdriver")
+def test_list_page_ids_returns_handles_without_switching(mock_webdriver):
+    drv = _make_fake_driver(handles=("h1", "h2", "h3"))
+    mock_webdriver.Chrome.return_value = drv
+    backend = SeleniumChromeBackend()
+
+    assert backend.list_page_ids() == ["h1", "h2", "h3"]
+    drv.switch_to.window.assert_not_called()  # cheap: no per-tab focus changes
