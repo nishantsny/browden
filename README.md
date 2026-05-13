@@ -52,7 +52,7 @@ busts it on demand.
 **Idle-tab cleanup.** A tab that goes one hour without a DOM query or navigation
 is closed and dropped from tracking, via a periodic sweep plus a lazy sweep on
 every tool call (the last remaining tab is left open). See
-[`design-docs/idle-cleanup-and-concurrency.md`](design-docs/idle-cleanup-and-concurrency.md)
+[`design-docs/cleanup_resources.md`](design-docs/cleanup_resources.md)
 for how the reaper and the WebDriver session stay out of each other's way without
 a lock.
 
@@ -115,7 +115,11 @@ pytest test/unit/
 ## Design docs
 
 - [`design-docs/layout.md`](design-docs/layout.md) — package layout and the import rules between them
-- [`design-docs/idle-cleanup-and-concurrency.md`](design-docs/idle-cleanup-and-concurrency.md) — the idle-tab reaper and the lock-free concurrency model
+- [`design-docs/cleanup_resources.md`](design-docs/cleanup_resources.md) — why and how tabs, parsed-HTML caches, and registry entries get cleaned up, plus the lock-free concurrency model
+
+## End-to-end evals
+
+Agent-driven scenario evals live under [`agentic_evals/evals/`](agentic_evals/evals/) — one Markdown file per scenario, executed against the live MCP. See [`agentic_evals/explanation.md`](agentic_evals/explanation.md) for the conventions and how to add a scenario.
 
 ## License
 
