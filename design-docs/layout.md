@@ -21,7 +21,8 @@ test/                # unit + e2e tests
   WebDriver code. `PageSession` (`web_navigator/session.py`) is the async
   coordinator that owns the soup cache and the idle reaper and dispatches every
   backend call off the event loop; see
-  [`cleanup_resources.md`](cleanup_resources.md).
+  [`page_caching.md`](page_caching.md) for the cache contract and
+  [`cleanup_resources.md`](cleanup_resources.md) for the cleanup + concurrency model.
 - **`dom/` is pure** — it eats an HTML string (the rendered DOM) and returns
   query results / JSON nodes; no Selenium, no I/O, no `mcp/`.
 - **Nothing imports a third-party SDK directly** — only via `dependencies/`

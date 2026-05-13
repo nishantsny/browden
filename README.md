@@ -47,7 +47,8 @@ tools (`get_elements_by_class_name`, `query_selector_all`) are paginated
 tab whose cache has expired transparently reloads that tab in the browser,
 re-parses, and tells the caller it did (`reloaded: true`); `navigate` /
 `new_page` / `close_page` invalidate the relevant tab's cache; `force_reload_page`
-busts it on demand.
+busts it on demand. See [`design-docs/page_caching.md`](design-docs/page_caching.md)
+for the snapshot semantics and where they bite.
 
 **Idle-tab cleanup.** A tab that goes one hour without a DOM query or navigation
 is closed and dropped from tracking, via a periodic sweep plus a lazy sweep on
@@ -115,6 +116,7 @@ pytest test/unit/
 ## Design docs
 
 - [`design-docs/layout.md`](design-docs/layout.md) — package layout and the import rules between them
+- [`design-docs/page_caching.md`](design-docs/page_caching.md) — what the per-tab parsed-DOM cache caches, its TTL / invalidation paths, and the snapshot semantics callers see (`reloaded` flag, dead-tab corner)
 - [`design-docs/cleanup_resources.md`](design-docs/cleanup_resources.md) — why and how tabs, parsed-HTML caches, and registry entries get cleaned up, plus the lock-free concurrency model
 
 ## End-to-end evals
