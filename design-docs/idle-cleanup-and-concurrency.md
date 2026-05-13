@@ -98,6 +98,33 @@ original five synchronous tools always made. If a concurrent client ever
 mattered, an `asyncio.Lock` around the `to_thread` section would close the gap —
 but that's a lock, and out of scope here.
 
+## Tab identity & dead handles
+
+A `page_id` is a Chrome window handle, and the human shares the browser — they
+can close that tab, or click a different one, at any time. Two consequences:
+
+- **No implicit "active tab" for reads.** `navigate` / `select_page` act on
+  whatever's focused (that's the point of them), but the four DOM-query tools
+  take a **required `page_id`**. An implicit "active tab" default would let a
+  human's click silently redirect a query to the wrong page and return wrong
+  data with no error — the worst failure mode. Callers always have the id in
+  hand (`new_page` / `navigate` / `list_pages` return it).
+- **A dead handle is a clean error, not a stack trace.** When a backend method
+  is given a handle Chrome no longer knows, Selenium raises
+  `NoSuchWindowException` (which stringifies to a multi-line driver dump). The
+  backend translates that to `PageNotFoundError` with a one-line message;
+  `PageSession` catches it, drops the tab from the cache and registry, and the
+  DOM tools return `{"error": "page <id> is no longer open …", "page_id": <id>}`
+  (mirroring the invalid-CSS error shape). `close_page` on a gone tab is treated
+  as a no-op success; `select_page` re-raises (you can't focus a tab that isn't
+  there).
+
+  One subtlety: a query that's served from a **fresh cached soup never touches
+  the driver**, so it can't notice the tab is gone — it returns the cached
+  snapshot. The dead-handle error surfaces on the next backend hit (cache miss,
+  TTL-expired stale-reload, or `force_reload_page`). That's the cache behaving
+  as designed: it's a deliberate snapshot, not a live view.
+
 ## Where the pieces live
 
 ```

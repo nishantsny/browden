@@ -28,14 +28,20 @@ Ten tools, mapped to a swappable `WebNavigatorBackend`.
 | `query_selector_all`          | `document.querySelectorAll`        |
 | `force_reload_page`           | reload a tab + refresh its cache   |
 
-Each query targets a tab (`page_id`, defaulting to the active tab) and returns
-matched elements as plain JSON "nodes" — `tag`, `id`, `classes`, `attributes`,
+Each query takes a **required `page_id`** (the id returned by `new_page` /
+`navigate` / `list_pages`) — these tools deliberately do *not* default to "the
+active tab", since the active tab is shared state the human also controls, and
+an implicit default would silently read whichever tab happened to be focused.
+A `page_id` that no longer names an open tab comes back as
+`{"error": …, "page_id": …}` (and that tab is dropped from the cache); so does
+an invalid CSS selector — structured errors, not exceptions.
+
+Results are plain JSON "nodes" — `tag`, `id`, `classes`, `attributes`,
 collapsed `text`, sizes (`text_length`, `html_length`, `child_count`) — with
 attribute values and text truncated to keep responses small (true lengths are
 reported; outer HTML is omitted unless you pass `include_html=true`). The list
 tools (`get_elements_by_class_name`, `query_selector_all`) are paginated
-(`limit` ≤ 50, `offset`, `next_offset`); an invalid CSS selector comes back as
-a structured tool error rather than an exception.
+(`limit` ≤ 50, `offset`, `next_offset`).
 
 **Caching.** The parsed DOM for a tab is cached for one hour. A query against a
 tab whose cache has expired transparently reloads that tab in the browser,

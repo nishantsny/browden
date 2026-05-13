@@ -59,38 +59,44 @@ async def navigate(url: str) -> dict:
 
 
 # -- DOM-query tools --------------------------------------------------------
+#
+# These take a REQUIRED page_id (the id from new_page / navigate / list_pages).
+# Unlike navigate / select_page they do not default to "the active tab": the
+# active tab is shared state the human also controls, so an implicit default
+# would silently read whichever tab happens to be focused. A page_id that no
+# longer names an open tab comes back as {"error": ..., "page_id": ...}.
 
 @mcp.tool()
-async def get_element_by_id(element_id: str, page_id: str | None = None,
+async def get_element_by_id(element_id: str, page_id: str,
                             include_html: bool = False, max_html_bytes: int = 4096) -> dict:
-    """document.getElementById — one element node, or found=false (not an error) if absent."""
+    """document.getElementById on a tab — one element node, or found=false (not an error) if absent."""
     return await _get_session().get_element_by_id(
         element_id, page_id=page_id, include_html=include_html, max_html_bytes=max_html_bytes)
 
 
 @mcp.tool()
-async def get_elements_by_class_name(class_names: str, page_id: str | None = None,
+async def get_elements_by_class_name(class_names: str, page_id: str,
                                      limit: int = 10, offset: int = 0,
                                      include_html: bool = False, max_html_bytes: int = 4096) -> dict:
-    """document.getElementsByClassName — space-separated names, element must have ALL. Paginated."""
+    """document.getElementsByClassName on a tab — space-separated names, element must have ALL. Paginated."""
     return await _get_session().get_elements_by_class_name(
         class_names, page_id=page_id, limit=limit, offset=offset,
         include_html=include_html, max_html_bytes=max_html_bytes)
 
 
 @mcp.tool()
-async def query_selector(css_selector: str, page_id: str | None = None,
+async def query_selector(css_selector: str, page_id: str,
                          include_html: bool = False, max_html_bytes: int = 4096) -> dict:
-    """document.querySelector — one element node, or found=false if no match. Invalid CSS → error."""
+    """document.querySelector on a tab — one element node, or found=false if no match. Invalid CSS → error."""
     return await _get_session().query_selector(
         css_selector, page_id=page_id, include_html=include_html, max_html_bytes=max_html_bytes)
 
 
 @mcp.tool()
-async def query_selector_all(css_selector: str, page_id: str | None = None,
+async def query_selector_all(css_selector: str, page_id: str,
                              limit: int = 10, offset: int = 0,
                              include_html: bool = False, max_html_bytes: int = 4096) -> dict:
-    """document.querySelectorAll — paginated list of element nodes. Invalid CSS → error."""
+    """document.querySelectorAll on a tab — paginated list of element nodes. Invalid CSS → error."""
     return await _get_session().query_selector_all(
         css_selector, page_id=page_id, limit=limit, offset=offset,
         include_html=include_html, max_html_bytes=max_html_bytes)
@@ -98,7 +104,7 @@ async def query_selector_all(css_selector: str, page_id: str | None = None,
 
 @mcp.tool()
 async def force_reload_page(page_id: str | None = None) -> dict:
-    """Reload a tab in the browser and refresh its cached DOM."""
+    """Reload a tab (the active tab if page_id is omitted) and refresh its cached DOM."""
     return await _get_session().force_reload_page(page_id=page_id)
 
 

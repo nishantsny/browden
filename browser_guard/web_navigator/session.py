@@ -21,11 +21,19 @@ Concurrency model (lockless, no ``threading``):
   request in flight at a time), the same assumption the sync tools always made.
   An ``asyncio.Lock`` around the ``to_thread`` section would close that gap but
   is out of scope (and is a lock).
+
+Tab identity: ``page_id`` is required on the DOM-query methods — they do not
+default to "the active tab", because the active tab is shared state the human
+also controls (clicking a tab in Chrome would otherwise silently redirect a
+query). A ``page_id`` that no longer names an open tab — or a missing active tab
+where one is needed — surfaces as ``{"error": ..., "page_id": ...}`` and the
+dead tab is dropped from the cache and registry on the way out.
 """
 import asyncio
 import time
 
 from ..dom import query, serialize
+from .interface import PageNotFoundError
 from .registry import PageRegistry
 from .soup_cache import SoupCache
 
@@ -53,17 +61,25 @@ class PageSession:
         finally:
             self._driver_busy = False
 
-    async def _load_soup(self, page_id: str | None):
-        """Resolve ``page_id`` (None → active tab) and fetch its (maybe stale-reloaded) soup.
-
-        Resolution + cache access happen in one ``to_thread`` hop so the active
-        tab can't change underneath us between the two.
-        """
+    async def _load_soup(self, page_id: str):
+        """Fetch ``page_id``'s (maybe stale-reloaded) soup. Raises ``PageNotFoundError`` if the tab is gone."""
         def work():
-            pid = page_id if page_id is not None else self._backend.current_page_id()
-            soup, reloaded = self._cache.get_soup(pid, self._backend)
-            return pid, soup, reloaded
+            soup, reloaded = self._cache.get_soup(page_id, self._backend)
+            return soup, reloaded
         return await self._run_driver(work)
+
+    def _drop(self, page_id: str | None) -> None:
+        """Forget a tab — used when it turns out to no longer exist."""
+        if page_id is not None:
+            self._cache.invalidate(page_id)
+            self._registry.forget(page_id)
+
+    @staticmethod
+    def _page_gone(page_id: str | None) -> dict:
+        if page_id is None:
+            return {"error": "no active tab — open one with new_page", "page_id": None}
+        return {"error": f"page {page_id} is no longer open — call list_pages for current tabs",
+                "page_id": page_id}
 
     # -- navigation tools ---------------------------------------------------
 
@@ -83,13 +99,20 @@ class PageSession:
 
     async def close_page(self, page_id: str) -> None:
         self.sweep_idle()
-        await self._run_driver(self._backend.close_page, page_id)
+        try:
+            await self._run_driver(self._backend.close_page, page_id)
+        except PageNotFoundError:
+            pass  # already closed — closing a gone tab is a no-op success
         self._cache.invalidate(page_id)
         self._registry.forget(page_id)
 
     async def select_page(self, page_id: str) -> None:
         self.sweep_idle()
-        await self._run_driver(self._backend.select_page, page_id)
+        try:
+            await self._run_driver(self._backend.select_page, page_id)
+        except PageNotFoundError:
+            self._drop(page_id)
+            raise
         self._registry.touch(page_id)
 
     async def navigate(self, url: str):
@@ -101,59 +124,75 @@ class PageSession:
 
     # -- DOM-query tools ----------------------------------------------------
 
-    async def get_element_by_id(self, element_id: str, *, page_id: str | None = None,
+    async def get_element_by_id(self, element_id: str, *, page_id: str,
                                 include_html: bool = False,
                                 max_html_bytes: int = serialize.DEFAULT_MAX_HTML_BYTES) -> dict:
         self.sweep_idle()
-        pid, soup, reloaded = await self._load_soup(page_id)
-        self._registry.touch(pid)
+        try:
+            soup, reloaded = await self._load_soup(page_id)
+        except PageNotFoundError:
+            self._drop(page_id)
+            return self._page_gone(page_id)
+        self._registry.touch(page_id)
         el = query.by_id(soup, element_id)
         return {
-            "page_id": pid,
+            "page_id": page_id,
             "reloaded": reloaded,
             "found": el is not None,
             "element": self._node(el, include_html, max_html_bytes),
         }
 
-    async def get_elements_by_class_name(self, class_names: str, *, page_id: str | None = None,
+    async def get_elements_by_class_name(self, class_names: str, *, page_id: str,
                                          limit: int = query.LIMIT_DEFAULT, offset: int = 0,
                                          include_html: bool = False,
                                          max_html_bytes: int = serialize.DEFAULT_MAX_HTML_BYTES) -> dict:
         self.sweep_idle()
-        pid, soup, reloaded = await self._load_soup(page_id)
-        self._registry.touch(pid)
+        try:
+            soup, reloaded = await self._load_soup(page_id)
+        except PageNotFoundError:
+            self._drop(page_id)
+            return self._page_gone(page_id)
+        self._registry.touch(page_id)
         result = query.by_class(soup, class_names, limit, offset)
-        return self._list_envelope(pid, reloaded, result, include_html, max_html_bytes)
+        return self._list_envelope(page_id, reloaded, result, include_html, max_html_bytes)
 
-    async def query_selector(self, css_selector: str, *, page_id: str | None = None,
+    async def query_selector(self, css_selector: str, *, page_id: str,
                              include_html: bool = False,
                              max_html_bytes: int = serialize.DEFAULT_MAX_HTML_BYTES) -> dict:
         self.sweep_idle()
-        pid, soup, reloaded = await self._load_soup(page_id)
-        self._registry.touch(pid)
+        try:
+            soup, reloaded = await self._load_soup(page_id)
+        except PageNotFoundError:
+            self._drop(page_id)
+            return self._page_gone(page_id)
+        self._registry.touch(page_id)
         try:
             el = query.css_one(soup, css_selector)
         except query.InvalidSelector as e:
-            return {"error": f"invalid CSS selector: {e}", "page_id": pid}
+            return {"error": f"invalid CSS selector: {e}", "page_id": page_id}
         return {
-            "page_id": pid,
+            "page_id": page_id,
             "reloaded": reloaded,
             "found": el is not None,
             "element": self._node(el, include_html, max_html_bytes),
         }
 
-    async def query_selector_all(self, css_selector: str, *, page_id: str | None = None,
+    async def query_selector_all(self, css_selector: str, *, page_id: str,
                                  limit: int = query.LIMIT_DEFAULT, offset: int = 0,
                                  include_html: bool = False,
                                  max_html_bytes: int = serialize.DEFAULT_MAX_HTML_BYTES) -> dict:
         self.sweep_idle()
-        pid, soup, reloaded = await self._load_soup(page_id)
-        self._registry.touch(pid)
+        try:
+            soup, reloaded = await self._load_soup(page_id)
+        except PageNotFoundError:
+            self._drop(page_id)
+            return self._page_gone(page_id)
+        self._registry.touch(page_id)
         try:
             result = query.css_all(soup, css_selector, limit, offset)
         except query.InvalidSelector as e:
-            return {"error": f"invalid CSS selector: {e}", "page_id": pid}
-        return self._list_envelope(pid, reloaded, result, include_html, max_html_bytes)
+            return {"error": f"invalid CSS selector: {e}", "page_id": page_id}
+        return self._list_envelope(page_id, reloaded, result, include_html, max_html_bytes)
 
     async def force_reload_page(self, *, page_id: str | None = None) -> dict:
         self.sweep_idle()
@@ -162,7 +201,11 @@ class PageSession:
             pid = page_id if page_id is not None else self._backend.current_page_id()
             _soup, page_info = self._cache.force_reload(pid, self._backend)
             return pid, page_info
-        pid, page_info = await self._run_driver(work)
+        try:
+            pid, page_info = await self._run_driver(work)
+        except PageNotFoundError:
+            self._drop(page_id)
+            return self._page_gone(page_id)
         self._registry.touch(pid)
         return {"page_id": pid, "url": page_info.url, "title": page_info.title, "reloaded": True}
 
@@ -174,14 +217,14 @@ class PageSession:
             return None
         return serialize.element_to_node(el, include_html=include_html, max_html_bytes=max_html_bytes)
 
-    def _list_envelope(self, pid, reloaded, paginated, include_html, max_html_bytes) -> dict:
+    def _list_envelope(self, page_id, reloaded, paginated, include_html, max_html_bytes) -> dict:
         page, eff_limit, eff_offset, total, next_offset = paginated
         elements = [
             serialize.element_to_node(el, include_html=include_html, max_html_bytes=max_html_bytes)
             for el in page
         ]
         return {
-            "page_id": pid,
+            "page_id": page_id,
             "reloaded": reloaded,
             "total_count": total,
             "offset": eff_offset,

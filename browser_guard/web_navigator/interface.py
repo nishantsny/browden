@@ -3,12 +3,26 @@ from abc import ABC, abstractmethod
 from ..common.page import PageInfo
 
 
+class PageNotFoundError(LookupError):
+    """A backend method was asked to act on a tab id that is no longer open.
+
+    Backend-agnostic: implementations translate their driver's equivalent
+    (Selenium's ``NoSuchWindowException``, ...) into this so callers above the
+    backend never see a driver-specific exception. Carries a clean message — no
+    driver stack trace.
+    """
+
+
 class WebNavigatorBackend(ABC):
     """Contract every browser backend must implement.
 
     Implementations live in browser_guard.web_navigator.<driver>/ and are the
     only place third-party browser libraries (selenium, playwright, ...) are
     imported. The interface itself imports only from common.
+
+    Any method given a ``page_id`` that no longer names an open tab — or any
+    method that needs "the active tab" when there isn't one — raises
+    ``PageNotFoundError``.
     """
 
     @abstractmethod

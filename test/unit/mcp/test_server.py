@@ -67,11 +67,19 @@ async def test_dom_tools_delegate_with_kwargs():
         force_reload_page={"reloaded": True},
     )
     with patch("browser_guard.mcp.server._get_session", return_value=session):
-        await server.get_element_by_id("x", page_id="h1", include_html=True, max_html_bytes=10)
-        await server.query_selector_all(".a", limit=3, offset=6)
+        await server.get_element_by_id("x", "h1", include_html=True, max_html_bytes=10)
+        await server.query_selector_all(".a", "h1", limit=3, offset=6)
         await server.force_reload_page(page_id="h2")
     session.get_element_by_id.assert_awaited_once_with(
         "x", page_id="h1", include_html=True, max_html_bytes=10)
     session.query_selector_all.assert_awaited_once_with(
-        ".a", page_id=None, limit=3, offset=6, include_html=False, max_html_bytes=4096)
+        ".a", page_id="h1", limit=3, offset=6, include_html=False, max_html_bytes=4096)
     session.force_reload_page.assert_awaited_once_with(page_id="h2")
+
+
+@pytest.mark.asyncio
+async def test_dom_tool_requires_page_id():
+    import browser_guard.mcp.server as server
+    importlib.reload(server)
+    with pytest.raises(TypeError):
+        await server.query_selector(".a")  # page_id is required, no "active tab" default
