@@ -1,5 +1,9 @@
 from unittest.mock import MagicMock, PropertyMock, patch
 
+import pytest
+
+from browser_guard.dependencies.selenium import NoSuchWindowException
+from browser_guard.web_navigator.interface import PageNotFoundError
 from browser_guard.web_navigator.selenium_chrome.backend import (
     SINGLETON_FILES,
     SeleniumChromeBackend,
@@ -107,3 +111,50 @@ def test_drv_swallows_quit_error_on_dead_driver(mock_webdriver):
 
     drv = backend._drv()
     assert drv is alive
+
+
+def _backend_with_driver(drv):
+    backend = SeleniumChromeBackend()
+    backend._driver = drv
+    return backend
+
+
+def test_switch_failure_becomes_page_not_found():
+    drv = _make_fake_driver(handles=("h1", "h2"))
+    drv.switch_to.window.side_effect = NoSuchWindowException("no such window\n  (Session info: ...)")
+    backend = _backend_with_driver(drv)
+
+    for call in (lambda: backend.select_page("dead"),
+                 lambda: backend.get_page_source("dead"),
+                 lambda: backend.reload("dead"),
+                 lambda: backend.close_page("dead")):
+        with pytest.raises(PageNotFoundError) as exc:
+            call()
+        assert "dead" in str(exc.value)
+        assert "Session info" not in str(exc.value)  # no driver stack trace leaks through
+
+
+def test_current_page_id_failure_becomes_page_not_found():
+    drv = _make_fake_driver()
+    type(drv).current_window_handle = PropertyMock(side_effect=NoSuchWindowException("no such window"))
+    backend = _backend_with_driver(drv)
+    with pytest.raises(PageNotFoundError):
+        backend.current_page_id()
+
+
+def test_navigate_failure_becomes_page_not_found():
+    drv = _make_fake_driver()
+    drv.get.side_effect = NoSuchWindowException("no such window")
+    backend = _backend_with_driver(drv)
+    with pytest.raises(PageNotFoundError):
+        backend.navigate("https://example.com")
+
+
+@patch("browser_guard.web_navigator.selenium_chrome.backend.webdriver")
+def test_list_page_ids_returns_handles_without_switching(mock_webdriver):
+    drv = _make_fake_driver(handles=("h1", "h2", "h3"))
+    mock_webdriver.Chrome.return_value = drv
+    backend = SeleniumChromeBackend()
+
+    assert backend.list_page_ids() == ["h1", "h2", "h3"]
+    drv.switch_to.window.assert_not_called()  # cheap: no per-tab focus changes

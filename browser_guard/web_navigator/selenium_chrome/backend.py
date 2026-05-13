@@ -2,8 +2,25 @@ import os
 from pathlib import Path
 
 from ...common.page import PageInfo
-from ...dependencies.selenium import ChromeOptions, WebDriverWait, webdriver
-from ..interface import WebNavigatorBackend
+from ...dependencies.selenium import (
+    ChromeOptions,
+    NoSuchWindowException,
+    WebDriverWait,
+    webdriver,
+)
+from ..interface import PageNotFoundError, WebNavigatorBackend
+
+
+def _switch(drv, page_id: str) -> None:
+    """Focus a tab by id, translating Selenium's missing-window error.
+
+    Selenium's NoSuchWindowException stringifies to a multi-line driver stack
+    trace; PageNotFoundError carries a clean, actionable message instead.
+    """
+    try:
+        drv.switch_to.window(page_id)
+    except NoSuchWindowException:
+        raise PageNotFoundError(f"tab {page_id!r} is not open") from None
 
 
 def _default_profile_dir() -> Path:
@@ -83,6 +100,9 @@ class SeleniumChromeBackend(WebNavigatorBackend):
         drv.switch_to.window(current_handle)
         return pages
 
+    def list_page_ids(self) -> list[str]:
+        return list(self._drv().window_handles)
+
     def new_page(self, url: str | None = None) -> PageInfo:
         drv = self._drv()
         drv.switch_to.new_window("tab")
@@ -100,15 +120,43 @@ class SeleniumChromeBackend(WebNavigatorBackend):
         drv = self._drv()
         if len(drv.window_handles) == 1:
             raise ValueError("Cannot close the last tab")
-        drv.switch_to.window(page_id)
+        _switch(drv, page_id)
         drv.close()
 
     def select_page(self, page_id: str) -> None:
-        self._drv().switch_to.window(page_id)
+        _switch(self._drv(), page_id)
 
     def navigate(self, url: str) -> PageInfo:
         drv = self._drv()
-        drv.get(url)
+        try:
+            drv.get(url)
+        except NoSuchWindowException:
+            raise PageNotFoundError("there is no active tab to navigate") from None
+        _wait_for_title(drv)
+        return PageInfo(
+            id=drv.current_window_handle,
+            url=drv.current_url,
+            title=drv.title,
+            selected=True,
+        )
+
+    def current_page_id(self) -> str:
+        try:
+            return self._drv().current_window_handle
+        except NoSuchWindowException:
+            raise PageNotFoundError("there is no active tab") from None
+
+    def get_page_source(self, page_id: str | None = None) -> str:
+        drv = self._drv()
+        if page_id:
+            _switch(drv, page_id)
+        return drv.page_source
+
+    def reload(self, page_id: str | None = None) -> PageInfo:
+        drv = self._drv()
+        if page_id:
+            _switch(drv, page_id)
+        drv.refresh()
         _wait_for_title(drv)
         return PageInfo(
             id=drv.current_window_handle,
