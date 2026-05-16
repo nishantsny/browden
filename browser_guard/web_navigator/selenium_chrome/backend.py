@@ -1,6 +1,7 @@
 import os
 from pathlib import Path
 
+from ...common.logger import logger
 from ...common.page import PageInfo
 from ...dependencies.selenium import (
     ChromeOptions,
@@ -57,9 +58,11 @@ def _clear_stale_singletons(profile_dir: Path) -> None:
     for name in SINGLETON_FILES:
         path = profile_dir / name
         try:
-            path.unlink(missing_ok=True)
-        except OSError:
-            pass
+            if path.exists():
+                logger.info(f"Clearing stale singleton: {path}")
+                path.unlink(missing_ok=True)
+        except OSError as e:
+            logger.warning(f"Failed to clear stale singleton {path}: {e}")
 
 
 class SeleniumChromeBackend(WebNavigatorBackend):
@@ -79,6 +82,7 @@ class SeleniumChromeBackend(WebNavigatorBackend):
                     pass
                 self._driver = None
         if self._driver is None:
+            logger.info("Starting new Chrome session")
             _clear_stale_singletons(PROFILE_DIR)
             opts = ChromeOptions()
             opts.add_argument(f"--user-data-dir={PROFILE_DIR}")
