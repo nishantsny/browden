@@ -11,9 +11,6 @@ from .validator import Allowlist, ValidationError, validate_url
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 8000
 
-DEFAULT_HOST = "127.0.0.1"
-DEFAULT_PORT = 8000
-
 mcp = FastMCP(
     "browser-guard",
     host=os.environ.get("MCP_HOST", DEFAULT_HOST),
