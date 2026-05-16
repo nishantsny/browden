@@ -33,6 +33,7 @@ and registry on the way out.
 import asyncio
 import time
 
+from ..common.logger import logger
 from ..dom import query, serialize
 from .interface import PageNotFoundError
 from .registry import PageRegistry
@@ -77,6 +78,7 @@ class PageSession:
 
     @staticmethod
     def _page_gone(page_id: str) -> dict:
+        logger.warning(f"Requested page is no longer open: {page_id}")
         return {"error": f"page {page_id} is no longer open — call list_pages for current tabs",
                 "page_id": page_id}
 
@@ -85,6 +87,7 @@ class PageSession:
     async def list_pages(self):
         self.sweep_idle()
         pages = await self._run_driver(self._backend.list_pages)
+        logger.info(f"Listed {len(pages)} pages")
         for p in pages:
             self._registry.touch(p.id)
         return pages
@@ -92,6 +95,7 @@ class PageSession:
     async def new_page(self, url: str | None = None):
         self.sweep_idle()
         page = await self._run_driver(self._backend.new_page, url)
+        logger.info(f"Created new page: {page.id} (url={url!r})")
         self._cache.invalidate(page.id)
         self._registry.touch(page.id)
         return page
@@ -102,8 +106,9 @@ class PageSession:
         # failure) means the tab is still open, so its cache/registry entries must stay.
         try:
             await self._run_driver(self._backend.close_page, page_id)
+            logger.info(f"Closed page: {page_id}")
         except PageNotFoundError:
-            pass  # already closed — closing a gone tab is a no-op success
+            logger.info(f"Attempted to close already-closed page: {page_id}")
         self._cache.invalidate(page_id)
         self._registry.forget(page_id)
 
@@ -111,7 +116,9 @@ class PageSession:
         self.sweep_idle()
         try:
             await self._run_driver(self._backend.select_page, page_id)
+            logger.info(f"Selected page: {page_id}")
         except PageNotFoundError:
+            logger.warning(f"Attempted to select missing page: {page_id}")
             self._drop(page_id)
             raise
         self._registry.touch(page_id)
@@ -124,6 +131,7 @@ class PageSession:
             return self._backend.navigate(url)
         try:
             page = await self._run_driver(work)
+            logger.info(f"Navigated page {page_id} to {url!r}")
         except PageNotFoundError:
             self._drop(page_id)
             return self._page_gone(page_id)
@@ -266,13 +274,16 @@ class PageSession:
             live = None  # couldn't enumerate; skip reconciliation this tick
         if live is not None:
             for pid in [p for p in self._registry.tracked_ids() if p not in live]:
+                logger.info(f"Reconcile: dropping tracked page closed by human: {pid}")
                 self._cache.invalidate(pid)
                 self._registry.forget(pid)
         for pid in self._registry.idle_pages(IDLE_TTL_SECONDS, now=now):
             try:
                 self._backend.close_page(pid)
-            except Exception:
-                pass  # last-tab guard (ValueError), already-closed, dead session — all fine
+                logger.info(f"Reaper: closed idle page {pid}")
+            except Exception as e:
+                # last-tab guard (ValueError), already-closed, dead session — all fine
+                logger.debug(f"Reaper: could not close page {pid}: {e}")
             self._cache.invalidate(pid)
             self._registry.forget(pid)
 
