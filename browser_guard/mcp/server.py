@@ -18,6 +18,7 @@ mcp = FastMCP(
 )
 
 _ALLOWLIST = Allowlist.from_file(Path(__file__).parent / "validator" / "allowlist.json")
+logger.info("Browser Guard MCP module initialized")
 _session: PageSession | None = None
 
 
