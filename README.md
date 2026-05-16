@@ -81,9 +81,15 @@ Failures raise `ValidationError`, which FastMCP surfaces as a structured
 tool error. Extend the allowlist by editing `allowlist.json` and adding
 the URL shape you actually need — start narrow.
 
-## Running as a Background Service (SSE)
+## MCP's runtime
 
-If you want the MCP server to stay active in the background (managed by the OS), you can use the SSE (Server-Sent Events) transport. This keeps the Chrome session "warm" and persistent between agent sessions.
+The MCP is designed to run on your local machine. You can run it either as an on-demand process started by your agent (stdio) or as a persistent background process managed by the OS (SSE). Running as a [background service via systemd](#talks-to-agents-via-sse-recommended) (Linux) is recommended for keeping the Chrome session "warm" and persistent.
+
+## Installing the MCP
+
+### Talks to agents via SSE (Recommended)
+
+If you want the MCP server to stay active in the background, use the SSE (Server-Sent Events) transport.
 
 1. **Install Dependencies:**
    ```bash
@@ -113,7 +119,9 @@ If you want the MCP server to stay active in the background (managed by the OS),
    }
    ```
 
-## Adding to an LLM agent (stdio)
+### Talks to agents via STDIO
+
+For simple local use where the agent manages the process life cycle.
 
 Add an entry to your `~/.claude.json` `mcpServers` block:
 
