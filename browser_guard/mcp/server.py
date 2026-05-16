@@ -1,12 +1,15 @@
 import atexit
+from pathlib import Path
+
 from ..common.logger import logger
 from ..dependencies.mcp import FastMCP
 from ..web_navigator.selenium_chrome import SeleniumChromeBackend
 from ..web_navigator.session import PageSession
-from .validator import ValidationError, validate_url
+from .validator import Allowlist, ValidationError, validate_url
 
 mcp = FastMCP("browser-guard")
 
+_ALLOWLIST = Allowlist.from_file(Path(__file__).parent / "validator" / "allowlist.json")
 _session: PageSession | None = None
 
 
@@ -41,7 +44,7 @@ async def new_page(url: str | None = None) -> dict:
     """Open a new tab. Optional url is gated by the per-host allowlist (query strings and fragments pass through)."""
     logger.info(f"Tool called: new_page (url={url!r})")
     if url:
-        url = validate_url(url)
+        url = validate_url(url, _ALLOWLIST)
     result = (await _get_session().new_page(url)).__dict__
     logger.info("Tool finished: new_page")
     return result
@@ -69,7 +72,7 @@ async def select_page(page_id: str) -> dict:
 async def navigate(url: str, page_id: str) -> dict:
     """Navigate the named tab to url. Url is gated by the per-host allowlist (query strings and fragments pass through)."""
     logger.info(f"Tool called: navigate (url={url!r}, page_id={page_id!r})")
-    url = validate_url(url)
+    url = validate_url(url, _ALLOWLIST)
     result = await _get_session().navigate(url, page_id=page_id)
     logger.info("Tool finished: navigate")
     return result if isinstance(result, dict) else result.__dict__
