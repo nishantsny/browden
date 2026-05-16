@@ -1,4 +1,5 @@
 import atexit
+import os
 from pathlib import Path
 
 from ..common.logger import logger
@@ -7,9 +8,17 @@ from ..web_navigator.selenium_chrome import SeleniumChromeBackend
 from ..web_navigator.session import PageSession
 from .validator import Allowlist, ValidationError, validate_url
 
-mcp = FastMCP("browser-guard")
+DEFAULT_HOST = "127.0.0.1"
+DEFAULT_PORT = 8000
+
+mcp = FastMCP(
+    "browser-guard",
+    host=os.environ.get("MCP_HOST", DEFAULT_HOST),
+    port=int(os.environ.get("MCP_PORT", DEFAULT_PORT))
+)
 
 _ALLOWLIST = Allowlist.from_file(Path(__file__).parent / "validator" / "allowlist.json")
+logger.info("Browser Guard MCP module initialized")
 _session: PageSession | None = None
 
 
@@ -145,4 +154,9 @@ async def force_reload_page(page_id: str) -> dict:
 
 
 if __name__ == "__main__":
-    mcp.run()
+    transport = os.environ.get("MCP_TRANSPORT", "stdio")
+    logger.info(f"MCP Server starting (transport={transport})")
+    if transport == "sse":
+        mcp.run(transport="sse")
+    else:
+        mcp.run(transport="stdio")

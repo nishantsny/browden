@@ -81,7 +81,47 @@ Failures raise `ValidationError`, which FastMCP surfaces as a structured
 tool error. Extend the allowlist by editing `allowlist.json` and adding
 the URL shape you actually need — start narrow.
 
-## Adding to an LLM agent
+## MCP's runtime
+
+The MCP is designed to run on your local machine. You can run it either as an on-demand process started by your agent (stdio) or as a persistent background process managed by the OS (SSE). Running as a [background service via systemd](#talks-to-agents-via-sse-recommended) (Linux) is recommended for keeping the Chrome session "warm" and persistent.
+
+## Installing the MCP
+
+### Talks to agents via SSE (Recommended)
+
+If you want the MCP server to stay active in the background, use the SSE (Server-Sent Events) transport.
+
+1. **Install Dependencies:**
+   ```bash
+   git clone https://github.com/nishantsny/browser-guard.git
+   cd browser-guard
+   uv venv && uv pip install -e .
+   ```
+2. **Generate the Service File:**
+   Ensure your virtual environment is active so the script picks up the correct Python binary, then run the installer:
+   ```bash
+   python -m browser_guard.scripts.install_service
+   ```
+   *(Optional: Use `--port 8080`, `--python /custom/bin/python`, or `--display :1` if you need to override the defaults).*
+3. **Start the Service:**
+   ```bash
+   systemctl --user daemon-reload
+   systemctl --user enable --now browser-guard
+   ```
+4. **Configure Your Agent (e.g., Claude, Gemini, Codex):**
+   Add the SSE connection to your agent's configuration file (e.g., `~/.claude.json` or `.gemini/settings.json`). Ensure the port matches the one you configured (8000 is the default):
+   ```json
+   "mcpServers": {
+     "browser-guard": {
+       "type": "sse",
+       "url": "http://localhost:8000/sse"
+     }
+   }
+   ```
+
+### Talks to agents via STDIO
+
+For simple local use where the agent manages the process life cycle.
 
 Add an entry to your `~/.claude.json` `mcpServers` block:
 
