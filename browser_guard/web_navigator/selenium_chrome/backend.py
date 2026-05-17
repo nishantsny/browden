@@ -74,8 +74,14 @@ class SeleniumChromeBackend(WebNavigatorBackend):
     def _drv(self):
         if self._driver is not None:
             try:
+                # 1. Check if the driver session is alive
                 _ = self._driver.window_handles
+
+                # 2. Check if the CURRENT window context is still valid
+                # This is specifically what causes the "no such window" error later
+                _ = self._driver.current_window_handle
             except Exception:
+                # If either check fails, the state is bad; clean up and restart
                 try:
                     self._driver.quit()
                 except Exception:

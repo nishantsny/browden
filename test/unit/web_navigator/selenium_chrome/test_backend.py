@@ -134,12 +134,40 @@ def test_switch_failure_becomes_page_not_found():
         assert "Session info" not in str(exc.value)  # no driver stack trace leaks through
 
 
-def test_current_page_id_failure_becomes_page_not_found():
-    drv = _make_fake_driver()
-    type(drv).current_window_handle = PropertyMock(side_effect=NoSuchWindowException("no such window"))
-    backend = _backend_with_driver(drv)
-    with pytest.raises(PageNotFoundError):
-        backend.current_page_id()
+@patch("browser_guard.web_navigator.selenium_chrome.backend.webdriver")
+def test_current_page_id_triggers_restart_on_no_such_window(mock_webdriver):
+    # Initial driver that has lost its current window
+    dead_drv = _make_fake_driver(handles=("h1",))
+    type(dead_drv).current_window_handle = PropertyMock(side_effect=NoSuchWindowException("no such window"))
+    
+    # New driver to be created upon restart
+    alive_drv = _make_fake_driver(handles=("new_h1",))
+    alive_drv.current_window_handle = "new_h1"
+    mock_webdriver.Chrome.return_value = alive_drv
+
+    backend = _backend_with_driver(dead_drv)
+    
+    # This should now trigger _drv() to restart and return the new handle
+    assert backend.current_page_id() == "new_h1"
+    dead_drv.quit.assert_called_once()
+    assert mock_webdriver.Chrome.call_count == 1
+
+
+@patch("browser_guard.web_navigator.selenium_chrome.backend.webdriver")
+def test_drv_recreates_when_window_handles_fails(mock_webdriver):
+    # Driver that fails on window_handles (session dead)
+    dead_drv = _make_fake_driver(dead=True)
+    
+    # New driver
+    alive_drv = _make_fake_driver(handles=("h1",))
+    mock_webdriver.Chrome.return_value = alive_drv
+
+    backend = _backend_with_driver(dead_drv)
+    
+    drv = backend._drv()
+    assert drv is alive_drv
+    dead_drv.quit.assert_called_once()
+    assert mock_webdriver.Chrome.call_count == 1
 
 
 def test_navigate_failure_becomes_page_not_found():
