@@ -60,3 +60,18 @@ class WebNavigatorBackend(ABC):
     @abstractmethod
     def reload(self, page_id: str | None = None) -> PageInfo:
         """Reload a tab in the browser; active tab if page_id is None."""
+
+    @abstractmethod
+    def current_url(self) -> str:
+        """Return the URL of the active tab. Caller focuses the tab first."""
+
+    @abstractmethod
+    def click_element(self, css_selector: str) -> dict:
+        """Find one element by CSS selector on the active tab and click it.
+
+        The only write primitive. Re-finds the element *live* (the DOM-query
+        tools read a cached snapshot, which cannot click) and refuses unless it
+        is the sole match and is displayed + enabled. Returns the pre/post click
+        URL and title. Policy — which hosts, which elements — is enforced by the
+        caller (the ``add_to_cart`` tool), never here.
+        """

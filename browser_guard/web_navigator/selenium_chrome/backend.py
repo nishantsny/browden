@@ -4,7 +4,9 @@ from pathlib import Path
 from ...common.logger import logger
 from ...common.page import PageInfo
 from ...dependencies.selenium import (
+    By,
     ChromeOptions,
+    NoSuchElementException,
     NoSuchWindowException,
     WebDriverWait,
     webdriver,
@@ -174,3 +176,37 @@ class SeleniumChromeBackend(WebNavigatorBackend):
             title=drv.title,
             selected=True,
         )
+
+    def current_url(self) -> str:
+        try:
+            return self._drv().current_url
+        except NoSuchWindowException:
+            raise PageNotFoundError("there is no active tab") from None
+
+    def click_element(self, css_selector: str) -> dict:
+        drv = self._drv()
+        try:
+            url_before = drv.current_url
+            matches = drv.find_elements(By.CSS_SELECTOR, css_selector)
+        except NoSuchWindowException:
+            raise PageNotFoundError("there is no active tab to click in") from None
+        # Ambiguity is a deny: the policy layer validated exactly one element on the
+        # snapshot, so more (or fewer) live matches means the DOM moved under us.
+        if len(matches) == 0:
+            raise NoSuchElementException(f"no element matches {css_selector!r}")
+        if len(matches) > 1:
+            raise ValueError(f"selector {css_selector!r} matched {len(matches)} live elements")
+        el = matches[0]
+        if not el.is_displayed():
+            raise ValueError("target element is not visible")
+        if not el.is_enabled():
+            raise ValueError("target element is disabled")
+        el.click()
+        _wait_for_title(drv)
+        return {
+            "clicked": True,
+            "page_id": drv.current_window_handle,
+            "url_before": url_before,
+            "url": drv.current_url,
+            "title": drv.title,
+        }
