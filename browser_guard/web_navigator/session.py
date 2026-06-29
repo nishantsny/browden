@@ -139,6 +139,46 @@ class PageSession:
         self._registry.touch(page.id)
         return page
 
+    async def current_url(self, *, page_id: str) -> str | None:
+        """Return ``page_id``'s live URL (for the per-action host gate), or None if the tab is gone."""
+        self.sweep_idle()
+
+        def work():
+            self._backend.select_page(page_id)
+            return self._backend.current_url()
+        try:
+            url = await self._run_driver(work)
+        except PageNotFoundError:
+            self._drop(page_id)
+            return None
+        self._registry.touch(page_id)
+        return url
+
+    # -- write tools --------------------------------------------------------
+
+    async def add_to_cart_click(self, css_selector: str, *, page_id: str) -> dict:
+        """Click the (already policy-validated) add-to-cart element on ``page_id``.
+
+        The caller (the ``add_to_cart`` MCP tool) has already gated the host and
+        verified the element is a genuine add-to-cart control on the cached
+        snapshot. Here we re-find it live and click; the soup cache is then
+        invalidated because the DOM has changed.
+        """
+        self.sweep_idle()
+
+        def work():
+            self._backend.select_page(page_id)
+            return self._backend.click_element(css_selector)
+        try:
+            result = await self._run_driver(work)
+        except PageNotFoundError:
+            self._drop(page_id)
+            return self._page_gone(page_id)
+        self._cache.invalidate(page_id)
+        self._registry.touch(page_id)
+        logger.info(f"add_to_cart clicked {css_selector!r} on page {page_id}")
+        return result
+
     # -- DOM-query tools ----------------------------------------------------
 
     async def get_element_by_id(self, element_id: str, *, page_id: str,
