@@ -82,6 +82,10 @@ class FakeBackend:
         self._check(page_id)
         return PageInfo(id=page_id or self.active, url="reloaded-url", title="reloaded-title", selected=True)
 
+    def screenshot(self, page_id=None):
+        self.calls.append(("screenshot", page_id))
+        return b"\x89PNG\r\n\x1a\nfakepng"
+
 
 def make_session(backend=None, clock=None):
     """Tests that don't manipulate time can omit ``clock``; sweep_idle tests pass a
@@ -182,6 +186,39 @@ async def test_force_reload_page_reloads_and_reports():
     out2 = await s.force_reload_page(page_id="h2")
     assert out2["page_id"] == "h2"
     assert ("reload", "h2") in backend.calls
+
+
+@pytest.mark.asyncio
+async def test_screenshot_returns_png_bytes_and_touches_registry():
+    backend = FakeBackend()
+    s = make_session(backend)
+    # Seed a cache entry so we can confirm screenshot leaves it untouched (read-only).
+    sentinel = object()
+    s._cache._entries["h1"] = sentinel  # type: ignore[assignment]
+
+    png = await s.screenshot(page_id="h1")
+
+    assert png == b"\x89PNG\r\n\x1a\nfakepng"
+    assert ("select_page", "h1") in backend.calls
+    assert ("screenshot", None) in backend.calls
+    assert "h1" in s._registry._last_access
+    assert s._cache._entries["h1"] is sentinel  # cache not invalidated
+
+
+@pytest.mark.asyncio
+async def test_screenshot_on_dead_page_returns_error_and_drops_it():
+    backend = FakeBackend()
+    backend.missing.add("h6")
+    s = make_session(backend)
+    s._registry.touch("h6")
+    s._cache._entries["h6"] = object()  # type: ignore[assignment]
+
+    res = await s.screenshot(page_id="h6")
+
+    assert res == {"page_id": "h6",
+                   "error": "page h6 is no longer open — call list_pages for current tabs"}
+    assert "h6" not in s._registry._last_access
+    assert "h6" not in s._cache._entries
 
 
 # -- dead-page handling -----------------------------------------------------

@@ -3,7 +3,7 @@ import os
 from pathlib import Path
 
 from ..common.logger import logger
-from ..dependencies.mcp import FastMCP
+from ..dependencies.mcp import FastMCP, Image
 from ..web_navigator.selenium_chrome import SeleniumChromeBackend
 from ..web_navigator.session import PageSession
 from urllib.parse import urlparse
@@ -201,6 +201,22 @@ async def query_selector_all(css_selector: str, page_id: str,
         include_html=include_html, max_html_bytes=max_html_bytes)
     logger.info("Tool finished: query_selector_all")
     return result
+
+
+@mcp.tool()
+async def screenshot(page_id: str):
+    """Capture a PNG screenshot of a tab's current viewport.
+
+    Read-only: it grabs live pixels from the rendered page and never mutates it
+    or the DOM cache. Returns the image on success, or
+    ``{"error": ..., "page_id": ...}`` if the tab is no longer open.
+    """
+    logger.info(f"Tool called: screenshot (page_id={page_id!r})")
+    result = await _get_session().screenshot(page_id=page_id)
+    if isinstance(result, dict):  # tab gone — structured error, not an image
+        return result
+    logger.info("Tool finished: screenshot")
+    return Image(data=result, format="png")
 
 
 @mcp.tool()

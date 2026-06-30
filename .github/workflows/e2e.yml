@@ -1,0 +1,37 @@
+name: e2e
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  e2e:
+    runs-on: ubuntu-latest
+    env:
+      # Drive Chrome with no display; the e2e conftest also sets this, but make
+      # it explicit at the job level so any ad-hoc run behaves the same.
+      BROWSER_GUARD_HEADLESS: "1"
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Set up Chrome
+        uses: browser-actions/setup-chrome@v1
+        with:
+          chrome-version: stable
+
+      - name: Install package
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+
+      - name: Run unit tests
+        run: pytest test/unit -q
+
+      - name: Run e2e tests (headless Chrome)
+        run: pytest test/e2e -q

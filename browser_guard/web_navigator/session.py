@@ -251,6 +251,27 @@ class PageSession:
             return {"error": f"invalid CSS selector: {e}", "page_id": page_id}
         return self._list_envelope(page_id, reloaded, result, include_html, max_html_bytes)
 
+    async def screenshot(self, *, page_id: str) -> bytes | dict:
+        """Capture a PNG screenshot of ``page_id``'s viewport.
+
+        Read-only: it focuses the tab and grabs live pixels, so it neither uses
+        nor invalidates the soup cache. Returns raw PNG bytes, or the standard
+        ``{"error": ..., "page_id": ...}`` envelope if the tab is gone.
+        """
+        self.sweep_idle()
+
+        def work():
+            self._backend.select_page(page_id)
+            return self._backend.screenshot()
+        try:
+            png = await self._run_driver(work)
+        except PageNotFoundError:
+            self._drop(page_id)
+            return self._page_gone(page_id)
+        self._registry.touch(page_id)
+        logger.info(f"Captured screenshot of page {page_id} ({len(png)} bytes)")
+        return png
+
     async def force_reload_page(self, *, page_id: str) -> dict:
         self.sweep_idle()
 

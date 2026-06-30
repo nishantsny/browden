@@ -6,7 +6,7 @@ handed the full power of a CDP or Playwright client.
 
 ## Capabilities
 
-Ten tools, mapped to a swappable `WebNavigatorBackend`.
+Eleven tools, mapped to a swappable `WebNavigatorBackend`.
 
 **Tabs**
 
@@ -27,9 +27,14 @@ Ten tools, mapped to a swappable `WebNavigatorBackend`.
 | `query_selector`              | `document.querySelector`           |
 | `query_selector_all`          | `document.querySelectorAll`        |
 | `force_reload_page`           | reload a tab + refresh its cache   |
+| `screenshot`                  | capture a PNG of the tab's viewport |
+
+`screenshot` is read-only — it grabs live pixels from the rendered page and
+returns a PNG image, without touching the DOM cache. It does not read the
+snapshot, so it always reflects exactly what's on screen now.
 
 Every tool that acts on a specific tab — `navigate`, `select_page`,
-`close_page`, `force_reload_page`, and all four DOM queries — takes a
+`close_page`, `force_reload_page`, `screenshot`, and all four DOM queries — takes a
 **required `page_id`** (the id returned by `new_page` / `list_pages`). None of
 them default to "the active tab", since the active tab is shared state the
 human also controls, and an implicit default would silently act on whichever
