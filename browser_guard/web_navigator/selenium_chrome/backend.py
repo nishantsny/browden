@@ -152,6 +152,14 @@ class SeleniumChromeBackend(WebNavigatorBackend):
             raise ValueError("Cannot close the last tab")
         _switch(drv, page_id)
         drv.close()
+        # drv.close() leaves the driver focused on the now-dead handle. The next
+        # command — or _drv()'s health check, which reads current_window_handle —
+        # would then mistake the session for dead and relaunch the whole browser,
+        # taking every other tab with it. Re-focus a survivor to keep the session
+        # valid.
+        remaining = drv.window_handles
+        if remaining:
+            drv.switch_to.window(remaining[0])
 
     def select_page(self, page_id: str) -> None:
         _switch(self._drv(), page_id)

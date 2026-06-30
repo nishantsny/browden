@@ -170,6 +170,31 @@ def test_drv_recreates_when_window_handles_fails(mock_webdriver):
     assert mock_webdriver.Chrome.call_count == 1
 
 
+def test_close_page_refocuses_a_survivor():
+    # Closing the focused tab leaves the driver on a dead handle; close_page must
+    # re-focus a remaining window so the next command doesn't see a "dead" session.
+    drv = _make_fake_driver(handles=("h1", "h2"))
+
+    def _close():
+        drv.window_handles = ["h1"]  # h2 is gone after drv.close()
+    drv.close.side_effect = _close
+
+    backend = _backend_with_driver(drv)
+    backend.close_page("h2")
+
+    drv.close.assert_called_once()
+    # Last switch_to.window call targets a surviving handle, not the closed one.
+    assert drv.switch_to.window.call_args.args == ("h1",)
+
+
+def test_close_page_last_tab_is_refused():
+    drv = _make_fake_driver(handles=("only",))
+    backend = _backend_with_driver(drv)
+    with pytest.raises(ValueError):
+        backend.close_page("only")
+    drv.close.assert_not_called()
+
+
 def test_navigate_failure_becomes_page_not_found():
     drv = _make_fake_driver()
     drv.get.side_effect = NoSuchWindowException("no such window")
