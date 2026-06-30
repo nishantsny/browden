@@ -32,6 +32,16 @@ def _default_profile_dir() -> Path:
     return Path(root) / "browser-guard" / "chrome-profile"
 
 
+def _headless_enabled() -> bool:
+    """Whether to launch Chrome headless, controlled by ``BROWSER_GUARD_HEADLESS``.
+
+    A real human-facing session wants a visible window, so this defaults to off.
+    Set ``BROWSER_GUARD_HEADLESS=1`` (or true/yes/on) for environments without a
+    display — e2e tests and CI runners.
+    """
+    return os.environ.get("BROWSER_GUARD_HEADLESS", "").strip().lower() in ("1", "true", "yes", "on")
+
+
 PROFILE_DIR = _default_profile_dir()
 SINGLETON_FILES = ("SingletonLock", "SingletonCookie", "SingletonSocket")
 TITLE_WAIT_SECONDS = 3
@@ -94,6 +104,14 @@ class SeleniumChromeBackend(WebNavigatorBackend):
             _clear_stale_singletons(PROFILE_DIR)
             opts = ChromeOptions()
             opts.add_argument(f"--user-data-dir={PROFILE_DIR}")
+            if _headless_enabled():
+                # New headless mode + the flags a sandboxed CI container needs.
+                logger.info("Launching Chrome headless")
+                opts.add_argument("--headless=new")
+                opts.add_argument("--no-sandbox")
+                opts.add_argument("--disable-dev-shm-usage")
+                opts.add_argument("--disable-gpu")
+                opts.add_argument("--window-size=1280,1024")
             self._driver = webdriver.Chrome(options=opts)
         return self._driver
 
@@ -182,6 +200,15 @@ class SeleniumChromeBackend(WebNavigatorBackend):
             return self._drv().current_url
         except NoSuchWindowException:
             raise PageNotFoundError("there is no active tab") from None
+
+    def screenshot(self, page_id: str | None = None) -> bytes:
+        drv = self._drv()
+        if page_id:
+            _switch(drv, page_id)
+        try:
+            return drv.get_screenshot_as_png()
+        except NoSuchWindowException:
+            raise PageNotFoundError("there is no active tab to screenshot") from None
 
     def click_element(self, css_selector: str) -> dict:
         drv = self._drv()

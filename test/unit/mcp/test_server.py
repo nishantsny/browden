@@ -99,3 +99,36 @@ async def test_dom_tool_requires_page_id():
     importlib.reload(server)
     with pytest.raises(TypeError):
         await server.query_selector(".a")  # page_id is required, no "active tab" default
+
+
+@pytest.mark.asyncio
+async def test_screenshot_tool_returns_image():
+    import browser_guard.mcp.server as server
+    importlib.reload(server)
+    png = b"\x89PNG\r\n\x1a\n" + b"fakepixels"
+    session = _fake_session(screenshot=png)
+    with patch("browser_guard.mcp.server._get_session", return_value=session):
+        result = await server.screenshot("h1")
+    session.screenshot.assert_awaited_once_with(page_id="h1")
+    assert isinstance(result, server.Image)
+    # The image carries the raw PNG bytes the session produced.
+    assert result.data == png
+
+
+@pytest.mark.asyncio
+async def test_screenshot_tool_passes_through_error_envelope():
+    import browser_guard.mcp.server as server
+    importlib.reload(server)
+    gone = {"error": "page h9 is no longer open", "page_id": "h9"}
+    session = _fake_session(screenshot=gone)
+    with patch("browser_guard.mcp.server._get_session", return_value=session):
+        result = await server.screenshot("h9")
+    assert result == gone  # a dict error is forwarded as-is, not wrapped in an Image
+
+
+@pytest.mark.asyncio
+async def test_screenshot_tool_requires_page_id():
+    import browser_guard.mcp.server as server
+    importlib.reload(server)
+    with pytest.raises(TypeError):
+        await server.screenshot()  # page_id is required, no "active tab" default

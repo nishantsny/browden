@@ -6,7 +6,7 @@ handed the full power of a CDP or Playwright client.
 
 ## Capabilities
 
-Ten tools, mapped to a swappable `WebNavigatorBackend`.
+Eleven tools, mapped to a swappable `WebNavigatorBackend`.
 
 **Tabs**
 
@@ -27,9 +27,14 @@ Ten tools, mapped to a swappable `WebNavigatorBackend`.
 | `query_selector`              | `document.querySelector`           |
 | `query_selector_all`          | `document.querySelectorAll`        |
 | `force_reload_page`           | reload a tab + refresh its cache   |
+| `screenshot`                  | capture a PNG of the tab's viewport |
+
+`screenshot` is read-only — it grabs live pixels from the rendered page and
+returns a PNG image, without touching the DOM cache. It does not read the
+snapshot, so it always reflects exactly what's on screen now.
 
 Every tool that acts on a specific tab — `navigate`, `select_page`,
-`close_page`, `force_reload_page`, and all four DOM queries — takes a
+`close_page`, `force_reload_page`, `screenshot`, and all four DOM queries — takes a
 **required `page_id`** (the id returned by `new_page` / `list_pages`). None of
 them default to "the active tab", since the active tab is shared state the
 human also controls, and an implicit default would silently act on whichever
@@ -153,6 +158,29 @@ Install:
 uv venv && uv pip install -e ".[dev]"
 pytest test/unit/
 ```
+
+### Running the e2e tests
+
+`test/e2e/` drives a **real Chrome** through the Selenium backend (the unit
+suite never launches a browser). The tests are self-contained — they render an
+inline `data:` page in a throwaway profile, so they need no network and no
+allowlisted host.
+
+```bash
+pytest test/e2e/        # or: pytest test/unit/ test/e2e/ for everything
+```
+
+On a machine without a display (a server box, a CI runner), set
+`BROWSER_GUARD_HEADLESS=1` so Chrome launches headless:
+
+```bash
+BROWSER_GUARD_HEADLESS=1 pytest test/e2e/
+```
+
+The `test/e2e/conftest.py` fixture already exports this for you, and redirects
+`XDG_CACHE_HOME` to a temp dir so the run never touches — or locks — your real
+persistent Chrome profile. The same suites run on every push / PR via the
+[`e2e` workflow](.github/workflows/e2e.yml).
 
 ## Design docs
 

@@ -66,6 +66,14 @@ class WebNavigatorBackend(ABC):
         """Return the URL of the active tab. Caller focuses the tab first."""
 
     @abstractmethod
+    def screenshot(self, page_id: str | None = None) -> bytes:
+        """Capture a PNG screenshot of a tab's viewport; active tab if page_id is None.
+
+        Read-only — never mutates page state. Returns the raw PNG bytes; the
+        caller is responsible for any encoding (e.g. base64 for transport).
+        """
+
+    @abstractmethod
     def click_element(self, css_selector: str) -> dict:
         """Find one element by CSS selector on the active tab and click it.
 
