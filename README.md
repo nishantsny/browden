@@ -68,6 +68,29 @@ at `~/.cache/browser-guard/chrome-profile`, so logins survive restarts. The
 backend self-heals after a dead Chrome session and clears stale
 `Singleton{Lock,Cookie,Socket}` files left by unclean shutdowns.
 
+## Profiles & concurrency
+
+Every tool takes an optional **`profile_dir`**. Omit it and the request runs
+against the shared default profile above. Pass a path and the request runs in
+its own Chrome profile (`--user-data-dir`) — the server keeps **one Chrome
+session per profile directory**, created on first use.
+
+This is what makes concurrency possible. A single Selenium session has one
+focused window, so two requests sharing a profile are serialized through it.
+But a distinct `profile_dir` is a *separate Chrome process and WebDriver
+session* — distinct profiles don't share window focus or the per-directory
+`SingletonLock` — so requests on different profiles run genuinely in parallel.
+(Selenium's single-session/single-focus model is the constraint here, not
+Chrome; CDP/Playwright expose per-tab concurrency directly.)
+
+Two things to keep in mind:
+
+- A `page_id` belongs to the profile that opened it. Pass the **same
+  `profile_dir`** on every follow-up call for that tab — a handle from one
+  profile is meaningless in another.
+- Each profile is an independent, isolated browser: separate cookies, storage,
+  and logins. They share nothing.
+
 ## Restrictions
 
 `navigate()` and `new_page(url=…)` run every URL through `validate_url`,

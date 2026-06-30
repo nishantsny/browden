@@ -78,10 +78,25 @@ def _clear_stale_singletons(profile_dir: Path) -> None:
 
 
 class SeleniumChromeBackend(WebNavigatorBackend):
-    """Selenium WebDriver implementation of the navigator backend."""
+    """Selenium WebDriver implementation of the navigator backend.
 
-    def __init__(self):
+    Each instance owns exactly one Chrome session bound to one profile
+    directory (``--user-data-dir``). ``profile_dir`` defaults to the shared
+    module ``PROFILE_DIR``; pass a distinct path to drive an independent Chrome
+    process — distinct profiles don't share the per-dir ``SingletonLock``, so
+    two backends on two profiles run concurrently without clobbering each
+    other's window focus.
+    """
+
+    def __init__(self, profile_dir=None):
         self._driver = None
+        # None -> resolve to the module default lazily in _drv(), so an
+        # env/monkeypatch of PROFILE_DIR still takes effect.
+        self._profile_dir = Path(profile_dir) if profile_dir else None
+
+    @property
+    def profile_dir(self) -> Path:
+        return self._profile_dir or PROFILE_DIR
 
     def _drv(self):
         if self._driver is not None:
@@ -100,10 +115,11 @@ class SeleniumChromeBackend(WebNavigatorBackend):
                     pass
                 self._driver = None
         if self._driver is None:
-            logger.info("Starting new Chrome session")
-            _clear_stale_singletons(PROFILE_DIR)
+            profile = self.profile_dir
+            logger.info(f"Starting new Chrome session (profile={profile})")
+            _clear_stale_singletons(profile)
             opts = ChromeOptions()
-            opts.add_argument(f"--user-data-dir={PROFILE_DIR}")
+            opts.add_argument(f"--user-data-dir={profile}")
             if _headless_enabled():
                 # New headless mode + the flags a sandboxed CI container needs.
                 logger.info("Launching Chrome headless")
