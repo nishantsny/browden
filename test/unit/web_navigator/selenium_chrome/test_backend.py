@@ -40,6 +40,36 @@ def test_drv_lazy_init(mock_webdriver):
     assert mock_webdriver.Chrome.call_count == 1  # cached, not recreated
 
 
+@patch("browser_guard.web_navigator.selenium_chrome.backend._clear_stale_singletons")
+@patch("browser_guard.web_navigator.selenium_chrome.backend.webdriver")
+def test_drv_uses_provided_profile_dir(mock_webdriver, mock_clear, tmp_path):
+    mock_webdriver.Chrome.return_value = _make_fake_driver()
+    profile = tmp_path / "custom-profile"
+    backend = SeleniumChromeBackend(profile_dir=str(profile))
+
+    assert backend.profile_dir == profile
+
+    backend._drv()
+
+    args = mock_webdriver.Chrome.call_args.kwargs["options"].arguments
+    assert f"--user-data-dir={profile}" in args
+    mock_clear.assert_called_once_with(profile)
+
+
+@patch("browser_guard.web_navigator.selenium_chrome.backend.PROFILE_DIR")
+@patch("browser_guard.web_navigator.selenium_chrome.backend._clear_stale_singletons")
+@patch("browser_guard.web_navigator.selenium_chrome.backend.webdriver")
+def test_drv_defaults_to_module_profile_dir(mock_webdriver, mock_clear, mock_profile_dir):
+    mock_webdriver.Chrome.return_value = _make_fake_driver()
+    backend = SeleniumChromeBackend()  # no profile_dir -> module default
+
+    assert backend.profile_dir is mock_profile_dir
+
+    backend._drv()
+    args = mock_webdriver.Chrome.call_args.kwargs["options"].arguments
+    assert f"--user-data-dir={mock_profile_dir}" in args
+
+
 @patch("browser_guard.web_navigator.selenium_chrome.backend.webdriver")
 def test_drv_recreates_after_dead_session(mock_webdriver):
     dead = _make_fake_driver(dead=True)

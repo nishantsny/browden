@@ -14,7 +14,7 @@ def test_no_backend_or_session_at_import():
         importlib.reload(server)
         assert mock_backend.call_count == 0
         assert mock_session.call_count == 0
-        assert server._session is None
+        assert server._sessions == {}
 
 
 def test_get_session_is_lazy_and_cached():
@@ -26,6 +26,34 @@ def test_get_session_is_lazy_and_cached():
         s2 = server._get_session()
         assert s1 is s2
         assert mock_session_cls.call_count == 1
+
+
+def test_distinct_profile_dirs_get_distinct_sessions(tmp_path):
+    import browser_guard.mcp.server as server
+    importlib.reload(server)
+    a, b = tmp_path / "a", tmp_path / "b"
+    with patch("browser_guard.mcp.server.SeleniumChromeBackend") as mock_backend, \
+         patch("browser_guard.mcp.server.PageSession", side_effect=lambda *a, **k: MagicMock()):
+        sa1 = server._get_session(str(a))
+        sa2 = server._get_session(str(a))
+        sb = server._get_session(str(b))
+        # same profile -> same cached session; different profile -> different one
+        assert sa1 is sa2
+        assert sa1 is not sb
+        # each backend was built bound to the profile the caller asked for
+        profiles = {c.kwargs.get("profile_dir") for c in mock_backend.call_args_list}
+        assert profiles == {str(a), str(b)}
+
+
+def test_profile_key_is_stable_and_distinguishes_dirs(tmp_path):
+    import browser_guard.mcp.server as server
+    importlib.reload(server)
+    # None is stable across calls (so the default profile maps to one session).
+    assert server._profile_key(None) == server._profile_key(None)
+    # Distinct dirs yield distinct keys; the same dir is stable.
+    a, b = str(tmp_path / "a"), str(tmp_path / "b")
+    assert server._profile_key(a) == server._profile_key(a)
+    assert server._profile_key(a) != server._profile_key(b)
 
 
 def _fake_session(**methods):
