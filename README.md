@@ -68,6 +68,18 @@ at `~/.cache/browser-guard/chrome-profile`, so logins survive restarts. The
 backend self-heals after a dead Chrome session and clears stale
 `Singleton{Lock,Cookie,Socket}` files left by unclean shutdowns.
 
+**Undetected launch.** The backend launches Chrome *itself* —
+`google-chrome --user-data-dir=<profile> --remote-debugging-port=<port> …` via
+a plain subprocess — and then *attaches* Selenium over the DevTools port
+(`debuggerAddress`). It deliberately does **not** let ChromeDriver spawn
+Chrome, because ChromeDriver injects automation switches
+(`--enable-automation`, the `AutomationControlled` blink feature, `--test-type`)
+that set `navigator.webdriver = true` and show the "controlled by automated
+test software" infobar. Launching Chrome ourselves with only benign flags keeps
+`navigator.webdriver` false and the window indistinguishable from an ordinary,
+human-run browser. The Chrome binary is auto-discovered on `PATH`
+(`google-chrome`, `chromium`, …); override it with `BROWSER_GUARD_CHROME_BINARY`.
+
 ## Profiles & concurrency
 
 Every tool takes an optional **`profile_dir`**. Omit it and the request runs

@@ -7,8 +7,11 @@ from browser_guard.web_navigator.interface import PageNotFoundError
 from browser_guard.web_navigator.selenium_chrome.backend import (
     SINGLETON_FILES,
     SeleniumChromeBackend,
+    _chrome_args,
     _clear_stale_singletons,
     _default_profile_dir,
+    _find_chrome_binary,
+    _launch_chrome,
 )
 
 
@@ -23,8 +26,21 @@ def _make_fake_driver(handles=("h1",), dead=False):
     return drv
 
 
+def _patch_launch(mock_launch, port=9222):
+    """Make _launch_chrome return a fresh fake (proc, port) pair per call."""
+    mock_launch.side_effect = lambda profile: (MagicMock(name="chrome_proc"), port)
+
+
+def _debugger_address(mock_webdriver):
+    """The debuggerAddress experimental option Selenium was attached with."""
+    opts = mock_webdriver.Chrome.call_args.kwargs["options"]
+    return opts.experimental_options["debuggerAddress"]
+
+
+@patch("browser_guard.web_navigator.selenium_chrome.backend._launch_chrome")
 @patch("browser_guard.web_navigator.selenium_chrome.backend.webdriver")
-def test_drv_lazy_init(mock_webdriver):
+def test_drv_lazy_init(mock_webdriver, mock_launch):
+    _patch_launch(mock_launch)
     fake = _make_fake_driver()
     mock_webdriver.Chrome.return_value = fake
 
@@ -38,11 +54,13 @@ def test_drv_lazy_init(mock_webdriver):
     drv2 = backend._drv()
     assert drv2 is fake
     assert mock_webdriver.Chrome.call_count == 1  # cached, not recreated
+    assert mock_launch.call_count == 1
 
 
-@patch("browser_guard.web_navigator.selenium_chrome.backend._clear_stale_singletons")
+@patch("browser_guard.web_navigator.selenium_chrome.backend._launch_chrome")
 @patch("browser_guard.web_navigator.selenium_chrome.backend.webdriver")
-def test_drv_uses_provided_profile_dir(mock_webdriver, mock_clear, tmp_path):
+def test_drv_launches_with_provided_profile_dir(mock_webdriver, mock_launch, tmp_path):
+    _patch_launch(mock_launch, port=7000)
     mock_webdriver.Chrome.return_value = _make_fake_driver()
     profile = tmp_path / "custom-profile"
     backend = SeleniumChromeBackend(profile_dir=str(profile))
@@ -51,39 +69,46 @@ def test_drv_uses_provided_profile_dir(mock_webdriver, mock_clear, tmp_path):
 
     backend._drv()
 
-    args = mock_webdriver.Chrome.call_args.kwargs["options"].arguments
-    assert f"--user-data-dir={profile}" in args
-    mock_clear.assert_called_once_with(profile)
+    mock_launch.assert_called_once_with(profile)
+    # Selenium attaches to the launched Chrome rather than spawning its own.
+    assert _debugger_address(mock_webdriver) == "127.0.0.1:7000"
 
 
+@patch("browser_guard.web_navigator.selenium_chrome.backend._launch_chrome")
 @patch("browser_guard.web_navigator.selenium_chrome.backend.PROFILE_DIR")
-@patch("browser_guard.web_navigator.selenium_chrome.backend._clear_stale_singletons")
 @patch("browser_guard.web_navigator.selenium_chrome.backend.webdriver")
-def test_drv_defaults_to_module_profile_dir(mock_webdriver, mock_clear, mock_profile_dir):
+def test_drv_defaults_to_module_profile_dir(mock_webdriver, mock_profile_dir, mock_launch):
+    _patch_launch(mock_launch)
     mock_webdriver.Chrome.return_value = _make_fake_driver()
     backend = SeleniumChromeBackend()  # no profile_dir -> module default
 
     assert backend.profile_dir is mock_profile_dir
 
     backend._drv()
-    args = mock_webdriver.Chrome.call_args.kwargs["options"].arguments
-    assert f"--user-data-dir={mock_profile_dir}" in args
+    mock_launch.assert_called_once_with(mock_profile_dir)
 
 
+@patch("browser_guard.web_navigator.selenium_chrome.backend._launch_chrome")
 @patch("browser_guard.web_navigator.selenium_chrome.backend.webdriver")
-def test_drv_recreates_after_dead_session(mock_webdriver):
+def test_drv_recreates_after_dead_session(mock_webdriver, mock_launch):
+    _patch_launch(mock_launch)
     dead = _make_fake_driver(dead=True)
     alive = _make_fake_driver()
     mock_webdriver.Chrome.return_value = alive
 
     backend = SeleniumChromeBackend()
     backend._driver = dead  # simulate a cached, dead driver
+    dead_proc = MagicMock(name="dead_chrome")
+    dead_proc.poll.return_value = None  # still "running" so _terminate acts
+    backend._chrome_proc = dead_proc
 
     drv = backend._drv()
 
     assert drv is alive
     dead.quit.assert_called_once()
+    dead_proc.terminate.assert_called_once()  # the old Chrome is reaped
     assert mock_webdriver.Chrome.call_count == 1  # one new driver after the dead one
+    assert mock_launch.call_count == 1
 
 
 def test_default_profile_dir_honours_xdg(monkeypatch, tmp_path):
@@ -113,24 +138,105 @@ def test_clear_stale_singletons_noop_when_absent(tmp_path):
     _clear_stale_singletons(tmp_path)  # must not raise on empty dir
 
 
+def test_chrome_args_have_no_automation_flags(tmp_path, monkeypatch):
+    monkeypatch.setenv("BROWSER_GUARD_CHROME_BINARY", "/usr/bin/google-chrome")
+    monkeypatch.delenv("BROWSER_GUARD_HEADLESS", raising=False)
+    args = _chrome_args(tmp_path / "profile", 9222)
+
+    assert args[0] == "/usr/bin/google-chrome"
+    assert f"--user-data-dir={tmp_path / 'profile'}" in args
+    assert "--remote-debugging-port=9222" in args
+    # None of chromedriver's automation tells should appear — that's the point.
+    joined = " ".join(args)
+    assert "enable-automation" not in joined
+    assert "AutomationControlled" not in joined
+    assert "--test-type" not in joined
+    # Headed by default: no headless switch unless asked for.
+    assert not any(a.startswith("--headless") for a in args)
+
+
+def test_chrome_args_headless_when_enabled(tmp_path, monkeypatch):
+    monkeypatch.setenv("BROWSER_GUARD_CHROME_BINARY", "/usr/bin/google-chrome")
+    monkeypatch.setenv("BROWSER_GUARD_HEADLESS", "1")
+    args = _chrome_args(tmp_path / "profile", 9222)
+    assert "--headless=new" in args
+    assert "--no-sandbox" in args
+
+
+def test_find_chrome_binary_honours_env(monkeypatch):
+    monkeypatch.setenv("BROWSER_GUARD_CHROME_BINARY", "/opt/chrome/chrome")
+    assert _find_chrome_binary() == "/opt/chrome/chrome"
+
+
+def test_find_chrome_binary_searches_path(monkeypatch):
+    monkeypatch.delenv("BROWSER_GUARD_CHROME_BINARY", raising=False)
+    monkeypatch.delenv("CHROME_BIN", raising=False)
+
+    def fake_which(name):
+        return "/usr/bin/google-chrome" if name == "google-chrome" else None
+
+    monkeypatch.setattr(
+        "browser_guard.web_navigator.selenium_chrome.backend.shutil.which", fake_which
+    )
+    assert _find_chrome_binary() == "/usr/bin/google-chrome"
+
+
+def test_find_chrome_binary_raises_when_missing(monkeypatch):
+    monkeypatch.delenv("BROWSER_GUARD_CHROME_BINARY", raising=False)
+    monkeypatch.delenv("CHROME_BIN", raising=False)
+    monkeypatch.setattr(
+        "browser_guard.web_navigator.selenium_chrome.backend.shutil.which",
+        lambda name: None,
+    )
+    with pytest.raises(RuntimeError):
+        _find_chrome_binary()
+
+
+@patch("browser_guard.web_navigator.selenium_chrome.backend._wait_for_devtools")
+@patch("browser_guard.web_navigator.selenium_chrome.backend.subprocess")
+@patch("browser_guard.web_navigator.selenium_chrome.backend._free_port", return_value=4321)
+@patch("browser_guard.web_navigator.selenium_chrome.backend._chrome_args", return_value=["chrome"])
 @patch("browser_guard.web_navigator.selenium_chrome.backend._clear_stale_singletons")
-@patch("browser_guard.web_navigator.selenium_chrome.backend.webdriver")
-def test_drv_clears_singletons_before_launch(mock_webdriver, mock_clear):
-    mock_webdriver.Chrome.return_value = _make_fake_driver()
-    backend = SeleniumChromeBackend()
+def test_launch_chrome_clears_singletons_before_spawning(
+    mock_clear, mock_args, mock_port, mock_subprocess, mock_wait, tmp_path
+):
+    proc = MagicMock(name="proc")
+    mock_subprocess.Popen.return_value = proc
 
     manager = MagicMock()
     manager.attach_mock(mock_clear, "clear")
-    manager.attach_mock(mock_webdriver.Chrome, "Chrome")
+    manager.attach_mock(mock_subprocess.Popen, "Popen")
 
-    backend._drv()
+    out_proc, port = _launch_chrome(tmp_path)
 
+    assert (out_proc, port) == (proc, 4321)
     call_names = [c[0] for c in manager.mock_calls]
-    assert call_names == ["clear", "Chrome"]
+    assert call_names == ["clear", "Popen"]  # stale lock cleared before spawn
+    mock_wait.assert_called_once()
 
 
+@patch("browser_guard.web_navigator.selenium_chrome.backend._wait_for_devtools")
+@patch("browser_guard.web_navigator.selenium_chrome.backend._terminate")
+@patch("browser_guard.web_navigator.selenium_chrome.backend.subprocess")
+@patch("browser_guard.web_navigator.selenium_chrome.backend._free_port", return_value=4321)
+@patch("browser_guard.web_navigator.selenium_chrome.backend._chrome_args", return_value=["chrome"])
+@patch("browser_guard.web_navigator.selenium_chrome.backend._clear_stale_singletons")
+def test_launch_chrome_terminates_when_devtools_never_comes_up(
+    mock_clear, mock_args, mock_port, mock_subprocess, mock_terminate, mock_wait, tmp_path
+):
+    proc = MagicMock(name="proc")
+    mock_subprocess.Popen.return_value = proc
+    mock_wait.side_effect = RuntimeError("never came up")
+
+    with pytest.raises(RuntimeError):
+        _launch_chrome(tmp_path)
+    mock_terminate.assert_called_once_with(proc)  # no orphaned Chrome
+
+
+@patch("browser_guard.web_navigator.selenium_chrome.backend._launch_chrome")
 @patch("browser_guard.web_navigator.selenium_chrome.backend.webdriver")
-def test_drv_swallows_quit_error_on_dead_driver(mock_webdriver):
+def test_drv_swallows_quit_error_on_dead_driver(mock_webdriver, mock_launch):
+    _patch_launch(mock_launch)
     dead = _make_fake_driver(dead=True)
     dead.quit.side_effect = Exception("already gone")
     alive = _make_fake_driver()
@@ -164,36 +270,40 @@ def test_switch_failure_becomes_page_not_found():
         assert "Session info" not in str(exc.value)  # no driver stack trace leaks through
 
 
+@patch("browser_guard.web_navigator.selenium_chrome.backend._launch_chrome")
 @patch("browser_guard.web_navigator.selenium_chrome.backend.webdriver")
-def test_current_page_id_triggers_restart_on_no_such_window(mock_webdriver):
+def test_current_page_id_triggers_restart_on_no_such_window(mock_webdriver, mock_launch):
+    _patch_launch(mock_launch)
     # Initial driver that has lost its current window
     dead_drv = _make_fake_driver(handles=("h1",))
     type(dead_drv).current_window_handle = PropertyMock(side_effect=NoSuchWindowException("no such window"))
-    
+
     # New driver to be created upon restart
     alive_drv = _make_fake_driver(handles=("new_h1",))
     alive_drv.current_window_handle = "new_h1"
     mock_webdriver.Chrome.return_value = alive_drv
 
     backend = _backend_with_driver(dead_drv)
-    
+
     # This should now trigger _drv() to restart and return the new handle
     assert backend.current_page_id() == "new_h1"
     dead_drv.quit.assert_called_once()
     assert mock_webdriver.Chrome.call_count == 1
 
 
+@patch("browser_guard.web_navigator.selenium_chrome.backend._launch_chrome")
 @patch("browser_guard.web_navigator.selenium_chrome.backend.webdriver")
-def test_drv_recreates_when_window_handles_fails(mock_webdriver):
+def test_drv_recreates_when_window_handles_fails(mock_webdriver, mock_launch):
+    _patch_launch(mock_launch)
     # Driver that fails on window_handles (session dead)
     dead_drv = _make_fake_driver(dead=True)
-    
+
     # New driver
     alive_drv = _make_fake_driver(handles=("h1",))
     mock_webdriver.Chrome.return_value = alive_drv
 
     backend = _backend_with_driver(dead_drv)
-    
+
     drv = backend._drv()
     assert drv is alive_drv
     dead_drv.quit.assert_called_once()
@@ -233,8 +343,10 @@ def test_navigate_failure_becomes_page_not_found():
         backend.navigate("https://example.com")
 
 
+@patch("browser_guard.web_navigator.selenium_chrome.backend._launch_chrome")
 @patch("browser_guard.web_navigator.selenium_chrome.backend.webdriver")
-def test_list_page_ids_returns_handles_without_switching(mock_webdriver):
+def test_list_page_ids_returns_handles_without_switching(mock_webdriver, mock_launch):
+    _patch_launch(mock_launch)
     drv = _make_fake_driver(handles=("h1", "h2", "h3"))
     mock_webdriver.Chrome.return_value = drv
     backend = SeleniumChromeBackend()
