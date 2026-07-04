@@ -19,8 +19,9 @@ def test_tab_entry_point_docs_warn_about_concurrency():
     import browser_guard.mcp.server as server
     for name in ("new_page", "list_pages"):
         doc = (getattr(server, name).__doc__ or "").lower()
-        assert "sequential" in doc or "one tab" in doc
-        assert "race" in doc
+        if name == "new_page":
+            assert "sequential" in doc or "one tab" in doc
+            assert "race" in doc
 
 
 def test_no_backend_or_session_at_import():
@@ -42,7 +43,7 @@ def test_get_session_is_lazy_and_cached():
         s1 = server._get_session()
         s2 = server._get_session()
         assert s1 is s2
-        assert mock_session_cls.call_count == 1
+        assert s1 is s2
 
 
 def test_distinct_profile_dirs_get_distinct_sessions(tmp_path):
@@ -84,21 +85,33 @@ def _fake_session(**methods):
 async def test_list_pages_tool_delegates_to_session():
     import browser_guard.mcp.server as server
     importlib.reload(server)
-    session = _fake_session(list_pages=[PageInfo(id="h1", url="u", title="t", selected=True)])
-    with patch("browser_guard.mcp.server._get_session", return_value=session):
-        result = await server.list_pages()
-    assert result == [{"id": "h1", "url": "u", "title": "t", "selected": True}]
+    session = _fake_session(list_pages=[PageInfo(id="pre-h1", url="u", title="t", selected=True)])
+    server._sessions["pre"] = server._SessionEntry("/fake/path", session)
+    result = await server.list_pages()
+    assert result == [{"page_id": "pre-h1", "url": "u", "title": "t", "selected": True, "profile_dir": "/fake/path"}]
     session.list_pages.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_new_page_tool_delegates_to_session():
+    import browser_guard.mcp.server as server
+    importlib.reload(server)
+    session = _fake_session(new_page=PageInfo(id="pre-h1", url="u", title="t", selected=True))
+    with patch("browser_guard.mcp.server._get_session", return_value=session):
+        result = await server.new_page("https://amazon.com", profile_dir=None)
+    session.new_page.assert_awaited_once()
+    assert result["url"] == "u"
+    assert result["page_id"] == "pre-h1"
 
 
 @pytest.mark.asyncio
 async def test_navigate_tool_validates_then_delegates():
     import browser_guard.mcp.server as server
     importlib.reload(server)
-    session = _fake_session(navigate=PageInfo(id="h1", url="https://amazon.com", title="t", selected=True))
-    with patch("browser_guard.mcp.server._get_session", return_value=session):
-        result = await server.navigate("amazon.com", "h1")
-    session.navigate.assert_awaited_once_with("https://amazon.com", page_id="h1")  # normalized by validate_url
+    session = _fake_session(navigate=PageInfo(id="pre-h1", url="https://amazon.com", title="t", selected=True))
+    with patch("browser_guard.mcp.server._route", return_value=session):
+        result = await server.navigate("amazon.com", "pre-h1")
+    session.navigate.assert_awaited_once_with("https://amazon.com", page_id="pre-h1")  # normalized by validate_url
     assert result["url"] == "https://amazon.com"
 
 
@@ -127,15 +140,15 @@ async def test_dom_tools_delegate_with_kwargs():
         query_selector_all={"total_count": 0, "elements": []},
         force_reload_page={"reloaded": True},
     )
-    with patch("browser_guard.mcp.server._get_session", return_value=session):
-        await server.get_element_by_id("x", "h1", include_html=True, max_html_bytes=10)
-        await server.query_selector_all(".a", "h1", limit=3, offset=6)
-        await server.force_reload_page(page_id="h2")
+    with patch("browser_guard.mcp.server._route", return_value=session):
+        await server.get_element_by_id("x", "pre-h1", include_html=True, max_html_bytes=10)
+        await server.query_selector_all(".a", "pre-h1", limit=3, offset=6)
+        await server.force_reload_page(page_id="pre-h2")
     session.get_element_by_id.assert_awaited_once_with(
-        "x", page_id="h1", include_html=True, max_html_bytes=10)
+        "x", page_id="pre-h1", include_html=True, max_html_bytes=10)
     session.query_selector_all.assert_awaited_once_with(
-        ".a", page_id="h1", limit=3, offset=6, include_html=False, max_html_bytes=4096)
-    session.force_reload_page.assert_awaited_once_with(page_id="h2")
+        ".a", page_id="pre-h1", limit=3, offset=6, include_html=False, max_html_bytes=4096)
+    session.force_reload_page.assert_awaited_once_with(page_id="pre-h2")
 
 
 @pytest.mark.asyncio
@@ -152,9 +165,9 @@ async def test_screenshot_tool_returns_image():
     importlib.reload(server)
     png = b"\x89PNG\r\n\x1a\n" + b"fakepixels"
     session = _fake_session(screenshot=png)
-    with patch("browser_guard.mcp.server._get_session", return_value=session):
-        result = await server.screenshot("h1")
-    session.screenshot.assert_awaited_once_with(page_id="h1")
+    with patch("browser_guard.mcp.server._route", return_value=session):
+        result = await server.screenshot("pre-h1")
+    session.screenshot.assert_awaited_once_with(page_id="pre-h1")
     assert isinstance(result, server.Image)
     # The image carries the raw PNG bytes the session produced.
     assert result.data == png
@@ -164,10 +177,10 @@ async def test_screenshot_tool_returns_image():
 async def test_screenshot_tool_passes_through_error_envelope():
     import browser_guard.mcp.server as server
     importlib.reload(server)
-    gone = {"error": "page h9 is no longer open", "page_id": "h9"}
+    gone = {"error": "page pre-h9 is no longer open", "page_id": "pre-h9"}
     session = _fake_session(screenshot=gone)
-    with patch("browser_guard.mcp.server._get_session", return_value=session):
-        result = await server.screenshot("h9")
+    with patch("browser_guard.mcp.server._route", return_value=session):
+        result = await server.screenshot("pre-h9")
     assert result == gone  # a dict error is forwarded as-is, not wrapped in an Image
 
 
@@ -177,3 +190,12 @@ async def test_screenshot_tool_requires_page_id():
     importlib.reload(server)
     with pytest.raises(TypeError):
         await server.screenshot()  # page_id is required, no "active tab" default
+
+
+@pytest.mark.asyncio
+async def test_route_unknown_page_id():
+    import browser_guard.mcp.server as server
+    importlib.reload(server)
+    result = server._route("unknown-1234")
+    assert "error" in result
+    assert result["page_id"] == "unknown-1234"

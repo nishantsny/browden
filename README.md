@@ -12,8 +12,8 @@ Eleven tools, mapped to a swappable `WebNavigatorBackend`.
 
 | Tool          | Purpose                                              |
 | ------------- | ---------------------------------------------------- |
-| `list_pages`  | List all open tabs.                                  |
-| `new_page`    | Open a new tab, optionally at a URL.                 |
+| `list_pages`  | List all open tabs across all profiles.              |
+| `new_page`    | Open a new tab, optionally at a URL and profile_dir. |
 | `close_page`  | Close a tab by id (refuses the last one).            |
 | `select_page` | Switch the active tab.                               |
 | `navigate`    | Navigate a named tab to a URL.                       |
@@ -82,10 +82,10 @@ human-run browser. The Chrome binary is auto-discovered on `PATH`
 
 ## Profiles & concurrency
 
-Every tool takes an optional **`profile_dir`**. Omit it and the request runs
+`new_page` takes an optional **`profile_dir`**. Omit it and the request runs
 against the shared default profile above. Pass a path and the request runs in
 its own Chrome profile (`--user-data-dir`) — the server keeps **one Chrome
-session per profile directory**, created on first use.
+session per profile directory**, created locklessly on first use.
 
 This is what makes concurrency possible. A single Selenium session has one
 focused window, and the server does **not** lock concurrent requests — so
@@ -104,9 +104,8 @@ here, not Chrome; CDP/Playwright expose per-tab concurrency directly.)
 
 Two things to keep in mind:
 
-- A `page_id` belongs to the profile that opened it. Pass the **same
-  `profile_dir`** on every follow-up call for that tab — a handle from one
-  profile is meaningless in another.
+- Each `page_id` is globally unique and encodes its profile path. You do not
+  need to pass `profile_dir` to follow-up tools (they will route automatically).
 - Each profile is an independent, isolated browser: separate cookies, storage,
   and logins. They share nothing.
 

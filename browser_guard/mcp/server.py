@@ -1,5 +1,8 @@
 import atexit
+import asyncio
+import hashlib
 import os
+from typing import NamedTuple
 from pathlib import Path
 
 from ..common.logger import logger
@@ -27,7 +30,9 @@ _INSTRUCTIONS = (
     "each to return before making the next. Firing calls in parallel — even "
     "against different tabs (page_ids) — races over the shared focused window "
     "and gives undefined results. (Distinct profiles are independent Chrome "
-    "sessions and may run concurrently.)"
+    "sessions and may run concurrently.)\n\n"
+    "Each page_id is globally unique and encodes its profile; pass it back verbatim. "
+    "Profile is chosen only at new_page."
 )
 
 mcp = FastMCP(
@@ -46,7 +51,8 @@ logger.info("Browser Guard MCP module initialized")
 # since distinct --user-data-dir profiles don't share window focus or the
 # per-dir SingletonLock. The default (profile_dir=None) maps to the backend's
 # shared default profile, so existing single-profile behaviour is unchanged.
-_sessions: dict[str, PageSession] = {}
+_SessionEntry = NamedTuple("_SessionEntry", [("profile_path", str), ("session", PageSession)])
+_sessions: dict[str, _SessionEntry] = {}
 _atexit_registered = False
 
 
@@ -62,40 +68,79 @@ def _profile_key(profile_dir: str | None) -> str:
     return str(selenium_backend.PROFILE_DIR)
 
 
-def _get_session(profile_dir: str | None = None) -> PageSession:
-    """Lazily build (and cache) the coordinator for ``profile_dir``.
+def _profile_digest(key: str) -> str:
+    return hashlib.sha256(key.encode()).hexdigest()[:8]
 
-    Called from inside a tool coroutine, so an event loop is already running —
-    safe for ``PageSession.__init__`` to ``asyncio.create_task`` the reaper.
-    Never invoked at import time.
-    """
+
+def _get_session(profile_dir: str | None = None) -> PageSession:
+    """Lazily build (and cache) the coordinator for ``profile_dir`` using a lockless pattern."""
     global _atexit_registered
     key = _profile_key(profile_dir)
-    session = _sessions.get(key)
-    if session is None:
-        logger.info(f"Initializing PageSession (profile={key})")
-        session = PageSession(SeleniumChromeBackend(profile_dir=profile_dir))
-        _sessions[key] = session
+    digest = _profile_digest(key)
+    candidate = _SessionEntry(key, PageSession(SeleniumChromeBackend(profile_dir=profile_dir, id_namespace=digest), start_reaper=False))
+    
+    entry = _sessions.setdefault(digest, candidate)
+    if entry is candidate:
+        logger.info(f"Initialized new PageSession (profile={key})")
         if not _atexit_registered:
             atexit.register(lambda: logger.info("MCP Server shutting down"))
             _atexit_registered = True
-    return session
+    elif entry.profile_path != key:
+        raise ValueError(f"Profile digest collision: {key} vs {entry.profile_path}")
+
+    entry.session.start_reaper()
+    return entry.session
+
+
+def _unknown_page(page_id: str) -> dict:
+    return {
+        "error": "unknown page_id — its profile has no active session; call new_page to start one (or list_pages)",
+        "page_id": page_id
+    }
+
+
+def _route(page_id: str) -> PageSession | dict:
+    digest, _, _ = page_id.partition("-")
+    entry = _sessions.get(digest)
+    if entry is None:
+        return _unknown_page(page_id)
+    return entry.session
 
 
 # -- navigation tools -------------------------------------------------------
 
 @mcp.tool()
-async def list_pages(profile_dir: str | None = None) -> list[dict]:
-    """List all open browser tabs. Optional profile_dir selects an independent Chrome profile.
+async def list_pages() -> list[dict]:
+    """List all open browser tabs across all sessions."""
+    logger.info("Tool called: list_pages")
+    if not _sessions:
+        return []
 
-    Multiple tabs may be open, but only one can be driven at a time within a
-    profile: issue tab calls sequentially — concurrent requests (even to
-    different page_ids) race over the shared focused window.
-    """
-    logger.info(f"Tool called: list_pages (profile_dir={profile_dir!r})")
-    result = [p.__dict__ for p in await _get_session(profile_dir).list_pages()]
+    async def _fetch(entry: _SessionEntry):
+        try:
+            pages = await entry.session.list_pages()
+            return [
+                {
+                    "page_id": p.id,
+                    "url": p.url,
+                    "title": p.title,
+                    "selected": p.selected,
+                    "profile_dir": entry.profile_path
+                }
+                for p in pages
+            ]
+        except Exception as e:
+            return [{"profile_dir": entry.profile_path, "error": str(e)}]
+
+    results = await asyncio.gather(*[_fetch(e) for e in _sessions.values()], return_exceptions=True)
+    flat = []
+    for res in results:
+        if isinstance(res, Exception):
+            pass
+        else:
+            flat.extend(res)
     logger.info("Tool finished: list_pages")
-    return result
+    return flat
 
 
 @mcp.tool()
@@ -112,46 +157,63 @@ async def new_page(url: str | None = None, profile_dir: str | None = None) -> di
     logger.info(f"Tool called: new_page (url={url!r}, profile_dir={profile_dir!r})")
     if url:
         url = validate_url(url, _ALLOWLIST.section("read"))
-    result = (await _get_session(profile_dir).new_page(url)).__dict__
+    
+    session = _get_session(profile_dir)
+    res = await session.new_page(url)
+    result = {
+        "page_id": res.id,
+        "url": res.url,
+        "title": res.title,
+        "selected": res.selected,
+        "profile_dir": _profile_key(profile_dir)
+    }
     logger.info("Tool finished: new_page")
     return result
 
 
 @mcp.tool()
-async def close_page(page_id: str, profile_dir: str | None = None) -> dict:
-    """Close a tab by id. profile_dir must match the profile the page_id belongs to."""
-    logger.info(f"Tool called: close_page (page_id={page_id!r}, profile_dir={profile_dir!r})")
-    await _get_session(profile_dir).close_page(page_id)
+async def close_page(page_id: str) -> dict:
+    """Close a tab by id."""
+    logger.info(f"Tool called: close_page (page_id={page_id!r})")
+    session = _route(page_id)
+    if isinstance(session, dict): return session
+    await session.close_page(page_id)
     logger.info("Tool finished: close_page")
     return {"closed": page_id}
 
 
 @mcp.tool()
-async def select_page(page_id: str, profile_dir: str | None = None) -> dict:
-    """Switch the active tab. profile_dir must match the profile the page_id belongs to."""
-    logger.info(f"Tool called: select_page (page_id={page_id!r}, profile_dir={profile_dir!r})")
-    await _get_session(profile_dir).select_page(page_id)
+async def select_page(page_id: str) -> dict:
+    """Switch the active tab."""
+    logger.info(f"Tool called: select_page (page_id={page_id!r})")
+    session = _route(page_id)
+    if isinstance(session, dict): return session
+    await session.select_page(page_id)
     logger.info("Tool finished: select_page")
     return {"selected": page_id}
 
 
 @mcp.tool()
-async def navigate(url: str, page_id: str, profile_dir: str | None = None) -> dict:
-    """Navigate the named tab to url. Url is gated by the per-host allowlist (query strings and fragments pass through).
-
-    profile_dir must match the profile the page_id belongs to.
-    """
-    logger.info(f"Tool called: navigate (url={url!r}, page_id={page_id!r}, profile_dir={profile_dir!r})")
+async def navigate(url: str, page_id: str) -> dict:
+    """Navigate the named tab to url. Url is gated by the per-host allowlist (query strings and fragments pass through)."""
+    logger.info(f"Tool called: navigate (url={url!r}, page_id={page_id!r})")
+    session = _route(page_id)
+    if isinstance(session, dict): return session
     url = validate_url(url, _ALLOWLIST.section("read"))
-    result = await _get_session(profile_dir).navigate(url, page_id=page_id)
+    result = await session.navigate(url, page_id=page_id)
     logger.info("Tool finished: navigate")
-    return result if isinstance(result, dict) else result.__dict__
+    return result if isinstance(result, dict) else {
+        "page_id": result.id,
+        "url": result.url,
+        "title": result.title,
+        "selected": result.selected
+    }
 
 
 # -- write tools ------------------------------------------------------------
 
 @mcp.tool()
-async def add_to_cart(css_selector: str, page_id: str, profile_dir: str | None = None) -> dict:
+async def add_to_cart(css_selector: str, page_id: str) -> dict:
     """Click an "Add to cart" control on a tab — the only write action.
 
     Two server-side gates, both default-deny, must pass:
@@ -161,11 +223,10 @@ async def add_to_cart(css_selector: str, page_id: str, profile_dir: str | None =
          trustworthy signals, a genuine add-to-cart button — not Buy Now,
          checkout, subscribe, remove, or an agent-targeted decoy.
     Either gate failing raises a ValidationError and nothing is clicked.
-
-    profile_dir must match the profile the page_id belongs to.
     """
-    logger.info(f"Tool called: add_to_cart (css_selector={css_selector!r}, page_id={page_id!r}, profile_dir={profile_dir!r})")
-    session = _get_session(profile_dir)
+    logger.info(f"Tool called: add_to_cart (css_selector={css_selector!r}, page_id={page_id!r})")
+    session = _route(page_id)
+    if isinstance(session, dict): return session
 
     # Gate 1: per-action host allowlist, checked against the tab's live URL.
     url = await session.current_url(page_id=page_id)
@@ -212,11 +273,12 @@ async def add_to_cart(css_selector: str, page_id: str, profile_dir: str | None =
 
 @mcp.tool()
 async def get_element_by_id(element_id: str, page_id: str,
-                            include_html: bool = False, max_html_bytes: int = 4096,
-                            profile_dir: str | None = None) -> dict:
+                            include_html: bool = False, max_html_bytes: int = 4096) -> dict:
     """document.getElementById on a tab — one element node, or found=false (not an error) if absent."""
-    logger.info(f"Tool called: get_element_by_id (element_id={element_id!r}, page_id={page_id!r}, profile_dir={profile_dir!r})")
-    result = await _get_session(profile_dir).get_element_by_id(
+    logger.info(f"Tool called: get_element_by_id (element_id={element_id!r}, page_id={page_id!r})")
+    session = _route(page_id)
+    if isinstance(session, dict): return session
+    result = await session.get_element_by_id(
         element_id, page_id=page_id, include_html=include_html, max_html_bytes=max_html_bytes)
     logger.info("Tool finished: get_element_by_id")
     return result
@@ -225,11 +287,12 @@ async def get_element_by_id(element_id: str, page_id: str,
 @mcp.tool()
 async def get_elements_by_class_name(class_names: str, page_id: str,
                                      limit: int = 10, offset: int = 0,
-                                     include_html: bool = False, max_html_bytes: int = 4096,
-                                     profile_dir: str | None = None) -> dict:
+                                     include_html: bool = False, max_html_bytes: int = 4096) -> dict:
     """document.getElementsByClassName on a tab — space-separated names, element must have ALL. Paginated."""
-    logger.info(f"Tool called: get_elements_by_class_name (class_names={class_names!r}, page_id={page_id!r}, profile_dir={profile_dir!r})")
-    result = await _get_session(profile_dir).get_elements_by_class_name(
+    logger.info(f"Tool called: get_elements_by_class_name (class_names={class_names!r}, page_id={page_id!r})")
+    session = _route(page_id)
+    if isinstance(session, dict): return session
+    result = await session.get_elements_by_class_name(
         class_names, page_id=page_id, limit=limit, offset=offset,
         include_html=include_html, max_html_bytes=max_html_bytes)
     logger.info("Tool finished: get_elements_by_class_name")
@@ -238,11 +301,12 @@ async def get_elements_by_class_name(class_names: str, page_id: str,
 
 @mcp.tool()
 async def query_selector(css_selector: str, page_id: str,
-                         include_html: bool = False, max_html_bytes: int = 4096,
-                         profile_dir: str | None = None) -> dict:
+                         include_html: bool = False, max_html_bytes: int = 4096) -> dict:
     """document.querySelector on a tab — one element node, or found=false if no match. Invalid CSS → error."""
-    logger.info(f"Tool called: query_selector (css_selector={css_selector!r}, page_id={page_id!r}, profile_dir={profile_dir!r})")
-    result = await _get_session(profile_dir).query_selector(
+    logger.info(f"Tool called: query_selector (css_selector={css_selector!r}, page_id={page_id!r})")
+    session = _route(page_id)
+    if isinstance(session, dict): return session
+    result = await session.query_selector(
         css_selector, page_id=page_id, include_html=include_html, max_html_bytes=max_html_bytes)
     logger.info("Tool finished: query_selector")
     return result
@@ -251,11 +315,12 @@ async def query_selector(css_selector: str, page_id: str,
 @mcp.tool()
 async def query_selector_all(css_selector: str, page_id: str,
                              limit: int = 10, offset: int = 0,
-                             include_html: bool = False, max_html_bytes: int = 4096,
-                             profile_dir: str | None = None) -> dict:
+                             include_html: bool = False, max_html_bytes: int = 4096) -> dict:
     """document.querySelectorAll on a tab — paginated list of element nodes. Invalid CSS → error."""
-    logger.info(f"Tool called: query_selector_all (css_selector={css_selector!r}, page_id={page_id!r}, profile_dir={profile_dir!r})")
-    result = await _get_session(profile_dir).query_selector_all(
+    logger.info(f"Tool called: query_selector_all (css_selector={css_selector!r}, page_id={page_id!r})")
+    session = _route(page_id)
+    if isinstance(session, dict): return session
+    result = await session.query_selector_all(
         css_selector, page_id=page_id, limit=limit, offset=offset,
         include_html=include_html, max_html_bytes=max_html_bytes)
     logger.info("Tool finished: query_selector_all")
@@ -263,15 +328,17 @@ async def query_selector_all(css_selector: str, page_id: str,
 
 
 @mcp.tool()
-async def screenshot(page_id: str, profile_dir: str | None = None):
+async def screenshot(page_id: str):
     """Capture a PNG screenshot of a tab's current viewport.
 
     Read-only: it grabs live pixels from the rendered page and never mutates it
     or the DOM cache. Returns the image on success, or
     ``{"error": ..., "page_id": ...}`` if the tab is no longer open.
     """
-    logger.info(f"Tool called: screenshot (page_id={page_id!r}, profile_dir={profile_dir!r})")
-    result = await _get_session(profile_dir).screenshot(page_id=page_id)
+    logger.info(f"Tool called: screenshot (page_id={page_id!r})")
+    session = _route(page_id)
+    if isinstance(session, dict): return session
+    result = await session.screenshot(page_id=page_id)
     if isinstance(result, dict):  # tab gone — structured error, not an image
         return result
     logger.info("Tool finished: screenshot")
@@ -279,12 +346,19 @@ async def screenshot(page_id: str, profile_dir: str | None = None):
 
 
 @mcp.tool()
-async def force_reload_page(page_id: str, profile_dir: str | None = None) -> dict:
+async def force_reload_page(page_id: str) -> dict:
     """Reload the named tab and refresh its cached DOM."""
-    logger.info(f"Tool called: force_reload_page (page_id={page_id!r}, profile_dir={profile_dir!r})")
-    result = await _get_session(profile_dir).force_reload_page(page_id=page_id)
+    logger.info(f"Tool called: force_reload_page (page_id={page_id!r})")
+    session = _route(page_id)
+    if isinstance(session, dict): return session
+    result = await session.force_reload_page(page_id=page_id)
     logger.info("Tool finished: force_reload_page")
-    return result
+    return result if isinstance(result, dict) else {
+        "page_id": result.id,
+        "url": result.url,
+        "title": result.title,
+        "selected": result.selected
+    }
 
 
 if __name__ == "__main__":

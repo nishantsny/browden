@@ -220,12 +220,26 @@ class SeleniumChromeBackend(WebNavigatorBackend):
     other's window focus.
     """
 
-    def __init__(self, profile_dir=None):
+    def __init__(self, profile_dir=None, id_namespace: str | None = None):
         self._driver = None
         self._chrome_proc = None
         # None -> resolve to the module default lazily in _drv(), so an
         # env/monkeypatch of PROFILE_DIR still takes effect.
         self._profile_dir = Path(profile_dir) if profile_dir else None
+        self.id_namespace = id_namespace
+
+    def _public(self, handle: str) -> str:
+        if self.id_namespace is not None:
+            return f"{self.id_namespace}-{handle}"
+        return handle
+
+    def _internal(self, page_id: str) -> str:
+        if self.id_namespace is not None:
+            prefix = f"{self.id_namespace}-"
+            if not page_id.startswith(prefix):
+                raise PageNotFoundError(f"invalid page_id prefix for {page_id!r}")
+            return page_id[len(prefix):]
+        return page_id
 
     @property
     def profile_dir(self) -> Path:
@@ -282,7 +296,7 @@ class SeleniumChromeBackend(WebNavigatorBackend):
         for handle in drv.window_handles:
             drv.switch_to.window(handle)
             pages.append(PageInfo(
-                id=handle,
+                id=self._public(handle),
                 url=drv.current_url,
                 title=drv.title,
                 selected=(handle == current_handle),
@@ -291,7 +305,7 @@ class SeleniumChromeBackend(WebNavigatorBackend):
         return pages
 
     def list_page_ids(self) -> list[str]:
-        return list(self._drv().window_handles)
+        return [self._public(h) for h in self._drv().window_handles]
 
     def new_page(self, url: str | None = None) -> PageInfo:
         drv = self._drv()
@@ -300,7 +314,7 @@ class SeleniumChromeBackend(WebNavigatorBackend):
             drv.get(url)
             _wait_for_title(drv)
         return PageInfo(
-            id=drv.current_window_handle,
+            id=self._public(drv.current_window_handle),
             url=drv.current_url,
             title=drv.title,
             selected=True,
@@ -310,7 +324,7 @@ class SeleniumChromeBackend(WebNavigatorBackend):
         drv = self._drv()
         if len(drv.window_handles) == 1:
             raise ValueError("Cannot close the last tab")
-        _switch(drv, page_id)
+        _switch(drv, self._internal(page_id))
         drv.close()
         # drv.close() leaves the driver focused on the now-dead handle. The next
         # command — or _drv()'s health check, which reads current_window_handle —
@@ -322,7 +336,7 @@ class SeleniumChromeBackend(WebNavigatorBackend):
             drv.switch_to.window(remaining[0])
 
     def select_page(self, page_id: str) -> None:
-        _switch(self._drv(), page_id)
+        _switch(self._drv(), self._internal(page_id))
 
     def navigate(self, url: str) -> PageInfo:
         drv = self._drv()
@@ -332,7 +346,7 @@ class SeleniumChromeBackend(WebNavigatorBackend):
             raise PageNotFoundError("there is no active tab to navigate") from None
         _wait_for_title(drv)
         return PageInfo(
-            id=drv.current_window_handle,
+            id=self._public(drv.current_window_handle),
             url=drv.current_url,
             title=drv.title,
             selected=True,
@@ -340,24 +354,24 @@ class SeleniumChromeBackend(WebNavigatorBackend):
 
     def current_page_id(self) -> str:
         try:
-            return self._drv().current_window_handle
+            return self._public(self._drv().current_window_handle)
         except NoSuchWindowException:
             raise PageNotFoundError("there is no active tab") from None
 
     def get_page_source(self, page_id: str | None = None) -> str:
         drv = self._drv()
         if page_id:
-            _switch(drv, page_id)
+            _switch(drv, self._internal(page_id))
         return drv.page_source
 
     def reload(self, page_id: str | None = None) -> PageInfo:
         drv = self._drv()
         if page_id:
-            _switch(drv, page_id)
+            _switch(drv, self._internal(page_id))
         drv.refresh()
         _wait_for_title(drv)
         return PageInfo(
-            id=drv.current_window_handle,
+            id=self._public(drv.current_window_handle),
             url=drv.current_url,
             title=drv.title,
             selected=True,
@@ -372,7 +386,7 @@ class SeleniumChromeBackend(WebNavigatorBackend):
     def screenshot(self, page_id: str | None = None) -> bytes:
         drv = self._drv()
         if page_id:
-            _switch(drv, page_id)
+            _switch(drv, self._internal(page_id))
         try:
             return drv.get_screenshot_as_png()
         except NoSuchWindowException:
@@ -400,7 +414,7 @@ class SeleniumChromeBackend(WebNavigatorBackend):
         _wait_for_title(drv)
         return {
             "clicked": True,
-            "page_id": drv.current_window_handle,
+            "page_id": self._public(drv.current_window_handle),
             "url_before": url_before,
             "url": drv.current_url,
             "title": drv.title,
