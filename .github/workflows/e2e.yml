@@ -21,6 +21,7 @@ jobs:
           python-version: "3.12"
 
       - name: Set up Chrome
+        id: setup-chrome
         uses: browser-actions/setup-chrome@v2
         with:
           chrome-version: stable
@@ -34,4 +35,8 @@ jobs:
         run: pytest test/unit -q
 
       - name: Run e2e tests (headless Chrome)
+        # The backend now launches Chrome directly (not via chromedriver), so it
+        # needs the binary path; point it at the one setup-chrome installed.
+        env:
+          BROWSER_GUARD_CHROME_BINARY: ${{ steps.setup-chrome.outputs.chrome-path }}
         run: pytest test/e2e -q

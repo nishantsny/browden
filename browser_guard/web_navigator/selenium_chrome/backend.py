@@ -1,4 +1,10 @@
 import os
+import shutil
+import socket
+import subprocess
+import time
+import urllib.error
+import urllib.request
 from pathlib import Path
 
 from ...common.logger import logger
@@ -45,6 +51,133 @@ def _headless_enabled() -> bool:
 PROFILE_DIR = _default_profile_dir()
 SINGLETON_FILES = ("SingletonLock", "SingletonCookie", "SingletonSocket")
 TITLE_WAIT_SECONDS = 3
+# Cold Chrome starts can take several seconds; under concurrent launches (many
+# profiles at once) plus a loaded host, give the DevTools endpoint generous
+# margin before declaring the launch failed.
+DEVTOOLS_WAIT_SECONDS = 60
+CHROME_BINARY_NAMES = (
+    "google-chrome",
+    "google-chrome-stable",
+    "chromium",
+    "chromium-browser",
+    "chrome",
+)
+
+
+def _find_chrome_binary() -> str:
+    """Locate the Chrome/Chromium executable to launch directly.
+
+    Honours ``BROWSER_GUARD_CHROME_BINARY`` (or the common ``CHROME_BIN``)
+    first, then falls back to the usual binary names on PATH.
+    """
+    explicit = os.environ.get("BROWSER_GUARD_CHROME_BINARY") or os.environ.get("CHROME_BIN")
+    if explicit:
+        return explicit
+    for name in CHROME_BINARY_NAMES:
+        found = shutil.which(name)
+        if found:
+            return found
+    raise RuntimeError(
+        "Could not find a Chrome/Chromium binary on PATH; "
+        "set BROWSER_GUARD_CHROME_BINARY to its full path."
+    )
+
+
+def _free_port() -> int:
+    """Reserve an ephemeral localhost port for Chrome's DevTools endpoint."""
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.bind(("127.0.0.1", 0))
+        return s.getsockname()[1]
+
+
+def _chrome_args(profile_dir: Path, port: int) -> list[str]:
+    """Build the command line for a human-looking Chrome.
+
+    Deliberately omits every automation switch chromedriver would otherwise
+    inject when *it* launches Chrome (``--enable-automation``, the
+    ``AutomationControlled`` blink feature, ``--test-type``, …). Because we
+    start Chrome ourselves and Selenium only attaches over the DevTools port,
+    ``navigator.webdriver`` stays false and there is no "controlled by
+    automated test software" infobar — the window passes for an ordinary,
+    human-driven browser. Only benign flags a real launcher commonly sets are
+    included here.
+    """
+    args = [
+        _find_chrome_binary(),
+        f"--user-data-dir={profile_dir}",
+        f"--remote-debugging-port={port}",
+        # Chrome >= 111 rejects DevTools websocket connections from a foreign
+        # origin unless this is set; Selenium's attach needs it.
+        "--remote-allow-origins=*",
+        "--no-first-run",
+        "--no-default-browser-check",
+    ]
+    if _headless_enabled():
+        # New headless mode + the flags a sandboxed CI container needs.
+        logger.info("Launching Chrome headless")
+        args += [
+            "--headless=new",
+            "--no-sandbox",
+            "--disable-dev-shm-usage",
+            "--disable-gpu",
+            "--window-size=1280,1024",
+        ]
+    return args
+
+
+def _wait_for_devtools(port: int, proc: subprocess.Popen, timeout: float = DEVTOOLS_WAIT_SECONDS) -> None:
+    """Block until Chrome's DevTools HTTP endpoint answers, or fail loudly.
+
+    Bails early (rather than waiting out the timeout) if the Chrome process
+    exits before the port comes up.
+    """
+    url = f"http://127.0.0.1:{port}/json/version"
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if proc.poll() is not None:
+            raise RuntimeError(
+                f"Chrome exited (code {proc.returncode}) before its DevTools "
+                f"endpoint came up on port {port}."
+            )
+        try:
+            with urllib.request.urlopen(url, timeout=1) as resp:
+                if resp.status == 200:
+                    return
+        except (urllib.error.URLError, OSError):
+            time.sleep(0.1)
+    raise RuntimeError(f"Chrome DevTools endpoint not ready on port {port} after {timeout}s.")
+
+
+def _terminate(proc: subprocess.Popen | None) -> None:
+    """Stop a Chrome subprocess, escalating to kill if it lingers."""
+    if proc is None or proc.poll() is not None:
+        return
+    try:
+        proc.terminate()
+        try:
+            proc.wait(timeout=10)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+    except Exception as e:
+        logger.warning(f"Failed to terminate Chrome process: {e}")
+
+
+def _launch_chrome(profile_dir: Path) -> tuple[subprocess.Popen, int]:
+    """Launch Chrome directly (no chromedriver) with remote debugging on.
+
+    Returns the running process and the DevTools port to attach Selenium to.
+    """
+    _clear_stale_singletons(profile_dir)
+    port = _free_port()
+    args = _chrome_args(profile_dir, port)
+    logger.info(f"Launching Chrome directly: {' '.join(args)}")
+    proc = subprocess.Popen(args, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    try:
+        _wait_for_devtools(port, proc)
+    except Exception:
+        _terminate(proc)
+        raise
+    return proc, port
 
 
 def _wait_for_title(drv, timeout: float = TITLE_WAIT_SECONDS) -> None:
@@ -90,6 +223,7 @@ class SeleniumChromeBackend(WebNavigatorBackend):
 
     def __init__(self, profile_dir=None):
         self._driver = None
+        self._chrome_proc = None
         # None -> resolve to the module default lazily in _drv(), so an
         # env/monkeypatch of PROFILE_DIR still takes effect.
         self._profile_dir = Path(profile_dir) if profile_dir else None
@@ -97,6 +231,23 @@ class SeleniumChromeBackend(WebNavigatorBackend):
     @property
     def profile_dir(self) -> Path:
         return self._profile_dir or PROFILE_DIR
+
+    def _teardown(self) -> None:
+        """Drop the WebDriver session and stop the Chrome we launched.
+
+        Selenium only *attached* to Chrome over the DevTools port, so
+        ``driver.quit()`` detaches without closing the browser — we own the
+        process and must terminate it ourselves, or it (and its SingletonLock)
+        outlives the dead session and blocks the next launch.
+        """
+        if self._driver is not None:
+            try:
+                self._driver.quit()
+            except Exception:
+                pass
+            self._driver = None
+        _terminate(self._chrome_proc)
+        self._chrome_proc = None
 
     def _drv(self):
         if self._driver is not None:
@@ -109,26 +260,20 @@ class SeleniumChromeBackend(WebNavigatorBackend):
                 _ = self._driver.current_window_handle
             except Exception:
                 # If either check fails, the state is bad; clean up and restart
-                try:
-                    self._driver.quit()
-                except Exception:
-                    pass
-                self._driver = None
+                self._teardown()
         if self._driver is None:
             profile = self.profile_dir
             logger.info(f"Starting new Chrome session (profile={profile})")
-            _clear_stale_singletons(profile)
+            self._chrome_proc, port = _launch_chrome(profile)
+            # Attach to the Chrome we just launched instead of letting
+            # chromedriver spawn its own (automation-flagged) instance.
             opts = ChromeOptions()
-            opts.add_argument(f"--user-data-dir={profile}")
-            if _headless_enabled():
-                # New headless mode + the flags a sandboxed CI container needs.
-                logger.info("Launching Chrome headless")
-                opts.add_argument("--headless=new")
-                opts.add_argument("--no-sandbox")
-                opts.add_argument("--disable-dev-shm-usage")
-                opts.add_argument("--disable-gpu")
-                opts.add_argument("--window-size=1280,1024")
-            self._driver = webdriver.Chrome(options=opts)
+            opts.add_experimental_option("debuggerAddress", f"127.0.0.1:{port}")
+            try:
+                self._driver = webdriver.Chrome(options=opts)
+            except Exception:
+                self._teardown()
+                raise
         return self._driver
 
     def list_pages(self) -> list[PageInfo]:
