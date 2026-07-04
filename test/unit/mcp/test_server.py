@@ -6,6 +6,23 @@ import pytest
 from browser_guard.common.page import PageInfo
 
 
+def test_server_instructions_state_concurrency_contract():
+    """The single-tab-at-a-time contract must reach the agent via MCP instructions."""
+    import browser_guard.mcp.server as server
+    ins = (server.mcp.instructions or "").lower()
+    assert "one at a time" in ins
+    assert "page_id" in ins  # spells out that even different tabs race
+
+
+def test_tab_entry_point_docs_warn_about_concurrency():
+    """new_page / list_pages descriptions (what the agent reads) carry the warning."""
+    import browser_guard.mcp.server as server
+    for name in ("new_page", "list_pages"):
+        doc = (getattr(server, name).__doc__ or "").lower()
+        assert "sequential" in doc or "one tab" in doc
+        assert "race" in doc
+
+
 def test_no_backend_or_session_at_import():
     """Importing server must not construct a backend, a PageSession, or a reaper task."""
     with patch("browser_guard.web_navigator.selenium_chrome.SeleniumChromeBackend") as mock_backend, \

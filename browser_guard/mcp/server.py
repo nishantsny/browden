@@ -20,8 +20,19 @@ from .validator import (
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 8000
 
+_INSTRUCTIONS = (
+    "browser-guard drives a real Chrome session. Within a single profile there "
+    "is ONE browser session with one focused window, and the server does NOT "
+    "serialize concurrent requests. Issue tool calls one at a time and wait for "
+    "each to return before making the next. Firing calls in parallel — even "
+    "against different tabs (page_ids) — races over the shared focused window "
+    "and gives undefined results. (Distinct profiles are independent Chrome "
+    "sessions and may run concurrently.)"
+)
+
 mcp = FastMCP(
     "browser-guard",
+    instructions=_INSTRUCTIONS,
     host=os.environ.get("MCP_HOST", DEFAULT_HOST),
     port=int(os.environ.get("MCP_PORT", DEFAULT_PORT))
 )
@@ -75,7 +86,12 @@ def _get_session(profile_dir: str | None = None) -> PageSession:
 
 @mcp.tool()
 async def list_pages(profile_dir: str | None = None) -> list[dict]:
-    """List all open browser tabs. Optional profile_dir selects an independent Chrome profile."""
+    """List all open browser tabs. Optional profile_dir selects an independent Chrome profile.
+
+    Multiple tabs may be open, but only one can be driven at a time within a
+    profile: issue tab calls sequentially — concurrent requests (even to
+    different page_ids) race over the shared focused window.
+    """
     logger.info(f"Tool called: list_pages (profile_dir={profile_dir!r})")
     result = [p.__dict__ for p in await _get_session(profile_dir).list_pages()]
     logger.info("Tool finished: list_pages")
@@ -88,6 +104,10 @@ async def new_page(url: str | None = None, profile_dir: str | None = None) -> di
 
     Optional profile_dir runs the request in an independent Chrome profile; the
     returned page_id is only valid for that same profile.
+
+    Only one tab can be driven at a time within a profile: interact with tabs
+    sequentially — concurrent requests (even to different page_ids) race over
+    the shared focused window and give undefined results.
     """
     logger.info(f"Tool called: new_page (url={url!r}, profile_dir={profile_dir!r})")
     if url:

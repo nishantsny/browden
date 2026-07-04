@@ -88,12 +88,19 @@ its own Chrome profile (`--user-data-dir`) — the server keeps **one Chrome
 session per profile directory**, created on first use.
 
 This is what makes concurrency possible. A single Selenium session has one
-focused window, so two requests sharing a profile are serialized through it.
-But a distinct `profile_dir` is a *separate Chrome process and WebDriver
-session* — distinct profiles don't share window focus or the per-directory
-`SingletonLock` — so requests on different profiles run genuinely in parallel.
-(Selenium's single-session/single-focus model is the constraint here, not
-Chrome; CDP/Playwright expose per-tab concurrency directly.)
+focused window, and the server does **not** lock concurrent requests — so
+within a profile you must **drive one tab at a time**: issue tool calls
+sequentially and wait for each to return. Even though a profile can hold
+several tabs, firing calls in parallel — including against *different*
+`page_id`s — races over that shared focused window and gives undefined results.
+(This contract is advertised to agents via the server's MCP `instructions` and
+the `new_page` / `list_pages` tool docs.)
+
+A distinct `profile_dir`, by contrast, is a *separate Chrome process and
+WebDriver session* — distinct profiles don't share window focus or the
+per-directory `SingletonLock` — so requests on different profiles run genuinely
+in parallel. (Selenium's single-session/single-focus model is the constraint
+here, not Chrome; CDP/Playwright expose per-tab concurrency directly.)
 
 Two things to keep in mind:
 
