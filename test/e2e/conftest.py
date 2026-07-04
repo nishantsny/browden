@@ -22,3 +22,30 @@ def _headless_isolated_chrome(tmp_path, monkeypatch):
         tmp_path / "cache" / "browser-guard" / "chrome-profile",
     )
     yield
+
+
+@pytest.fixture(scope="session")
+def mcp_server(tmp_path_factory):
+    import sys
+    import os
+    sys.path.insert(0, os.path.dirname(__file__))
+    from mcp_harness import McpServerHarness
+    cache_dir = tmp_path_factory.mktemp("harness_cache")
+    harness = McpServerHarness(cache_dir)
+    harness.start()
+    yield harness
+    harness.stop()
+
+
+@pytest.fixture
+def mcp_client_session():
+    from contextlib import asynccontextmanager
+    @asynccontextmanager
+    async def _helper(mcp_server):
+        from mcp.client.sse import sse_client
+        from mcp import ClientSession
+        async with sse_client(mcp_server.url) as streams:
+            async with ClientSession(*streams) as session:
+                await session.initialize()
+                yield session
+    return _helper

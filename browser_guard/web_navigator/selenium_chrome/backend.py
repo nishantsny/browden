@@ -18,6 +18,7 @@ from ...dependencies.selenium import (
     webdriver,
 )
 from ..interface import PageNotFoundError, WebNavigatorBackend
+from ..utils.network_utils import get_free_port
 
 
 def _switch(drv, page_id: str) -> None:
@@ -85,9 +86,7 @@ def _find_chrome_binary() -> str:
 
 def _free_port() -> int:
     """Reserve an ephemeral localhost port for Chrome's DevTools endpoint."""
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-        s.bind(("127.0.0.1", 0))
-        return s.getsockname()[1]
+    return get_free_port()
 
 
 def _chrome_args(profile_dir: Path, port: int) -> list[str]:

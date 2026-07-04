@@ -208,6 +208,8 @@ suite never launches a browser). The tests are self-contained — they render an
 inline `data:` page in a throwaway profile, so they need no network and no
 allowlisted host.
 
+**MCP Server Harness**: A portion of the e2e suite deploys the actual MCP server on an ephemeral localhost port to test the FastMCP endpoint itself. This harness automatically provisions an isolated temporary cache and Chrome profile for the test run (no systemd needed).
+
 ```bash
 pytest test/e2e/        # or: pytest test/unit/ test/e2e/ for everything
 ```
