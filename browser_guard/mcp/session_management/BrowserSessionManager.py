@@ -138,9 +138,13 @@ class BrowserSessionManager:
             result.append(t.as_dict(id=self._id(t.per_session_id)))
         return result
 
-    async def new_blank_tab(self) -> dict:
+    async def new_blank_tab(self, max_tabs: int) -> dict:
         self.sweep_idle()
-        tab = await self._run_driver(self._backend.new_blank_tab)
+        def work():
+            if len(self._backend.list_tab_ids()) >= max_tabs:
+                raise RuntimeError(f"session limit of {max_tabs} tabs reached")
+            return self._backend.new_blank_tab()
+        tab = await self._run_driver(work)
         logger.info(f"Created new tab: {tab.per_session_id}")
         self._cache.invalidate(tab.per_session_id)
         self._registry.touch(tab.per_session_id)
