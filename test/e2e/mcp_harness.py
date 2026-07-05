@@ -23,6 +23,7 @@ class McpServerHarness:
         env["MCP_TRANSPORT"] = "sse"
         env["MCP_HOST"] = "127.0.0.1"
         env["MCP_PORT"] = str(self.port)
+        env["BROWSER_GUARD_HEADLESS"] = "1"
         # Set explicitly in the child env
         env["XDG_CACHE_HOME"] = str(self.tmp_path)
         # Pin the allowlist to the repo sample so the test server's policy

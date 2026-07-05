@@ -2,7 +2,7 @@ from dataclasses import dataclass
 
 
 @dataclass
-class PageInfo:
+class TabInfo:
     """Information about an open browser tab."""
     id: str
     url: str

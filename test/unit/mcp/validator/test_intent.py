@@ -12,7 +12,7 @@ def node(tag="input", *, text="", **attrs):
     return {"tag": tag, "id": el_id, "classes": classes, "attributes": attrs, "text": text}
 
 
-# -- the real Amazon add-to-cart button (from the live page) -----------------
+# -- the real Amazon add-to-cart button (from the live tab) -----------------
 
 AMAZON_ATC = node(
     "input",
@@ -74,7 +74,7 @@ def test_hidden_or_disabled_rejected():
 
 
 def test_agent_decoy_rejected():
-    # A page-supplied control marked "for AI agents" must never be trusted, even
+    # A tab-supplied control marked "for AI agents" must never be trusted, even
     # if its text says "Add to cart".
     assert not is_add_to_cart(
         node("input", type="submit", value="Add to cart",

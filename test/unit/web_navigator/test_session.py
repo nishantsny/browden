@@ -2,9 +2,9 @@ import time
 
 import pytest
 
-from browser_guard.common.page import PageInfo
-from browser_guard.web_navigator.interface import PageNotFoundError
-from browser_guard.web_navigator.session import IDLE_TTL_SECONDS, PageSession
+from browser_guard.common.tab import TabInfo
+from browser_guard.web_navigator.interface import TabNotFoundError
+from browser_guard.web_navigator.session import IDLE_TTL_SECONDS, BrowserSessionManager
 
 PAGE_HTML = """
 <html><body>
@@ -19,8 +19,8 @@ PAGE_HTML = """
 class FakeBackend:
     """Records calls; minimal behaviour for the coordinator's needs.
 
-    ``missing`` is a set of page ids that are "no longer open" — touching one
-    raises ``PageNotFoundError``, like the real backend does for a dead handle.
+    ``missing`` is a set of tab ids that are "no longer open" — touching one
+    raises ``TabNotFoundError``, like the real backend does for a dead handle.
     """
 
     def __init__(self):
@@ -29,68 +29,68 @@ class FakeBackend:
         self.calls = []
         self.closed = []
         self.missing: set[str] = set()
-        self.live: set[str] | None = {"h1", "h2"}  # ids list_page_ids reports; None -> it raises
+        self.live: set[str] | None = {"h1", "h2"}  # ids list_tab_ids reports; None -> it raises
         self.close_raises = None  # set to an exception instance to simulate failure
 
-    def _check(self, page_id):
-        if page_id in self.missing:
-            raise PageNotFoundError(f"tab {page_id!r} is not open")
+    def _check(self, tab_id):
+        if tab_id in self.missing:
+            raise TabNotFoundError(f"tab {tab_id!r} is not open")
 
-    def list_pages(self):
-        self.calls.append("list_pages")
-        return [PageInfo(id="h1", url="u1", title="t1", selected=True),
-                PageInfo(id="h2", url="u2", title="t2", selected=False)]
+    def list_tabs(self):
+        self.calls.append("list_tabs")
+        return [TabInfo(id="h1", url="u1", title="t1", selected=True),
+                TabInfo(id="h2", url="u2", title="t2", selected=False)]
 
-    def list_page_ids(self):
-        self.calls.append("list_page_ids")
+    def list_tab_ids(self):
+        self.calls.append("list_tab_ids")
         if self.live is None:
-            raise RuntimeError("list_page_ids unavailable")
+            raise RuntimeError("list_tab_ids unavailable")
         return list(self.live)
 
-    def new_page(self, url=None):
-        self.calls.append(("new_page", url))
-        return PageInfo(id="h2", url=url or "about:blank", title="t", selected=True)
+    def new_blank_tab(self):
+        self.calls.append("new_blank_tab")
+        return TabInfo(id="h2", url="about:blank", title="t", selected=True)
 
-    def close_page(self, page_id):
-        self.calls.append(("close_page", page_id))
+    def close_tab(self, tab_id):
+        self.calls.append(("close_tab", tab_id))
         if self.close_raises is not None:
             raise self.close_raises
-        self._check(page_id)
-        self.closed.append(page_id)
+        self._check(tab_id)
+        self.closed.append(tab_id)
 
-    def select_page(self, page_id):
-        self.calls.append(("select_page", page_id))
-        self._check(page_id)
+    def select_tab(self, tab_id):
+        self.calls.append(("select_tab", tab_id))
+        self._check(tab_id)
 
     def navigate(self, url):
         self.calls.append(("navigate", url))
-        return PageInfo(id="h1", url=url, title="t", selected=True)
+        return TabInfo(id="h1", url=url, title="t", selected=True)
 
-    def current_page_id(self):
-        self.calls.append("current_page_id")
+    def current_tab_id(self):
+        self.calls.append("current_tab_id")
         if self.active in self.missing:
-            raise PageNotFoundError("there is no active tab")
+            raise TabNotFoundError("there is no active tab")
         return self.active
 
-    def get_page_source(self, page_id=None):
-        self.calls.append(("get_page_source", page_id))
-        self._check(page_id)
+    def get_page_source(self, tab_id=None):
+        self.calls.append(("get_page_source", tab_id))
+        self._check(tab_id)
         return self.source
 
-    def reload(self, page_id=None):
-        self.calls.append(("reload", page_id))
-        self._check(page_id)
-        return PageInfo(id=page_id or self.active, url="reloaded-url", title="reloaded-title", selected=True)
+    def reload(self, tab_id=None):
+        self.calls.append(("reload", tab_id))
+        self._check(tab_id)
+        return TabInfo(id=tab_id or self.active, url="reloaded-url", title="reloaded-title", selected=True)
 
-    def screenshot(self, page_id=None):
-        self.calls.append(("screenshot", page_id))
+    def screenshot(self, tab_id=None):
+        self.calls.append(("screenshot", tab_id))
         return b"\x89PNG\r\n\x1a\nfakepng"
 
 
 def make_session(backend=None, clock=None):
     """Tests that don't manipulate time can omit ``clock``; sweep_idle tests pass a
     ``fake_clock()`` instance so they can ``clock.t += seconds`` to advance."""
-    return PageSession(backend or FakeBackend(),
+    return BrowserSessionManager(backend or FakeBackend(),
                        clock=clock or time.monotonic, start_reaper=False)
 
 
@@ -103,45 +103,46 @@ async def test_nav_tools_dispatch_and_touch_registry():
     backend = FakeBackend()
     s = make_session(backend)
 
-    await s.list_pages()
-    assert "list_pages" in backend.calls
+    await s.list_tabs()
+    assert "list_tabs" in backend.calls
     assert set(s._registry._last_access) == {"h1", "h2"}
 
-    await s.select_page("h2")
-    assert ("select_page", "h2") in backend.calls
+    await s.select_tab("h2")
+    assert ("select_tab", "h2") in backend.calls
 
 
 @pytest.mark.asyncio
-async def test_navigate_new_page_close_page_invalidate_cache():
+async def test_navigate_new_blank_tab_close_page_invalidate_cache():
     backend = FakeBackend()
     s = make_session(backend)
 
-    await s.get_element_by_id("logo", page_id="h1")
+    await s.get_element_by_id("logo", tab_id="h1")
     assert "h1" in s._cache._entries
 
-    await s.navigate("https://www.amazon.com/", page_id="h1")
+    await s.navigate("https://www.amazon.com/", tab_id="h1")
     assert "h1" not in s._cache._entries  # navigate busted it
 
-    await s.new_page("https://www.amazon.com/")
-    await s.get_element_by_id("logo", page_id="h2")
+    tab = await s.new_blank_tab()
+    await s.navigate("https://www.amazon.com/", tab_id=tab.id)
+    await s.get_element_by_id("logo", tab_id="h2")
     assert "h2" in s._cache._entries
-    await s.close_page("h2")
+    await s.close_tab("h2")
     assert "h2" not in s._cache._entries
     assert "h2" not in s._registry._last_access
-    assert ("close_page", "h2") in backend.calls
+    assert ("close_tab", "h2") in backend.calls
 
 
 @pytest.mark.asyncio
 async def test_get_element_by_id_found_and_missing_element():
     s = make_session(FakeBackend())
-    found = await s.get_element_by_id("logo", page_id="h1")
+    found = await s.get_element_by_id("logo", tab_id="h1")
     assert found["found"] is True
     assert found["element"]["id"] == "logo"
     assert found["element"]["classes"] == ["brand"]
     assert found["reloaded"] is False
-    assert found["page_id"] == "h1"
+    assert found["tab_id"] == "h1"
 
-    missing = await s.get_element_by_id("nope", page_id="h1")
+    missing = await s.get_element_by_id("nope", tab_id="h1")
     assert missing["found"] is False
     assert missing["element"] is None
 
@@ -149,7 +150,7 @@ async def test_get_element_by_id_found_and_missing_element():
 @pytest.mark.asyncio
 async def test_query_selector_all_envelope_and_pagination():
     s = make_session(FakeBackend())
-    env = await s.query_selector_all(".order-card.js-card", page_id="h1", limit=2, offset=0)
+    env = await s.query_selector_all(".order-card.js-card", tab_id="h1", limit=2, offset=0)
     assert env["total_count"] == 3
     assert env["returned"] == 2
     assert env["limit"] == 2
@@ -158,7 +159,7 @@ async def test_query_selector_all_envelope_and_pagination():
     assert len(env["elements"]) == 2
     assert all("order-card" in e["classes"] for e in env["elements"])
 
-    last = await s.query_selector_all(".order-card.js-card", page_id="h1", limit=2, offset=2)
+    last = await s.query_selector_all(".order-card.js-card", tab_id="h1", limit=2, offset=2)
     assert last["returned"] == 1
     assert last["next_offset"] is None
 
@@ -166,25 +167,25 @@ async def test_query_selector_all_envelope_and_pagination():
 @pytest.mark.asyncio
 async def test_invalid_css_returns_error_dict():
     s = make_session(FakeBackend())
-    err = await s.query_selector("div::::bad", page_id="h1")
+    err = await s.query_selector("div::::bad", tab_id="h1")
     assert "invalid CSS selector" in err["error"]
-    assert err["page_id"] == "h1"
+    assert err["tab_id"] == "h1"
 
-    err2 = await s.query_selector_all("??", page_id="h1")
+    err2 = await s.query_selector_all("??", tab_id="h1")
     assert "invalid CSS selector" in err2["error"]
 
 
 @pytest.mark.asyncio
-async def test_force_reload_page_reloads_and_reports():
+async def test_force_reload_tab_reloads_and_reports():
     backend = FakeBackend()
     s = make_session(backend)
-    out = await s.force_reload_page(page_id="h1")
-    assert out == {"page_id": "h1", "url": "reloaded-url", "title": "reloaded-title", "reloaded": True}
+    out = await s.force_reload_tab(tab_id="h1")
+    assert out == {"tab_id": "h1", "url": "reloaded-url", "title": "reloaded-title", "reloaded": True}
     assert ("reload", "h1") in backend.calls
     assert "h1" in s._registry._last_access
 
-    out2 = await s.force_reload_page(page_id="h2")
-    assert out2["page_id"] == "h2"
+    out2 = await s.force_reload_tab(tab_id="h2")
+    assert out2["tab_id"] == "h2"
     assert ("reload", "h2") in backend.calls
 
 
@@ -196,10 +197,10 @@ async def test_screenshot_returns_png_bytes_and_touches_registry():
     sentinel = object()
     s._cache._entries["h1"] = sentinel  # type: ignore[assignment]
 
-    png = await s.screenshot(page_id="h1")
+    png = await s.screenshot(tab_id="h1")
 
     assert png == b"\x89PNG\r\n\x1a\nfakepng"
-    assert ("select_page", "h1") in backend.calls
+    assert ("select_tab", "h1") in backend.calls
     assert ("screenshot", None) in backend.calls
     assert "h1" in s._registry._last_access
     assert s._cache._entries["h1"] is sentinel  # cache not invalidated
@@ -213,15 +214,15 @@ async def test_screenshot_on_dead_page_returns_error_and_drops_it():
     s._registry.touch("h6")
     s._cache._entries["h6"] = object()  # type: ignore[assignment]
 
-    res = await s.screenshot(page_id="h6")
+    res = await s.screenshot(tab_id="h6")
 
-    assert res == {"page_id": "h6",
-                   "error": "page h6 is no longer open — call list_pages for current tabs"}
+    assert res == {"tab_id": "h6",
+                   "error": "tab h6 is no longer open — call list_tabs for current tabs"}
     assert "h6" not in s._registry._last_access
     assert "h6" not in s._cache._entries
 
 
-# -- dead-page handling -----------------------------------------------------
+# -- dead-tab handling -----------------------------------------------------
 
 @pytest.mark.asyncio
 async def test_dom_query_on_dead_page_returns_error_and_drops_it():
@@ -232,9 +233,9 @@ async def test_dom_query_on_dead_page_returns_error_and_drops_it():
     s._registry.touch("h7")
     backend.missing.add("h7")
 
-    res = await s.query_selector_all(".order-card.js-card", page_id="h7")
-    assert res == {"page_id": "h7",
-                   "error": "page h7 is no longer open — call list_pages for current tabs"}
+    res = await s.query_selector_all(".order-card.js-card", tab_id="h7")
+    assert res == {"tab_id": "h7",
+                   "error": "tab h7 is no longer open — call list_tabs for current tabs"}
     assert "h7" not in s._cache._entries
     assert "h7" not in s._registry._last_access  # dropped from tracking
 
@@ -244,17 +245,17 @@ async def test_force_reload_on_dead_page_returns_error():
     backend = FakeBackend()
     backend.missing.add("h9")
     s = make_session(backend)
-    res = await s.force_reload_page(page_id="h9")
-    assert res["page_id"] == "h9"
+    res = await s.force_reload_tab(tab_id="h9")
+    assert res["tab_id"] == "h9"
     assert "no longer open" in res["error"]
 
 
 @pytest.mark.asyncio
 async def test_force_reload_partial_failure_drops_supplied_page_id():
     """reload(pid) succeeds but the subsequent get_page_source(pid) fails — the tab
-    died between the two backend calls. The supplied page_id must be dropped from
+    died between the two backend calls. The supplied tab_id must be dropped from
     cache + registry, and a structured error returned. Regression: an earlier
-    implementation defaulted page_id from current_page_id() but caught the
+    implementation defaulted tab_id from current_tab_id() but caught the
     exception with the *original* (None) argument, leaving the live id leaked."""
     backend = FakeBackend()
     s = make_session(backend)
@@ -262,15 +263,15 @@ async def test_force_reload_partial_failure_drops_supplied_page_id():
     s._cache._entries["h2"] = object()  # type: ignore[assignment]
 
     # Make get_page_source raise for h2, but leave reload working.
-    def get_page_source(page_id=None):
-        backend.calls.append(("get_page_source", page_id))
-        raise PageNotFoundError(f"tab {page_id!r} disappeared mid-reload")
+    def get_page_source(tab_id=None):
+        backend.calls.append(("get_page_source", tab_id))
+        raise TabNotFoundError(f"tab {tab_id!r} disappeared mid-reload")
     backend.get_page_source = get_page_source
 
-    res = await s.force_reload_page(page_id="h2")
+    res = await s.force_reload_tab(tab_id="h2")
 
-    assert res == {"page_id": "h2",
-                   "error": "page h2 is no longer open — call list_pages for current tabs"}
+    assert res == {"tab_id": "h2",
+                   "error": "tab h2 is no longer open — call list_tabs for current tabs"}
     assert ("reload", "h2") in backend.calls  # the partial succeeded
     assert ("get_page_source", "h2") in backend.calls  # …and the second call failed
     assert "h2" not in s._cache._entries  # old entry dropped
@@ -283,9 +284,9 @@ async def test_navigate_on_dead_page_returns_error_and_drops_it():
     backend.missing.add("h5")
     s = make_session(backend)
     s._registry.touch("h5")
-    res = await s.navigate("https://www.amazon.com/", page_id="h5")
-    assert res == {"page_id": "h5",
-                   "error": "page h5 is no longer open — call list_pages for current tabs"}
+    res = await s.navigate("https://www.amazon.com/", tab_id="h5")
+    assert res == {"tab_id": "h5",
+                   "error": "tab h5 is no longer open — call list_tabs for current tabs"}
     assert "h5" not in s._registry._last_access
 
 
@@ -297,9 +298,9 @@ async def test_close_dead_page_is_a_noop_success():
     s._registry.touch("h3")
     s._cache._entries["h3"] = object()  # type: ignore[assignment]
 
-    await s.close_page("h3")  # must not raise
+    await s.close_tab("h3")  # must not raise
 
-    assert ("close_page", "h3") in backend.calls
+    assert ("close_tab", "h3") in backend.calls
     assert "h3" not in s._cache._entries
     assert "h3" not in s._registry._last_access
 
@@ -310,8 +311,8 @@ async def test_select_dead_page_raises_and_drops_it():
     backend.missing.add("h4")
     s = make_session(backend)
     s._registry.touch("h4")
-    with pytest.raises(PageNotFoundError):
-        await s.select_page("h4")
+    with pytest.raises(TabNotFoundError):
+        await s.select_tab("h4")
     assert "h4" not in s._registry._last_access
 
 
@@ -348,7 +349,7 @@ def test_sweep_idle_swallows_close_errors(fake_clock):
 
     s.sweep_idle()  # must not raise
 
-    assert ("close_page", "only") in backend.calls
+    assert ("close_tab", "only") in backend.calls
     assert "only" not in s._registry._last_access  # still dropped from tracking
 
 
@@ -363,7 +364,7 @@ def test_sweep_idle_is_noop_while_driver_busy(fake_clock):
     s.sweep_idle()
 
     assert backend.closed == []
-    assert "list_page_ids" not in backend.calls  # didn't even reconcile
+    assert "list_tab_ids" not in backend.calls  # didn't even reconcile
     assert "old" in s._registry._last_access  # left for the next tick
 
 
@@ -386,7 +387,7 @@ def test_sweep_idle_reconciles_against_live_tabs(fake_clock):
 
 def test_sweep_idle_skips_reconcile_when_enumeration_fails():
     backend = FakeBackend()
-    backend.live = None  # list_page_ids raises
+    backend.live = None  # list_tab_ids raises
     s = make_session(backend)
     s._registry.touch("h1")
 
