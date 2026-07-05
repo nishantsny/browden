@@ -24,8 +24,8 @@ URL_B = _data_url("PAGE_BETA")
 
 
 @pytest.fixture
-def backend():
-    b = SeleniumChromeBackend(id_namespace="e2e")
+def backend(tmp_path):
+    b = SeleniumChromeBackend(profile_dir=str(tmp_path / "profile"), id_namespace="e2e")
     yield b
     b._drv().quit()
 

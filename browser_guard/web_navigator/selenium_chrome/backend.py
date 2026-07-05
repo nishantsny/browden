@@ -214,17 +214,22 @@ class SeleniumChromeBackend(WebNavigatorBackend):
     """Selenium WebDriver implementation of the navigator backend.
 
     Each instance owns exactly one Chrome session bound to one profile
-    directory (``--user-data-dir``). ``profile_dir`` defaults to the shared
-    module ``PROFILE_DIR``; pass a distinct path to drive an independent Chrome
-    process — distinct profiles don't share the per-dir ``SingletonLock``, so
-    two backends on two profiles run concurrently without clobbering each
-    other's window focus.
+    directory (``--user-data-dir``). ``profile_dir`` is required — the caller
+    picks the path (the MCP server resolves the shared default via
+    ``_profile_key``); distinct profiles don't share the per-dir
+    ``SingletonLock``, so two backends on two profiles run concurrently without
+    clobbering each other's window focus.
     """
 
-    def __init__(self, profile_dir=None, *, id_namespace: str):
-        # Required: the namespace stamped onto every public page_id so the MCP
-        # server can route an incoming id back to this session. It must be
-        # non-empty and free of the separator, or ids wouldn't round-trip.
+    def __init__(self, profile_dir, *, id_namespace: str):
+        # Both are required. profile_dir binds this backend to exactly one
+        # Chrome --user-data-dir (the caller resolves the shared default path;
+        # the backend never falls back to a module default). id_namespace is
+        # stamped onto every public page_id so the MCP server can route an
+        # incoming id back to this session; it must be non-empty and free of
+        # the separator, or ids wouldn't round-trip.
+        if not profile_dir:
+            raise ValueError("profile_dir is required")
         if not id_namespace:
             raise ValueError("id_namespace is required and must be non-empty")
         if SEPARATOR in id_namespace:
@@ -232,9 +237,7 @@ class SeleniumChromeBackend(WebNavigatorBackend):
                 f"id_namespace must not contain {SEPARATOR!r}: {id_namespace!r}")
         self._driver = None
         self._chrome_proc = None
-        # None -> resolve to the module default lazily in _drv(), so an
-        # env/monkeypatch of PROFILE_DIR still takes effect.
-        self._profile_dir = Path(profile_dir) if profile_dir else None
+        self._profile_dir = Path(profile_dir).expanduser()
         self.id_namespace = id_namespace
 
     def _get_page_id(self, handle: str) -> str:
@@ -248,7 +251,7 @@ class SeleniumChromeBackend(WebNavigatorBackend):
 
     @property
     def profile_dir(self) -> Path:
-        return self._profile_dir or PROFILE_DIR
+        return self._profile_dir
 
     def _teardown(self) -> None:
         """Drop the WebDriver session and stop the Chrome we launched.

@@ -60,8 +60,9 @@ logger.info("Browser Guard MCP module initialized")
 # that share a profile share its session and run serially through it; requests
 # on *different* profiles get independent Chrome sessions and run concurrently,
 # since distinct --user-data-dir profiles don't share window focus or the
-# per-dir SingletonLock. The default (profile_dir=None) maps to the backend's
-# shared default profile, so existing single-profile behaviour is unchanged.
+# per-dir SingletonLock. The default (profile_dir=None) is resolved to the
+# shared default profile *path* here (via _profile_key) before the backend is
+# built, so existing single-profile behaviour is unchanged.
 #
 # Sessions are keyed by the profile's id namespace (the digest that prefixes
 # every page_id the profile mints), so _route can map an incoming page_id back
@@ -117,7 +118,7 @@ def _get_session(profile_dir: str | None = None) -> PageSession:
     if session is None:
         logger.info(f"Initializing PageSession (profile={key})")
         session = PageSession(SeleniumChromeBackend(
-            profile_dir=key if profile_dir else None, id_namespace=digest))
+            profile_dir=key, id_namespace=digest))
         _sessions[digest] = session
         if not _atexit_registered:
             atexit.register(lambda: logger.info("MCP Server shutting down"))

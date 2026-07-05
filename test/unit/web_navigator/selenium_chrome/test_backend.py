@@ -23,6 +23,7 @@ NS = "ns"
 
 def _backend(**kwargs):
     kwargs.setdefault("id_namespace", NS)
+    kwargs.setdefault("profile_dir", "/tmp/bg-unit-profile")
     return SeleniumChromeBackend(**kwargs)
 
 
@@ -88,20 +89,6 @@ def test_drv_launches_with_provided_profile_dir(mock_webdriver, mock_launch, tmp
     mock_launch.assert_called_once_with(profile)
     # Selenium attaches to the launched Chrome rather than spawning its own.
     assert _debugger_address(mock_webdriver) == "127.0.0.1:7000"
-
-
-@patch("browser_guard.web_navigator.selenium_chrome.backend._launch_chrome")
-@patch("browser_guard.web_navigator.selenium_chrome.backend.PROFILE_DIR")
-@patch("browser_guard.web_navigator.selenium_chrome.backend.webdriver")
-def test_drv_defaults_to_module_profile_dir(mock_webdriver, mock_profile_dir, mock_launch):
-    _patch_launch(mock_launch)
-    mock_webdriver.Chrome.return_value = _make_fake_driver()
-    backend = _backend()  # no profile_dir -> module default
-
-    assert backend.profile_dir is mock_profile_dir
-
-    backend._drv()
-    mock_launch.assert_called_once_with(mock_profile_dir)
 
 
 @patch("browser_guard.web_navigator.selenium_chrome.backend._launch_chrome")
@@ -300,13 +287,17 @@ def test_wrong_namespace_prefix_is_page_not_found():
     drv.switch_to.window.assert_not_called()  # rejected before touching the driver
 
 
-def test_missing_id_namespace_is_rejected():
+def test_required_args_are_enforced():
     with pytest.raises(TypeError):
-        SeleniumChromeBackend()  # id_namespace is a required keyword-only arg
+        SeleniumChromeBackend()  # profile_dir and id_namespace are both required
+    with pytest.raises(TypeError):
+        SeleniumChromeBackend("/tmp/p")  # id_namespace is a required keyword-only arg
     with pytest.raises(ValueError):
-        SeleniumChromeBackend(id_namespace="")  # must be non-empty
+        SeleniumChromeBackend(None, id_namespace=NS)  # profile_dir must be non-empty
     with pytest.raises(ValueError):
-        SeleniumChromeBackend(id_namespace="has-dash")  # must not contain the separator
+        SeleniumChromeBackend("/tmp/p", id_namespace="")  # namespace must be non-empty
+    with pytest.raises(ValueError):
+        SeleniumChromeBackend("/tmp/p", id_namespace="has-dash")  # no separator allowed
 
 
 @patch("browser_guard.web_navigator.selenium_chrome.backend._launch_chrome")

@@ -8,8 +8,8 @@ DATA_URL = "data:text/html,<html><head><title>hi</title></head><body>ok</body></
 
 
 @pytest.fixture
-def backend():
-    b = SeleniumChromeBackend(id_namespace="e2e")
+def backend(tmp_path):
+    b = SeleniumChromeBackend(profile_dir=str(tmp_path / "profile"), id_namespace="e2e")
     yield b
     b._drv().quit()
 
