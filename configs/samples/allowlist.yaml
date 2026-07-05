@@ -10,12 +10,22 @@
 read:
   "*": [".*"]
 
-# The one write action, add_to_cart, ships disabled. The block below shows
-# exactly what enabling it for amazon.com looks like — uncomment it to allow
-# clicks on controls whose visible text matches the label regex, and nothing
-# else.
-#
-# add_to_cart:
-#   amazon.com:
-#     paths: [".*"]
-#     label: '(?i)\badd to cart\b'
+# The one write action, add_to_cart. Each host lists the paths it may act on
+# and a `label` regex the control's visible text must match — checked (via
+# search) against the element's trustworthy labels (text, value, aria-label,
+# title) on top of the generic add-to-cart intent guard. A host not listed
+# here is inert. The label per site below is the button text actually observed
+# on a live product/storefront page:
+#   amazon.com            <input> value "Add to cart"
+#   wholefoodsmarket.com  storefront quick-add aria-label "Add to Cart, <item>"
+#   target.com            <button> text "Add to cart"
+add_to_cart:
+  amazon.com:
+    paths: [".*"]
+    label: '(?i)\badd to cart\b'
+  wholefoodsmarket.com:
+    paths: [".*"]
+    label: '(?i)\badd to cart\b'
+  target.com:
+    paths: [".*"]
+    label: '(?i)\badd to cart\b'

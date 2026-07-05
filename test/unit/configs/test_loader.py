@@ -11,13 +11,17 @@ from browser_guard.configs.loader import (
 
 # -- load_allowlist -----------------------------------------------------------
 
-def test_sample_config_loads_reads_open_writes_denied():
-    # The shipped sample: read wide open, the add_to_cart block only present
-    # as a commented-out showcase.
+def test_sample_config_loads_reads_open_writes_enabled_for_listed_hosts():
+    # The shipped sample: reads wide open; add_to_cart enabled for the three
+    # observed retailers, each requiring an "add to cart" label. Hosts not
+    # listed (e.g. qfc.com) stay inert.
     al = load_allowlist(SAMPLE_ALLOWLIST)
     assert al.section("read").is_allowed("anything.example.com", "/whatever")
-    assert not al.section("add_to_cart").is_allowed("amazon.com", "/dp/X")
-    assert al.label_pattern("add_to_cart", "amazon.com") is None
+    for host in ("amazon.com", "wholefoodsmarket.com", "target.com"):
+        assert al.section("add_to_cart").is_allowed(host, "/dp/X")
+        assert al.label_pattern("add_to_cart", host).search("Add to Cart")
+    assert not al.section("add_to_cart").is_allowed("qfc.com", "/p/X")
+    assert al.label_pattern("add_to_cart", "qfc.com") is None
 
 
 def test_load_builds_working_allowlist(tmp_path):

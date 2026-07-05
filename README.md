@@ -135,11 +135,11 @@ tool error. Extend the allowlist by editing `~/.browser_guard/allowlist.yaml`
 and adding the URL shape you actually need — start narrow — then restart the
 service.
 
-The sample default keeps reads wide open (`read: "*"`) and every write
-action disabled: the `add_to_cart` block in the sample is commented out,
-showcasing what enabling amazon.com looks like without turning it on.
-Uncomment it (or add your own host + label entry) to allow the one write
-action.
+The sample default keeps reads wide open (`read: "*"`) and enables the one
+write action, `add_to_cart`, for a small set of retailers whose live button
+text was observed — `amazon.com`, `wholefoodsmarket.com`, and `target.com` —
+each gated on an "add to cart" label. Any host not listed there is inert; add
+your own host + label entry (start narrow) to allow it.
 
 ## MCP's runtime
 
