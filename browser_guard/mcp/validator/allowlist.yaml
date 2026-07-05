@@ -1,0 +1,21 @@
+# Per-action allowlist. Top-level keys are action names; under each action,
+# a host maps to either a list of path regexes (list form, used by the read
+# gate) or an object with "paths" and a required visible-text "label" regex
+# (object form, used by write actions).
+#
+# Reads are wide open by default. Write actions are default-deny: an action
+# with no entry here is inert, so nothing can be clicked until you opt a host
+# in explicitly.
+
+read:
+  "*": [".*"]
+
+# The one write action, add_to_cart, ships disabled. The block below shows
+# exactly what enabling it for amazon.com looks like — uncomment it to allow
+# clicks on controls whose visible text matches the label regex, and nothing
+# else.
+#
+# add_to_cart:
+#   amazon.com:
+#     paths: [".*"]
+#     label: '(?i)\badd to cart\b'

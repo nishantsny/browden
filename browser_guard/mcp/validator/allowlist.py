@@ -1,6 +1,7 @@
-import json
 import re
 from pathlib import Path
+
+import yaml
 
 
 def _canonical_host(host: str) -> str:
@@ -21,7 +22,7 @@ class Allowlist:
 
     @classmethod
     def from_file(cls, path: Path) -> "Allowlist":
-        return cls(json.loads(path.read_text()))
+        return cls(yaml.safe_load(path.read_text()) or {})
 
     def is_allowed(self, host: str, path: str) -> bool:
         patterns = self._rules.get(_canonical_host(host)) or self._rules.get("*")
@@ -34,18 +35,21 @@ class Allowlist:
 class ActionAllowlist:
     """Per-action host/path allowlist with optional per-host label requirements.
 
-    Top-level keys are *action names*. A host's rules take one of two shapes:
+    Top-level keys are *action names*. A host's rules take one of two shapes
+    (shown as they appear in ``allowlist.yaml``):
 
     * **list form** — just path regexes (used by the read/navigate gate)::
 
-          "read": {"*": [".*"]}
+          read:
+            "*": [".*"]
 
     * **object form** — path regexes plus a site-specific ``label`` regex the
       activated control's visible name must match (used by write actions)::
 
-          "add_to_cart": {
-            "amazon.com": {"paths": [".*"], "label": "(?i)\\\\badd to cart\\\\b"}
-          }
+          add_to_cart:
+            amazon.com:
+              paths: [".*"]
+              label: '(?i)\\badd to cart\\b'
 
     Reads stay wide-open; every write action carries its own explicit host list
     *and* the exact button text it expects on each site. ``section(name)`` gates
@@ -73,7 +77,7 @@ class ActionAllowlist:
 
     @classmethod
     def from_file(cls, path: Path) -> "ActionAllowlist":
-        return cls(json.loads(path.read_text()))
+        return cls(yaml.safe_load(path.read_text()) or {})
 
     def section(self, action: str) -> Allowlist:
         """Return the host/path allowlist for ``action``; an empty (deny-all) one if unlisted."""

@@ -37,7 +37,7 @@ mcp = FastMCP(
     port=int(os.environ.get("MCP_PORT", DEFAULT_PORT))
 )
 
-_ALLOWLIST = ActionAllowlist.from_file(Path(__file__).parent / "validator" / "allowlist.json")
+_ALLOWLIST = ActionAllowlist.from_file(Path(__file__).parent / "validator" / "allowlist.yaml")
 logger.info("Browser Guard MCP module initialized")
 
 # One PageSession (hence one Chrome process) per profile directory. Requests
@@ -156,7 +156,8 @@ async def add_to_cart(css_selector: str, page_id: str, profile_dir: str | None =
 
     Two server-side gates, both default-deny, must pass:
       1. The tab's host must be listed under the ``add_to_cart`` section of the
-         allowlist (currently amazon.com / amazon.in only).
+         allowlist. The shipped default has no hosts enabled — the amazon.com
+         entry in allowlist.yaml is commented out until you opt in.
       2. ``css_selector`` must resolve to exactly one element that is, by
          trustworthy signals, a genuine add-to-cart button — not Buy Now,
          checkout, subscribe, remove, or an agent-targeted decoy.

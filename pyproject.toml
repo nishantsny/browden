@@ -14,6 +14,7 @@ dependencies = [
   "mcp[cli]>=1.0",
   "selenium>=4.20",
   "beautifulsoup4>=4.12",
+  "pyyaml>=6.0",
 ]
 
 [project.optional-dependencies]
@@ -28,3 +29,6 @@ browser-guard = "browser_guard.mcp.server:mcp.run"
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["browser_guard*"]
+
+[tool.setuptools.package-data]
+"browser_guard.mcp.validator" = ["*.yaml"]

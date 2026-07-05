@@ -114,7 +114,7 @@ Two things to keep in mind:
 
 `navigate()` and `new_page(url=…)` run every URL through `validate_url`,
 which gates against a per-host allowlist defined in
-[`browser_guard/mcp/validator/allowlist.json`](browser_guard/mcp/validator/allowlist.json).
+[`browser_guard/mcp/validator/allowlist.yaml`](browser_guard/mcp/validator/allowlist.yaml).
 
 - Bare domains are normalized to `https://`.
 - A `netloc` is required.
@@ -125,8 +125,14 @@ which gates against a per-host allowlist defined in
 - Anything not on the allowlist is rejected.
 
 Failures raise `ValidationError`, which FastMCP surfaces as a structured
-tool error. Extend the allowlist by editing `allowlist.json` and adding
+tool error. Extend the allowlist by editing `allowlist.yaml` and adding
 the URL shape you actually need — start narrow.
+
+The shipped default keeps reads wide open (`read: "*"`) and every write
+action disabled: the `add_to_cart` block in `allowlist.yaml` is commented
+out, showcasing what enabling amazon.com looks like without turning it on.
+Uncomment it (or add your own host + label entry) to allow the one write
+action.
 
 ## MCP's runtime
 
