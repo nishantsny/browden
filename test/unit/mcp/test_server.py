@@ -3,7 +3,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from browser_guard.common.page import PageInfo
+from browser_guard.common.tab import TabInfo
 
 
 def test_server_instructions_state_concurrency_contract():
@@ -11,22 +11,22 @@ def test_server_instructions_state_concurrency_contract():
     import browser_guard.mcp.server as server
     ins = (server.mcp.instructions or "").lower()
     assert "one at a time" in ins
-    assert "page_id" in ins  # spells out that even different tabs race
+    assert "tab_id" in ins
 
 
 def test_tab_entry_point_docs_warn_about_concurrency():
-    """new_page / list_pages descriptions (what the agent reads) carry the warning."""
+    """new_blank_tab / list_tabs descriptions (what the agent reads) carry the warning."""
     import browser_guard.mcp.server as server
-    for name in ("new_page", "list_pages"):
+    for name in ("new_blank_tab", "list_tabs"):
         doc = (getattr(server, name).__doc__ or "").lower()
         assert "sequential" in doc or "one tab" in doc
         assert "race" in doc
 
 
 def test_no_backend_or_session_at_import():
-    """Importing server must not construct a backend, a PageSession, or a reaper task."""
+    """Importing server must not construct a backend, a BrowserSessionManager, or a reaper task."""
     with patch("browser_guard.web_navigator.selenium_chrome.SeleniumChromeBackend") as mock_backend, \
-         patch("browser_guard.web_navigator.session.PageSession") as mock_session:
+         patch("browser_guard.web_navigator.session.BrowserSessionManager") as mock_session:
         import browser_guard.mcp.server as server
         importlib.reload(server)
         assert mock_backend.call_count == 0
@@ -38,7 +38,7 @@ def test_get_session_is_lazy_and_cached():
     import browser_guard.mcp.server as server
     importlib.reload(server)
     with patch("browser_guard.mcp.server.SeleniumChromeBackend"), \
-         patch("browser_guard.mcp.server.PageSession") as mock_session_cls:
+         patch("browser_guard.mcp.server.BrowserSessionManager") as mock_session_cls:
         s1 = server._get_session()
         s2 = server._get_session()
         assert s1 is s2
@@ -50,7 +50,7 @@ def test_distinct_profile_dirs_get_distinct_sessions(tmp_path):
     importlib.reload(server)
     a, b = tmp_path / "a", tmp_path / "b"
     with patch("browser_guard.mcp.server.SeleniumChromeBackend") as mock_backend, \
-         patch("browser_guard.mcp.server.PageSession", side_effect=lambda *a, **k: MagicMock()):
+         patch("browser_guard.mcp.server.BrowserSessionManager", side_effect=lambda *a, **k: MagicMock()):
         sa1 = server._get_session(str(a))
         sa2 = server._get_session(str(a))
         sb = server._get_session(str(b))
@@ -81,24 +81,24 @@ def _fake_session(**methods):
 
 
 @pytest.mark.asyncio
-async def test_list_pages_tool_delegates_to_session():
+async def test_list_tabs_tool_delegates_to_session():
     import browser_guard.mcp.server as server
     importlib.reload(server)
-    session = _fake_session(list_pages=[PageInfo(id="h1", url="u", title="t", selected=True)])
+    session = _fake_session(list_tabs=[TabInfo(id="h1", url="u", title="t", selected=True)])
     with patch("browser_guard.mcp.server._get_session", return_value=session):
-        result = await server.list_pages()
+        result = await server.list_tabs()
     assert result == [{"id": "h1", "url": "u", "title": "t", "selected": True}]
-    session.list_pages.assert_awaited_once()
+    session.list_tabs.assert_awaited_once()
 
 
 @pytest.mark.asyncio
 async def test_navigate_tool_validates_then_delegates():
     import browser_guard.mcp.server as server
     importlib.reload(server)
-    session = _fake_session(navigate=PageInfo(id="h1", url="https://amazon.com", title="t", selected=True))
+    session = _fake_session(navigate=TabInfo(id="h1", url="https://amazon.com", title="t", selected=True))
     with patch("browser_guard.mcp.server._get_session", return_value=session):
         result = await server.navigate("amazon.com", "h1")
-    session.navigate.assert_awaited_once_with("https://amazon.com", page_id="h1")  # normalized by validate_url
+    session.navigate.assert_awaited_once_with("https://amazon.com", tab_id="h1")  # normalized by validate_url
     assert result["url"] == "https://amazon.com"
 
 
@@ -111,11 +111,11 @@ async def test_navigate_tool_requires_page_id():
 
 
 @pytest.mark.asyncio
-async def test_force_reload_page_tool_requires_page_id():
+async def test_force_reload_tab_tool_requires_page_id():
     import browser_guard.mcp.server as server
     importlib.reload(server)
     with pytest.raises(TypeError):
-        await server.force_reload_page()
+        await server.force_reload_tab()
 
 
 @pytest.mark.asyncio
@@ -125,17 +125,17 @@ async def test_dom_tools_delegate_with_kwargs():
     session = _fake_session(
         get_element_by_id={"found": False, "element": None},
         query_selector_all={"total_count": 0, "elements": []},
-        force_reload_page={"reloaded": True},
+        force_reload_tab={"reloaded": True},
     )
     with patch("browser_guard.mcp.server._get_session", return_value=session):
         await server.get_element_by_id("x", "h1", include_html=True, max_html_bytes=10)
         await server.query_selector_all(".a", "h1", limit=3, offset=6)
-        await server.force_reload_page(page_id="h2")
+        await server.force_reload_tab(tab_id="h2")
     session.get_element_by_id.assert_awaited_once_with(
-        "x", page_id="h1", include_html=True, max_html_bytes=10)
+        "x", tab_id="h1", include_html=True, max_html_bytes=10)
     session.query_selector_all.assert_awaited_once_with(
-        ".a", page_id="h1", limit=3, offset=6, include_html=False, max_html_bytes=4096)
-    session.force_reload_page.assert_awaited_once_with(page_id="h2")
+        ".a", tab_id="h1", limit=3, offset=6, include_html=False, max_html_bytes=4096)
+    session.force_reload_tab.assert_awaited_once_with(tab_id="h2")
 
 
 @pytest.mark.asyncio
@@ -143,7 +143,7 @@ async def test_dom_tool_requires_page_id():
     import browser_guard.mcp.server as server
     importlib.reload(server)
     with pytest.raises(TypeError):
-        await server.query_selector(".a")  # page_id is required, no "active tab" default
+        await server.query_selector(".a")  # tab_id is required, no "active tab" default
 
 
 @pytest.mark.asyncio
@@ -154,7 +154,7 @@ async def test_screenshot_tool_returns_image():
     session = _fake_session(screenshot=png)
     with patch("browser_guard.mcp.server._get_session", return_value=session):
         result = await server.screenshot("h1")
-    session.screenshot.assert_awaited_once_with(page_id="h1")
+    session.screenshot.assert_awaited_once_with(tab_id="h1")
     assert isinstance(result, server.Image)
     # The image carries the raw PNG bytes the session produced.
     assert result.data == png
@@ -164,7 +164,7 @@ async def test_screenshot_tool_returns_image():
 async def test_screenshot_tool_passes_through_error_envelope():
     import browser_guard.mcp.server as server
     importlib.reload(server)
-    gone = {"error": "page h9 is no longer open", "page_id": "h9"}
+    gone = {"error": "tab h9 is no longer open", "tab_id": "h9"}
     session = _fake_session(screenshot=gone)
     with patch("browser_guard.mcp.server._get_session", return_value=session):
         result = await server.screenshot("h9")
@@ -176,4 +176,4 @@ async def test_screenshot_tool_requires_page_id():
     import browser_guard.mcp.server as server
     importlib.reload(server)
     with pytest.raises(TypeError):
-        await server.screenshot()  # page_id is required, no "active tab" default
+        await server.screenshot()  # tab_id is required, no "active tab" default

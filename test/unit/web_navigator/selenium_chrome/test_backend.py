@@ -3,7 +3,7 @@ from unittest.mock import MagicMock, PropertyMock, patch
 import pytest
 
 from browser_guard.dependencies.selenium import NoSuchWindowException
-from browser_guard.web_navigator.interface import PageNotFoundError
+from browser_guard.web_navigator.interface import TabNotFoundError
 from browser_guard.web_navigator.selenium_chrome.backend import (
     SINGLETON_FILES,
     SeleniumChromeBackend,
@@ -260,11 +260,11 @@ def test_switch_failure_becomes_page_not_found():
     drv.switch_to.window.side_effect = NoSuchWindowException("no such window\n  (Session info: ...)")
     backend = _backend_with_driver(drv)
 
-    for call in (lambda: backend.select_page("dead"),
+    for call in (lambda: backend.select_tab("dead"),
                  lambda: backend.get_page_source("dead"),
                  lambda: backend.reload("dead"),
-                 lambda: backend.close_page("dead")):
-        with pytest.raises(PageNotFoundError) as exc:
+                 lambda: backend.close_tab("dead")):
+        with pytest.raises(TabNotFoundError) as exc:
             call()
         assert "dead" in str(exc.value)
         assert "Session info" not in str(exc.value)  # no driver stack trace leaks through
@@ -272,7 +272,7 @@ def test_switch_failure_becomes_page_not_found():
 
 @patch("browser_guard.web_navigator.selenium_chrome.backend._launch_chrome")
 @patch("browser_guard.web_navigator.selenium_chrome.backend.webdriver")
-def test_current_page_id_triggers_restart_on_no_such_window(mock_webdriver, mock_launch):
+def test_current_tab_id_triggers_restart_on_no_such_window(mock_webdriver, mock_launch):
     _patch_launch(mock_launch)
     # Initial driver that has lost its current window
     dead_drv = _make_fake_driver(handles=("h1",))
@@ -286,7 +286,7 @@ def test_current_page_id_triggers_restart_on_no_such_window(mock_webdriver, mock
     backend = _backend_with_driver(dead_drv)
 
     # This should now trigger _drv() to restart and return the new handle
-    assert backend.current_page_id() == "new_h1"
+    assert backend.current_tab_id() == "new_h1"
     dead_drv.quit.assert_called_once()
     assert mock_webdriver.Chrome.call_count == 1
 
@@ -310,8 +310,8 @@ def test_drv_recreates_when_window_handles_fails(mock_webdriver, mock_launch):
     assert mock_webdriver.Chrome.call_count == 1
 
 
-def test_close_page_refocuses_a_survivor():
-    # Closing the focused tab leaves the driver on a dead handle; close_page must
+def test_close_tab_refocuses_a_survivor():
+    # Closing the focused tab leaves the driver on a dead handle; close_tab must
     # re-focus a remaining window so the next command doesn't see a "dead" session.
     drv = _make_fake_driver(handles=("h1", "h2"))
 
@@ -320,18 +320,18 @@ def test_close_page_refocuses_a_survivor():
     drv.close.side_effect = _close
 
     backend = _backend_with_driver(drv)
-    backend.close_page("h2")
+    backend.close_tab("h2")
 
     drv.close.assert_called_once()
     # Last switch_to.window call targets a surviving handle, not the closed one.
     assert drv.switch_to.window.call_args.args == ("h1",)
 
 
-def test_close_page_last_tab_is_refused():
+def test_close_tab_last_tab_is_refused():
     drv = _make_fake_driver(handles=("only",))
     backend = _backend_with_driver(drv)
     with pytest.raises(ValueError):
-        backend.close_page("only")
+        backend.close_tab("only")
     drv.close.assert_not_called()
 
 
@@ -339,7 +339,7 @@ def test_navigate_failure_becomes_page_not_found():
     drv = _make_fake_driver()
     drv.get.side_effect = NoSuchWindowException("no such window")
     backend = _backend_with_driver(drv)
-    with pytest.raises(PageNotFoundError):
+    with pytest.raises(TabNotFoundError):
         backend.navigate("https://example.com")
 
 
@@ -351,5 +351,5 @@ def test_list_page_ids_returns_handles_without_switching(mock_webdriver, mock_la
     mock_webdriver.Chrome.return_value = drv
     backend = SeleniumChromeBackend()
 
-    assert backend.list_page_ids() == ["h1", "h2", "h3"]
+    assert backend.list_tab_ids() == ["h1", "h2", "h3"]
     drv.switch_to.window.assert_not_called()  # cheap: no per-tab focus changes

@@ -1,6 +1,6 @@
 """Async coordinator over a synchronous browser backend.
 
-``PageSession`` owns the backend, the soup cache, the idle registry, an
+``BrowserSessionManager`` owns the backend, the soup cache, the idle registry, an
 in-flight-driver flag, and a periodic reaper task. It's the only module under
 ``web_navigator/`` that imports ``asyncio``; the backend and the cache/registry
 helpers stay synchronous.
@@ -22,12 +22,12 @@ Concurrency model (lockless, no ``threading``):
   An ``asyncio.Lock`` around the ``to_thread`` section would close that gap but
   is out of scope (and is a lock).
 
-Tab identity: ``page_id`` is required on every method that acts on a specific
-tab — ``navigate``, ``force_reload_page``, and all DOM queries. None of them
+Tab identity: ``tab_id`` is required on every method that acts on a specific
+tab — ``navigate``, ``force_reload_tab``, and all DOM queries. None of them
 default to "the active tab", because the active tab is shared state the human
 also controls (clicking a tab in Chrome would otherwise silently redirect a
-call). A ``page_id`` that no longer names an open tab surfaces as
-``{"error": ..., "page_id": ...}`` and the dead tab is dropped from the cache
+call). A ``tab_id`` that no longer names an open tab surfaces as
+``{"error": ..., "tab_id": ...}`` and the dead tab is dropped from the cache
 and registry on the way out.
 """
 import asyncio
@@ -35,19 +35,19 @@ import time
 
 from ..common.logger import logger
 from ..dom import query, serialize
-from .interface import PageNotFoundError
-from .registry import PageRegistry
+from .interface import TabNotFoundError
+from .registry import TabRegistry
 from .soup_cache import SoupCache
 
 IDLE_TTL_SECONDS = 3600
 REAP_INTERVAL_SECONDS = 300
 
 
-class PageSession:
+class BrowserSessionManager:
     def __init__(self, backend, *, clock=time.monotonic, start_reaper: bool = True):
         self._backend = backend
         self._cache = SoupCache(clock=clock)
-        self._registry = PageRegistry(clock=clock)
+        self._registry = TabRegistry(clock=clock)
         self._driver_busy = False
         self._reaper_task: asyncio.Task | None = None
         if start_reaper:
@@ -63,101 +63,101 @@ class PageSession:
         finally:
             self._driver_busy = False
 
-    async def _load_soup(self, page_id: str):
-        """Fetch ``page_id``'s (maybe stale-reloaded) soup. Raises ``PageNotFoundError`` if the tab is gone."""
+    async def _load_soup(self, tab_id: str):
+        """Fetch ``tab_id``'s (maybe stale-reloaded) soup. Raises ``TabNotFoundError`` if the tab is gone."""
         def work():
-            soup, reloaded = self._cache.get_soup(page_id, self._backend)
+            soup, reloaded = self._cache.get_soup(tab_id, self._backend)
             return soup, reloaded
         return await self._run_driver(work)
 
-    def _drop(self, page_id: str | None) -> None:
+    def _drop(self, tab_id: str | None) -> None:
         """Forget a tab — used when it turns out to no longer exist."""
-        if page_id is not None:
-            self._cache.invalidate(page_id)
-            self._registry.forget(page_id)
+        if tab_id is not None:
+            self._cache.invalidate(tab_id)
+            self._registry.forget(tab_id)
 
     @staticmethod
-    def _page_gone(page_id: str) -> dict:
-        logger.warning(f"Requested page is no longer open: {page_id}")
-        return {"error": f"page {page_id} is no longer open — call list_pages for current tabs",
-                "page_id": page_id}
+    def _page_gone(tab_id: str) -> dict:
+        logger.warning(f"Requested tab is no longer open: {tab_id}")
+        return {"error": f"tab {tab_id} is no longer open — call list_tabs for current tabs",
+                "tab_id": tab_id}
 
     # -- navigation tools ---------------------------------------------------
 
-    async def list_pages(self):
+    async def list_tabs(self):
         self.sweep_idle()
-        pages = await self._run_driver(self._backend.list_pages)
-        logger.info(f"Listed {len(pages)} pages")
-        for p in pages:
+        tabs = await self._run_driver(self._backend.list_tabs)
+        logger.info(f"Listed {len(tabs)} tabs")
+        for p in tabs:
             self._registry.touch(p.id)
-        return pages
+        return tabs
 
-    async def new_page(self, url: str | None = None):
+    async def new_blank_tab(self):
         self.sweep_idle()
-        page = await self._run_driver(self._backend.new_page, url)
-        logger.info(f"Created new page: {page.id} (url={url!r})")
-        self._cache.invalidate(page.id)
-        self._registry.touch(page.id)
-        return page
+        tab = await self._run_driver(self._backend.new_blank_tab)
+        logger.info(f"Created new tab: {tab.id}")
+        self._cache.invalidate(tab.id)
+        self._registry.touch(tab.id)
+        return tab
 
-    async def close_page(self, page_id: str) -> None:
+    async def close_tab(self, tab_id: str) -> None:
         self.sweep_idle()
-        # Only PageNotFoundError is swallowed: a last-tab ValueError (or any other backend
+        # Only TabNotFoundError is swallowed: a last-tab ValueError (or any other backend
         # failure) means the tab is still open, so its cache/registry entries must stay.
         try:
-            await self._run_driver(self._backend.close_page, page_id)
-            logger.info(f"Closed page: {page_id}")
-        except PageNotFoundError:
-            logger.info(f"Attempted to close already-closed page: {page_id}")
-        self._cache.invalidate(page_id)
-        self._registry.forget(page_id)
+            await self._run_driver(self._backend.close_tab, tab_id)
+            logger.info(f"Closed tab: {tab_id}")
+        except TabNotFoundError:
+            logger.info(f"Attempted to close already-closed tab: {tab_id}")
+        self._cache.invalidate(tab_id)
+        self._registry.forget(tab_id)
 
-    async def select_page(self, page_id: str) -> None:
+    async def select_tab(self, tab_id: str) -> None:
         self.sweep_idle()
         try:
-            await self._run_driver(self._backend.select_page, page_id)
-            logger.info(f"Selected page: {page_id}")
-        except PageNotFoundError:
-            logger.warning(f"Attempted to select missing page: {page_id}")
-            self._drop(page_id)
+            await self._run_driver(self._backend.select_tab, tab_id)
+            logger.info(f"Selected tab: {tab_id}")
+        except TabNotFoundError:
+            logger.warning(f"Attempted to select missing tab: {tab_id}")
+            self._drop(tab_id)
             raise
-        self._registry.touch(page_id)
+        self._registry.touch(tab_id)
 
-    async def navigate(self, url: str, *, page_id: str):
+    async def navigate(self, url: str, *, tab_id: str):
         self.sweep_idle()
 
         def work():
-            self._backend.select_page(page_id)
+            self._backend.select_tab(tab_id)
             return self._backend.navigate(url)
         try:
-            page = await self._run_driver(work)
-            logger.info(f"Navigated page {page_id} to {url!r}")
-        except PageNotFoundError:
-            self._drop(page_id)
-            return self._page_gone(page_id)
-        self._cache.invalidate(page.id)
-        self._registry.touch(page.id)
-        return page
+            tab = await self._run_driver(work)
+            logger.info(f"Navigated tab {tab_id} to {url!r}")
+        except TabNotFoundError:
+            self._drop(tab_id)
+            return self._page_gone(tab_id)
+        self._cache.invalidate(tab.id)
+        self._registry.touch(tab.id)
+        return tab
 
-    async def current_url(self, *, page_id: str) -> str | None:
-        """Return ``page_id``'s live URL (for the per-action host gate), or None if the tab is gone."""
+    async def current_url(self, *, tab_id: str) -> str | None:
+        """Return ``tab_id``'s live URL (for the per-action host gate), or None if the tab is gone."""
         self.sweep_idle()
 
         def work():
-            self._backend.select_page(page_id)
+            self._backend.select_tab(tab_id)
             return self._backend.current_url()
         try:
             url = await self._run_driver(work)
-        except PageNotFoundError:
-            self._drop(page_id)
+        except TabNotFoundError:
+            self._drop(tab_id)
             return None
-        self._registry.touch(page_id)
+        self._registry.touch(tab_id)
         return url
 
     # -- write tools --------------------------------------------------------
 
-    async def add_to_cart_click(self, css_selector: str, *, page_id: str) -> dict:
-        """Click the (already policy-validated) add-to-cart element on ``page_id``.
+    async def add_to_cart_click(self, css_selector: str, *, tab_id: str) -> dict:
+        """Click the (already policy-validated) add-to-cart element on ``tab_id``.
 
         The caller (the ``add_to_cart`` MCP tool) has already gated the host and
         verified the element is a genuine add-to-cart control on the cached
@@ -167,124 +167,124 @@ class PageSession:
         self.sweep_idle()
 
         def work():
-            self._backend.select_page(page_id)
+            self._backend.select_tab(tab_id)
             return self._backend.click_element(css_selector)
         try:
             result = await self._run_driver(work)
-        except PageNotFoundError:
-            self._drop(page_id)
-            return self._page_gone(page_id)
-        self._cache.invalidate(page_id)
-        self._registry.touch(page_id)
-        logger.info(f"add_to_cart clicked {css_selector!r} on page {page_id}")
+        except TabNotFoundError:
+            self._drop(tab_id)
+            return self._page_gone(tab_id)
+        self._cache.invalidate(tab_id)
+        self._registry.touch(tab_id)
+        logger.info(f"add_to_cart clicked {css_selector!r} on tab {tab_id}")
         return result
 
     # -- DOM-query tools ----------------------------------------------------
 
-    async def get_element_by_id(self, element_id: str, *, page_id: str,
+    async def get_element_by_id(self, element_id: str, *, tab_id: str,
                                 include_html: bool = False,
                                 max_html_bytes: int = serialize.DEFAULT_MAX_HTML_BYTES) -> dict:
         self.sweep_idle()
         try:
-            soup, reloaded = await self._load_soup(page_id)
-        except PageNotFoundError:
-            self._drop(page_id)
-            return self._page_gone(page_id)
-        self._registry.touch(page_id)
+            soup, reloaded = await self._load_soup(tab_id)
+        except TabNotFoundError:
+            self._drop(tab_id)
+            return self._page_gone(tab_id)
+        self._registry.touch(tab_id)
         el = query.by_id(soup, element_id)
         return {
-            "page_id": page_id,
+            "tab_id": tab_id,
             "reloaded": reloaded,
             "found": el is not None,
             "element": self._node(el, include_html, max_html_bytes),
         }
 
-    async def get_elements_by_class_name(self, class_names: str, *, page_id: str,
+    async def get_elements_by_class_name(self, class_names: str, *, tab_id: str,
                                          limit: int = query.LIMIT_DEFAULT, offset: int = 0,
                                          include_html: bool = False,
                                          max_html_bytes: int = serialize.DEFAULT_MAX_HTML_BYTES) -> dict:
         self.sweep_idle()
         try:
-            soup, reloaded = await self._load_soup(page_id)
-        except PageNotFoundError:
-            self._drop(page_id)
-            return self._page_gone(page_id)
-        self._registry.touch(page_id)
+            soup, reloaded = await self._load_soup(tab_id)
+        except TabNotFoundError:
+            self._drop(tab_id)
+            return self._page_gone(tab_id)
+        self._registry.touch(tab_id)
         result = query.by_class(soup, class_names, limit, offset)
-        return self._list_envelope(page_id, reloaded, result, include_html, max_html_bytes)
+        return self._list_envelope(tab_id, reloaded, result, include_html, max_html_bytes)
 
-    async def query_selector(self, css_selector: str, *, page_id: str,
+    async def query_selector(self, css_selector: str, *, tab_id: str,
                              include_html: bool = False,
                              max_html_bytes: int = serialize.DEFAULT_MAX_HTML_BYTES) -> dict:
         self.sweep_idle()
         try:
-            soup, reloaded = await self._load_soup(page_id)
-        except PageNotFoundError:
-            self._drop(page_id)
-            return self._page_gone(page_id)
-        self._registry.touch(page_id)
+            soup, reloaded = await self._load_soup(tab_id)
+        except TabNotFoundError:
+            self._drop(tab_id)
+            return self._page_gone(tab_id)
+        self._registry.touch(tab_id)
         try:
             el = query.css_one(soup, css_selector)
         except query.InvalidSelector as e:
-            return {"error": f"invalid CSS selector: {e}", "page_id": page_id}
+            return {"error": f"invalid CSS selector: {e}", "tab_id": tab_id}
         return {
-            "page_id": page_id,
+            "tab_id": tab_id,
             "reloaded": reloaded,
             "found": el is not None,
             "element": self._node(el, include_html, max_html_bytes),
         }
 
-    async def query_selector_all(self, css_selector: str, *, page_id: str,
+    async def query_selector_all(self, css_selector: str, *, tab_id: str,
                                  limit: int = query.LIMIT_DEFAULT, offset: int = 0,
                                  include_html: bool = False,
                                  max_html_bytes: int = serialize.DEFAULT_MAX_HTML_BYTES) -> dict:
         self.sweep_idle()
         try:
-            soup, reloaded = await self._load_soup(page_id)
-        except PageNotFoundError:
-            self._drop(page_id)
-            return self._page_gone(page_id)
-        self._registry.touch(page_id)
+            soup, reloaded = await self._load_soup(tab_id)
+        except TabNotFoundError:
+            self._drop(tab_id)
+            return self._page_gone(tab_id)
+        self._registry.touch(tab_id)
         try:
             result = query.css_all(soup, css_selector, limit, offset)
         except query.InvalidSelector as e:
-            return {"error": f"invalid CSS selector: {e}", "page_id": page_id}
-        return self._list_envelope(page_id, reloaded, result, include_html, max_html_bytes)
+            return {"error": f"invalid CSS selector: {e}", "tab_id": tab_id}
+        return self._list_envelope(tab_id, reloaded, result, include_html, max_html_bytes)
 
-    async def screenshot(self, *, page_id: str) -> bytes | dict:
-        """Capture a PNG screenshot of ``page_id``'s viewport.
+    async def screenshot(self, *, tab_id: str) -> bytes | dict:
+        """Capture a PNG screenshot of ``tab_id``'s viewport.
 
         Read-only: it focuses the tab and grabs live pixels, so it neither uses
         nor invalidates the soup cache. Returns raw PNG bytes, or the standard
-        ``{"error": ..., "page_id": ...}`` envelope if the tab is gone.
+        ``{"error": ..., "tab_id": ...}`` envelope if the tab is gone.
         """
         self.sweep_idle()
 
         def work():
-            self._backend.select_page(page_id)
+            self._backend.select_tab(tab_id)
             return self._backend.screenshot()
         try:
             png = await self._run_driver(work)
-        except PageNotFoundError:
-            self._drop(page_id)
-            return self._page_gone(page_id)
-        self._registry.touch(page_id)
-        logger.info(f"Captured screenshot of page {page_id} ({len(png)} bytes)")
+        except TabNotFoundError:
+            self._drop(tab_id)
+            return self._page_gone(tab_id)
+        self._registry.touch(tab_id)
+        logger.info(f"Captured screenshot of tab {tab_id} ({len(png)} bytes)")
         return png
 
-    async def force_reload_page(self, *, page_id: str) -> dict:
+    async def force_reload_tab(self, *, tab_id: str) -> dict:
         self.sweep_idle()
 
         def work():
-            _soup, page_info = self._cache.force_reload(page_id, self._backend)
+            _soup, page_info = self._cache.force_reload(tab_id, self._backend)
             return page_info
         try:
             page_info = await self._run_driver(work)
-        except PageNotFoundError:
-            self._drop(page_id)
-            return self._page_gone(page_id)
-        self._registry.touch(page_id)
-        return {"page_id": page_id, "url": page_info.url, "title": page_info.title, "reloaded": True}
+        except TabNotFoundError:
+            self._drop(tab_id)
+            return self._page_gone(tab_id)
+        self._registry.touch(tab_id)
+        return {"tab_id": tab_id, "url": page_info.url, "title": page_info.title, "reloaded": True}
 
     # -- serialization helpers ---------------------------------------------
 
@@ -294,14 +294,14 @@ class PageSession:
             return None
         return serialize.element_to_node(el, include_html=include_html, max_html_bytes=max_html_bytes)
 
-    def _list_envelope(self, page_id, reloaded, paginated, include_html, max_html_bytes) -> dict:
-        page, eff_limit, eff_offset, total, next_offset = paginated
+    def _list_envelope(self, tab_id, reloaded, paginated, include_html, max_html_bytes) -> dict:
+        tab, eff_limit, eff_offset, total, next_offset = paginated
         elements = [
             serialize.element_to_node(el, include_html=include_html, max_html_bytes=max_html_bytes)
-            for el in page
+            for el in tab
         ]
         return {
-            "page_id": page_id,
+            "tab_id": tab_id,
             "reloaded": reloaded,
             "total_count": total,
             "offset": eff_offset,
@@ -318,8 +318,8 @@ class PageSession:
 
         Short-circuits while a driver op is in flight (``_driver_busy``): the next
         tick (or the next tool's lazy sweep) catches everything. The driver calls
-        here (``list_page_ids``, ``close_page``) are synchronous and briefly block
-        the loop — bounded and rare, acceptable; ``list_page_ids`` is cheap (no
+        here (``list_tab_ids``, ``close_tab``) are synchronous and briefly block
+        the loop — bounded and rare, acceptable; ``list_tab_ids`` is cheap (no
         per-tab focus changes). The last remaining tab is left open (closing the
         only window would quit the driver) but is still dropped from the
         cache/registry so it stops being tracked until touched again.
@@ -328,23 +328,23 @@ class PageSession:
             return
         # Reconcile: a tab the human closed in Chrome (and the agent never
         # touched again) is gone — drop it from tracking now rather than waiting
-        # for its idle TTL to elapse and the close_page below to no-op on it.
+        # for its idle TTL to elapse and the close_tab below to no-op on it.
         try:
-            live = set(self._backend.list_page_ids())
+            live = set(self._backend.list_tab_ids())
         except Exception:
             live = None  # couldn't enumerate; skip reconciliation this tick
         if live is not None:
             for pid in [p for p in self._registry.tracked_ids() if p not in live]:
-                logger.info(f"Reconcile: dropping tracked page closed by human: {pid}")
+                logger.info(f"Reconcile: dropping tracked tab closed by human: {pid}")
                 self._cache.invalidate(pid)
                 self._registry.forget(pid)
         for pid in self._registry.idle_pages(IDLE_TTL_SECONDS, now=now):
             try:
-                self._backend.close_page(pid)
-                logger.info(f"Reaper: closed idle page {pid}")
+                self._backend.close_tab(pid)
+                logger.info(f"Reaper: closed idle tab {pid}")
             except Exception as e:
                 # last-tab guard (ValueError), already-closed, dead session — all fine
-                logger.debug(f"Reaper: could not close page {pid}: {e}")
+                logger.debug(f"Reaper: could not close tab {pid}: {e}")
             self._cache.invalidate(pid)
             self._registry.forget(pid)
 

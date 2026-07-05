@@ -12,13 +12,13 @@ Eleven tools, mapped to a swappable `WebNavigatorBackend`.
 
 | Tool          | Purpose                                              |
 | ------------- | ---------------------------------------------------- |
-| `list_pages`  | List all open tabs.                                  |
-| `new_page`    | Open a new tab, optionally at a URL.                 |
-| `close_page`  | Close a tab by id (refuses the last one).            |
-| `select_page` | Switch the active tab.                               |
+| `list_tabs`  | List all open tabs.                                  |
+| `new_blank_tab`    | Open a new tab, optionally at a URL.                 |
+| `close_tab`  | Close a tab by id (refuses the last one).            |
+| `select_tab` | Switch the active tab.                               |
 | `navigate`    | Navigate a named tab to a URL.                       |
 
-**Reading page content** — mirrors the four browser DOM-query APIs, server-side, over the rendered (post-JS) DOM:
+**Reading tab content** — mirrors the four browser DOM-query APIs, server-side, over the rendered (post-JS) DOM:
 
 | Tool                          | Mirrors                            |
 | ----------------------------- | ---------------------------------- |
@@ -26,20 +26,20 @@ Eleven tools, mapped to a swappable `WebNavigatorBackend`.
 | `get_elements_by_class_name`  | `document.getElementsByClassName`  |
 | `query_selector`              | `document.querySelector`           |
 | `query_selector_all`          | `document.querySelectorAll`        |
-| `force_reload_page`           | reload a tab + refresh its cache   |
+| `force_reload_tab`           | reload a tab + refresh its cache   |
 | `screenshot`                  | capture a PNG of the tab's viewport |
 
-`screenshot` is read-only — it grabs live pixels from the rendered page and
+`screenshot` is read-only — it grabs live pixels from the rendered tab and
 returns a PNG image, without touching the DOM cache. It does not read the
 snapshot, so it always reflects exactly what's on screen now.
 
-Every tool that acts on a specific tab — `navigate`, `select_page`,
-`close_page`, `force_reload_page`, `screenshot`, and all four DOM queries — takes a
-**required `page_id`** (the id returned by `new_page` / `list_pages`). None of
+Every tool that acts on a specific tab — `navigate`, `select_tab`,
+`close_tab`, `force_reload_tab`, `screenshot`, and all four DOM queries — takes a
+**required `tab_id`** (the id returned by `new_blank_tab` / `list_tabs`). None of
 them default to "the active tab", since the active tab is shared state the
 human also controls, and an implicit default would silently act on whichever
-tab happened to be focused. A `page_id` that no longer names an open tab comes
-back as `{"error": …, "page_id": …}` (and that tab is dropped from the cache);
+tab happened to be focused. A `tab_id` that no longer names an open tab comes
+back as `{"error": …, "tab_id": …}` (and that tab is dropped from the cache);
 so does an invalid CSS selector — structured errors, not exceptions.
 
 Results are plain JSON "nodes" — `tag`, `id`, `classes`, `attributes`,
@@ -52,7 +52,7 @@ tools (`get_elements_by_class_name`, `query_selector_all`) are paginated
 **Caching.** The parsed DOM for a tab is cached for one hour. A query against a
 tab whose cache has expired transparently reloads that tab in the browser,
 re-parses, and tells the caller it did (`reloaded: true`); `navigate` /
-`new_page` / `close_page` invalidate the relevant tab's cache; `force_reload_page`
+`new_blank_tab` / `close_tab` invalidate the relevant tab's cache; `force_reload_tab`
 busts it on demand. See [`design-docs/page_caching.md`](design-docs/page_caching.md)
 for the snapshot semantics and where they bite.
 
@@ -92,9 +92,9 @@ focused window, and the server does **not** lock concurrent requests — so
 within a profile you must **drive one tab at a time**: issue tool calls
 sequentially and wait for each to return. Even though a profile can hold
 several tabs, firing calls in parallel — including against *different*
-`page_id`s — races over that shared focused window and gives undefined results.
+`tab_id`s — races over that shared focused window and gives undefined results.
 (This contract is advertised to agents via the server's MCP `instructions` and
-the `new_page` / `list_pages` tool docs.)
+the `new_blank_tab` / `list_tabs` tool docs.)
 
 A distinct `profile_dir`, by contrast, is a *separate Chrome process and
 WebDriver session* — distinct profiles don't share window focus or the
@@ -104,7 +104,7 @@ here, not Chrome; CDP/Playwright expose per-tab concurrency directly.)
 
 Two things to keep in mind:
 
-- A `page_id` belongs to the profile that opened it. Pass the **same
+- A `tab_id` belongs to the profile that opened it. Pass the **same
   `profile_dir`** on every follow-up call for that tab — a handle from one
   profile is meaningless in another.
 - Each profile is an independent, isolated browser: separate cookies, storage,
@@ -112,7 +112,7 @@ Two things to keep in mind:
 
 ## Restrictions
 
-`navigate()` and `new_page(url=…)` run every URL through `validate_url`,
+`navigate()` and `new_blank_tab()` run every URL through `validate_url`,
 which gates against a per-host allowlist config. The server picks the file
 at startup, most specific first: `--allowlist <path>` on the command line >
 the `BROWSER_GUARD_ALLOWLIST` env var > `~/.browser_guard/allowlist.yaml`
@@ -227,7 +227,7 @@ pytest test/unit/
 
 `test/e2e/` drives a **real Chrome** through the Selenium backend (the unit
 suite never launches a browser). The tests are self-contained — they render an
-inline `data:` page in a throwaway profile, so they need no network and no
+inline `data:` tab in a throwaway profile, so they need no network and no
 allowlisted host.
 
 **MCP Server Harness**: A portion of the e2e suite deploys the actual MCP server on an ephemeral localhost port to test the FastMCP endpoint itself. This harness automatically provisions an isolated temporary cache and Chrome profile for the test run (no systemd needed).

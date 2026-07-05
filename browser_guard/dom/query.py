@@ -24,19 +24,19 @@ def _clamp_limit(limit: int) -> int:
 
 
 def paginate(matches, limit: int, offset: int):
-    """Slice ``matches`` for one page.
+    """Slice ``matches`` for one tab.
 
-    Returns ``(page, effective_limit, effective_offset, total_count, next_offset)``
+    Returns ``(tab, effective_limit, effective_offset, total_count, next_offset)``
     where ``next_offset`` is ``None`` exactly when pagination is exhausted
     (``offset + returned >= total_count``), including when ``offset >= total_count``.
     """
     total = len(matches)
     eff_limit = _clamp_limit(limit)
     eff_offset = max(0, offset)
-    page = matches[eff_offset:eff_offset + eff_limit]
-    returned = len(page)
+    tab = matches[eff_offset:eff_offset + eff_limit]
+    returned = len(tab)
     next_offset = None if eff_offset + returned >= total else eff_offset + returned
-    return page, eff_limit, eff_offset, total, next_offset
+    return tab, eff_limit, eff_offset, total, next_offset
 
 
 def by_id(soup, element_id: str):

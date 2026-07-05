@@ -28,8 +28,8 @@ _NEGATIVE = re.compile(
     r")\b"
 )
 
-# Attributes a page uses to steer AI agents — untrustworthy by construction, so an
-# element carrying them is rejected rather than trusted. (See the Amazon page's
+# Attributes a tab uses to steer AI agents — untrustworthy by construction, so an
+# element carrying them is rejected rather than trusted. (See the Amazon tab's
 # decoy controls: data-target-audience="ai-agent", data-agent-recommended, ...)
 _AGENT_BAIT_KEYS = (
     "data-agent-action",
@@ -75,7 +75,7 @@ def is_add_to_cart(node: dict) -> bool:
         return False
     attrs = node.get("attributes", {})
 
-    # 1. Reject agent-targeted decoys outright — never let page-supplied "for AI"
+    # 1. Reject agent-targeted decoys outright — never let tab-supplied "for AI"
     #    markup vouch for an element.
     if any(k in attrs for k in _AGENT_BAIT_KEYS):
         return False
