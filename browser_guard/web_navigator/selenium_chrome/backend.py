@@ -18,7 +18,7 @@ from ...dependencies.selenium import (
     webdriver,
 )
 from ..interface import PageNotFoundError, WebNavigatorBackend
-from ..page_id import format_page_id, split_page_id
+from ..page_id import SEPARATOR, format_page_id, split_page_id
 from ..utils.network_utils import get_free_port
 
 
@@ -221,7 +221,15 @@ class SeleniumChromeBackend(WebNavigatorBackend):
     other's window focus.
     """
 
-    def __init__(self, profile_dir=None, id_namespace: str | None = None):
+    def __init__(self, profile_dir=None, *, id_namespace: str):
+        # Required: the namespace stamped onto every public page_id so the MCP
+        # server can route an incoming id back to this session. It must be
+        # non-empty and free of the separator, or ids wouldn't round-trip.
+        if not id_namespace:
+            raise ValueError("id_namespace is required and must be non-empty")
+        if SEPARATOR in id_namespace:
+            raise ValueError(
+                f"id_namespace must not contain {SEPARATOR!r}: {id_namespace!r}")
         self._driver = None
         self._chrome_proc = None
         # None -> resolve to the module default lazily in _drv(), so an
@@ -229,18 +237,14 @@ class SeleniumChromeBackend(WebNavigatorBackend):
         self._profile_dir = Path(profile_dir) if profile_dir else None
         self.id_namespace = id_namespace
 
-    def _public(self, handle: str) -> str:
-        if self.id_namespace is not None:
-            return format_page_id(self.id_namespace, handle)
-        return handle
+    def _get_page_id(self, handle: str) -> str:
+        return format_page_id(self.id_namespace, handle)
 
     def _internal(self, page_id: str) -> str:
-        if self.id_namespace is not None:
-            namespace, handle = split_page_id(page_id)
-            if namespace != self.id_namespace:
-                raise PageNotFoundError(f"invalid page_id prefix for {page_id!r}")
-            return handle
-        return page_id
+        namespace, handle = split_page_id(page_id)
+        if namespace != self.id_namespace:
+            raise PageNotFoundError(f"invalid page_id prefix for {page_id!r}")
+        return handle
 
     @property
     def profile_dir(self) -> Path:
@@ -313,7 +317,7 @@ class SeleniumChromeBackend(WebNavigatorBackend):
         for handle in drv.window_handles:
             drv.switch_to.window(handle)
             pages.append(PageInfo(
-                id=self._public(handle),
+                id=self._get_page_id(handle),
                 url=drv.current_url,
                 title=drv.title,
                 selected=(handle == current_handle),
@@ -322,7 +326,7 @@ class SeleniumChromeBackend(WebNavigatorBackend):
         return pages
 
     def list_page_ids(self) -> list[str]:
-        return [self._public(h) for h in self._drv().window_handles]
+        return [self._get_page_id(h) for h in self._drv().window_handles]
 
     def new_page(self, url: str | None = None) -> PageInfo:
         drv = self._drv()
@@ -331,7 +335,7 @@ class SeleniumChromeBackend(WebNavigatorBackend):
             drv.get(url)
             _wait_for_title(drv)
         return PageInfo(
-            id=self._public(drv.current_window_handle),
+            id=self._get_page_id(drv.current_window_handle),
             url=drv.current_url,
             title=drv.title,
             selected=True,
@@ -363,7 +367,7 @@ class SeleniumChromeBackend(WebNavigatorBackend):
             raise PageNotFoundError("there is no active tab to navigate") from None
         _wait_for_title(drv)
         return PageInfo(
-            id=self._public(drv.current_window_handle),
+            id=self._get_page_id(drv.current_window_handle),
             url=drv.current_url,
             title=drv.title,
             selected=True,
@@ -371,7 +375,7 @@ class SeleniumChromeBackend(WebNavigatorBackend):
 
     def current_page_id(self) -> str:
         try:
-            return self._public(self._drv().current_window_handle)
+            return self._get_page_id(self._drv().current_window_handle)
         except NoSuchWindowException:
             raise PageNotFoundError("there is no active tab") from None
 
@@ -388,7 +392,7 @@ class SeleniumChromeBackend(WebNavigatorBackend):
         drv.refresh()
         _wait_for_title(drv)
         return PageInfo(
-            id=self._public(drv.current_window_handle),
+            id=self._get_page_id(drv.current_window_handle),
             url=drv.current_url,
             title=drv.title,
             selected=True,
@@ -431,7 +435,7 @@ class SeleniumChromeBackend(WebNavigatorBackend):
         _wait_for_title(drv)
         return {
             "clicked": True,
-            "page_id": self._public(drv.current_window_handle),
+            "page_id": self._get_page_id(drv.current_window_handle),
             "url_before": url_before,
             "url": drv.current_url,
             "title": drv.title,

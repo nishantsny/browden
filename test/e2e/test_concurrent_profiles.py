@@ -28,7 +28,10 @@ def _data_url(token: str) -> str:
 
 @pytest.fixture
 def sessions(tmp_path):
-    backends = [SeleniumChromeBackend(profile_dir=str(tmp_path / f"profile-{i}")) for i in range(N)]
+    backends = [
+        SeleniumChromeBackend(profile_dir=str(tmp_path / f"profile-{i}"), id_namespace=f"p{i}")
+        for i in range(N)
+    ]
     sess = [PageSession(b, start_reaper=False) for b in backends]
     yield sess
     for b in backends:

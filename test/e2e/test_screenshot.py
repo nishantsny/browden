@@ -23,7 +23,7 @@ DATA_URL = (
 
 @pytest.fixture
 def backend():
-    b = SeleniumChromeBackend()
+    b = SeleniumChromeBackend(id_namespace="e2e")
     yield b
     b._drv().quit()
 

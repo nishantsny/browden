@@ -15,6 +15,22 @@ from browser_guard.web_navigator.selenium_chrome.backend import (
 )
 
 
+# Every backend now requires an id_namespace; the public page_ids it emits are
+# "<NS>-<handle>". Tests construct through _backend() so the namespace is set in
+# one place, and assert against the prefixed form.
+NS = "ns"
+
+
+def _backend(**kwargs):
+    kwargs.setdefault("id_namespace", NS)
+    return SeleniumChromeBackend(**kwargs)
+
+
+def _pid(handle):
+    """The public page_id a NS-namespaced backend emits for an internal handle."""
+    return f"{NS}-{handle}"
+
+
 def _make_fake_driver(handles=("h1",), dead=False):
     drv = MagicMock(name="driver")
     if dead:
@@ -44,7 +60,7 @@ def test_drv_lazy_init(mock_webdriver, mock_launch):
     fake = _make_fake_driver()
     mock_webdriver.Chrome.return_value = fake
 
-    backend = SeleniumChromeBackend()
+    backend = _backend()
     assert backend._driver is None
 
     drv = backend._drv()
@@ -63,7 +79,7 @@ def test_drv_launches_with_provided_profile_dir(mock_webdriver, mock_launch, tmp
     _patch_launch(mock_launch, port=7000)
     mock_webdriver.Chrome.return_value = _make_fake_driver()
     profile = tmp_path / "custom-profile"
-    backend = SeleniumChromeBackend(profile_dir=str(profile))
+    backend = _backend(profile_dir=str(profile))
 
     assert backend.profile_dir == profile
 
@@ -80,7 +96,7 @@ def test_drv_launches_with_provided_profile_dir(mock_webdriver, mock_launch, tmp
 def test_drv_defaults_to_module_profile_dir(mock_webdriver, mock_profile_dir, mock_launch):
     _patch_launch(mock_launch)
     mock_webdriver.Chrome.return_value = _make_fake_driver()
-    backend = SeleniumChromeBackend()  # no profile_dir -> module default
+    backend = _backend()  # no profile_dir -> module default
 
     assert backend.profile_dir is mock_profile_dir
 
@@ -96,7 +112,7 @@ def test_drv_recreates_after_dead_session(mock_webdriver, mock_launch):
     alive = _make_fake_driver()
     mock_webdriver.Chrome.return_value = alive
 
-    backend = SeleniumChromeBackend()
+    backend = _backend()
     backend._driver = dead  # simulate a cached, dead driver
     dead_proc = MagicMock(name="dead_chrome")
     dead_proc.poll.return_value = None  # still "running" so _terminate acts
@@ -242,7 +258,7 @@ def test_drv_swallows_quit_error_on_dead_driver(mock_webdriver, mock_launch):
     alive = _make_fake_driver()
     mock_webdriver.Chrome.return_value = alive
 
-    backend = SeleniumChromeBackend()
+    backend = _backend()
     backend._driver = dead
 
     drv = backend._drv()
@@ -250,7 +266,7 @@ def test_drv_swallows_quit_error_on_dead_driver(mock_webdriver, mock_launch):
 
 
 def _backend_with_driver(drv):
-    backend = SeleniumChromeBackend()
+    backend = _backend()
     backend._driver = drv
     return backend
 
@@ -260,14 +276,37 @@ def test_switch_failure_becomes_page_not_found():
     drv.switch_to.window.side_effect = NoSuchWindowException("no such window\n  (Session info: ...)")
     backend = _backend_with_driver(drv)
 
-    for call in (lambda: backend.select_page("dead"),
-                 lambda: backend.get_page_source("dead"),
-                 lambda: backend.reload("dead"),
-                 lambda: backend.close_page("dead")):
+    # A well-formed (namespaced) id that resolves to a handle Selenium then
+    # rejects — so the driver's stack-trace error is what must be translated.
+    dead = _pid("dead")
+    for call in (lambda: backend.select_page(dead),
+                 lambda: backend.get_page_source(dead),
+                 lambda: backend.reload(dead),
+                 lambda: backend.close_page(dead)):
         with pytest.raises(PageNotFoundError) as exc:
             call()
         assert "dead" in str(exc.value)
         assert "Session info" not in str(exc.value)  # no driver stack trace leaks through
+
+
+def test_wrong_namespace_prefix_is_page_not_found():
+    # An id minted by another profile's backend must not resolve here.
+    drv = _make_fake_driver(handles=("h1", "h2"))
+    backend = _backend_with_driver(drv)
+
+    with pytest.raises(PageNotFoundError) as exc:
+        backend.select_page("other-h1")
+    assert "other-h1" in str(exc.value)
+    drv.switch_to.window.assert_not_called()  # rejected before touching the driver
+
+
+def test_missing_id_namespace_is_rejected():
+    with pytest.raises(TypeError):
+        SeleniumChromeBackend()  # id_namespace is a required keyword-only arg
+    with pytest.raises(ValueError):
+        SeleniumChromeBackend(id_namespace="")  # must be non-empty
+    with pytest.raises(ValueError):
+        SeleniumChromeBackend(id_namespace="has-dash")  # must not contain the separator
 
 
 @patch("browser_guard.web_navigator.selenium_chrome.backend._launch_chrome")
@@ -286,7 +325,7 @@ def test_current_page_id_triggers_restart_on_no_such_window(mock_webdriver, mock
     backend = _backend_with_driver(dead_drv)
 
     # This should now trigger _drv() to restart and return the new handle
-    assert backend.current_page_id() == "new_h1"
+    assert backend.current_page_id() == _pid("new_h1")
     dead_drv.quit.assert_called_once()
     assert mock_webdriver.Chrome.call_count == 1
 
@@ -320,7 +359,7 @@ def test_close_page_refocuses_a_survivor():
     drv.close.side_effect = _close
 
     backend = _backend_with_driver(drv)
-    backend.close_page("h2")
+    backend.close_page(_pid("h2"))
 
     drv.close.assert_called_once()
     # Last switch_to.window call targets a surviving handle, not the closed one.
@@ -349,7 +388,7 @@ def test_list_page_ids_returns_handles_without_switching(mock_webdriver, mock_la
     _patch_launch(mock_launch)
     drv = _make_fake_driver(handles=("h1", "h2", "h3"))
     mock_webdriver.Chrome.return_value = drv
-    backend = SeleniumChromeBackend()
+    backend = _backend()
 
-    assert backend.list_page_ids() == ["h1", "h2", "h3"]
+    assert backend.list_page_ids() == [_pid("h1"), _pid("h2"), _pid("h3")]
     drv.switch_to.window.assert_not_called()  # cheap: no per-tab focus changes

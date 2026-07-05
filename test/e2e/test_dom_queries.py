@@ -27,7 +27,7 @@ DATA_URL = "data:text/html," + urllib.parse.quote(HTML)
 
 @pytest.fixture
 def session():
-    backend = SeleniumChromeBackend()
+    backend = SeleniumChromeBackend(id_namespace="e2e")
     s = PageSession(backend, start_reaper=False)
     yield s
     backend._drv().quit()

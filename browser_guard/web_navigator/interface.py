@@ -24,11 +24,12 @@ class WebNavigatorBackend(ABC):
     method that needs "the active tab" when there isn't one — raises
     ``PageNotFoundError``.
 
-    Public page ids: a backend constructed with an ``id_namespace`` must emit
-    and accept ids in the ``page_id.format_page_id(namespace, handle)`` form —
-    the MCP server routes an id back to its session by splitting it with the
-    same helper. A backend that skips this emits bare handles the server
-    cannot route.
+    Public page ids: every backend is constructed with a required, non-empty
+    ``id_namespace`` and must emit and accept ids in the
+    ``page_id.format_page_id(namespace, handle)`` form — the MCP server routes
+    an id back to its session by splitting it with the same helper. The
+    namespace makes ids globally unique across the concurrently-running
+    per-profile backends the server holds.
     """
 
     @abstractmethod
