@@ -13,15 +13,15 @@ import pytest
 
 
 def _pages_from(result) -> list[dict]:
-    pages = []
+    tabs = []
     for c in result.content:
         if c.type == "text":
             data = json.loads(c.text)
             if isinstance(data, list):
-                pages.extend(data)
+                tabs.extend(data)
             else:
-                pages.append(data)
-    return pages
+                tabs.append(data)
+    return tabs
 
 
 @pytest.mark.asyncio
@@ -32,35 +32,35 @@ async def test_concurrent_profiles_are_isolated(mcp_server, mcp_client_session, 
         # Resolved, because the server canonicalizes profile paths the same way.
         profile2_dir = str((tmp_path / "profile2").resolve())
 
-        # 1. Concurrently create new pages in distinct profiles (default + profile2).
+        # 1. Concurrently create new tabs in distinct profiles (default + profile2).
         results = await asyncio.gather(
-            session1.call_tool("new_page", arguments={}),
-            session2.call_tool("new_page", arguments={"profile_dir": profile2_dir})
+            session1.call_tool("new_blank_tab", arguments={}),
+            session2.call_tool("new_blank_tab", arguments={"profile_dir": profile2_dir})
         )
         p1 = json.loads(results[0].content[0].text)
         p2 = json.loads(results[1].content[0].text)
 
-        # Each page is tagged with its profile; ids are namespaced per profile.
+        # Each tab is tagged with its profile; ids are namespaced per profile.
         assert p2["profile_dir"] == profile2_dir
         assert p1["profile_dir"] != p2["profile_dir"]
-        id1, id2 = p1["page_id"], p2["page_id"]
+        id1, id2 = p1["tab_id"], p2["tab_id"]
         d1 = id1.partition("-")[0]
         d2 = id2.partition("-")[0]
         assert d1 != d2
         assert len(d1) == 8
         assert len(d2) == 8
 
-        # 2. list_pages aggregates both profiles and routes ids back to them.
-        pages = _pages_from(await session1.call_tool("list_pages", arguments={}))
-        by_id = {p["page_id"]: p for p in pages}
+        # 2. list_tabs aggregates both profiles and routes ids back to them.
+        tabs = _pages_from(await session1.call_tool("list_tabs", arguments={}))
+        by_id = {p["tab_id"]: p for p in tabs}
         assert id1 in by_id and id2 in by_id
         assert by_id[id2]["profile_dir"] == profile2_dir
         assert by_id[id1]["profile_dir"] != profile2_dir
 
-        # 3. Concurrent DOM reads, one per profile, routed by page_id alone.
+        # 3. Concurrent DOM reads, one per profile, routed by tab_id alone.
         dom_results = await asyncio.gather(
-            session1.call_tool("query_selector", arguments={"css_selector": "body", "page_id": id1}),
-            session2.call_tool("query_selector", arguments={"css_selector": "body", "page_id": id2})
+            session1.call_tool("query_selector", arguments={"css_selector": "body", "tab_id": id1}),
+            session2.call_tool("query_selector", arguments={"css_selector": "body", "tab_id": id2})
         )
         body1 = json.loads(dom_results[0].content[0].text)
         body2 = json.loads(dom_results[1].content[0].text)
@@ -69,9 +69,9 @@ async def test_concurrent_profiles_are_isolated(mcp_server, mcp_client_session, 
         assert body1["element"]["tag"] == "body"
         assert body2["element"]["tag"] == "body"
 
-        # 4. Garbage page_id returns the error envelope, not a crash.
+        # 4. Garbage tab_id returns the error envelope, not a crash.
         garbage = await session1.call_tool(
-            "query_selector", arguments={"css_selector": "body", "page_id": "deadbeef-123"})
+            "query_selector", arguments={"css_selector": "body", "tab_id": "deadbeef-123"})
         err = json.loads(garbage.content[0].text)
         assert "error" in err
-        assert err["page_id"] == "deadbeef-123"
+        assert err["tab_id"] == "deadbeef-123"

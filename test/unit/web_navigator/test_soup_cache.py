@@ -1,4 +1,4 @@
-from browser_guard.common.page import PageInfo
+from browser_guard.common.tab import TabInfo
 from browser_guard.web_navigator.soup_cache import TTL_SECONDS, SoupCache
 
 
@@ -8,13 +8,13 @@ class FakeBackend:
         self.get_calls = 0
         self.reload_calls = 0
 
-    def get_page_source(self, page_id=None):
+    def get_page_source(self, tab_id=None):
         self.get_calls += 1
         return self.source
 
-    def reload(self, page_id=None):
+    def reload(self, tab_id=None):
         self.reload_calls += 1
-        return PageInfo(id=page_id or "active", url="https://www.amazon.com/", title="T", selected=True)
+        return TabInfo(id=tab_id or "active", url="https://www.amazon.com/", title="T", selected=True)
 
 
 def test_first_get_parses_without_reloading(fake_clock):

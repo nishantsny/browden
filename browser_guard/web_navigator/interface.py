@@ -1,9 +1,9 @@
 from abc import ABC, abstractmethod
 
-from ..common.page import PageInfo
+from ..common.tab import TabInfo
 
 
-class PageNotFoundError(LookupError):
+class TabNotFoundError(LookupError):
     """A backend method was asked to act on a tab id that is no longer open.
 
     Backend-agnostic: implementations translate their driver's equivalent
@@ -20,13 +20,13 @@ class WebNavigatorBackend(ABC):
     only place third-party browser libraries (selenium, playwright, ...) are
     imported. The interface itself imports only from common.
 
-    Any method given a ``page_id`` that no longer names an open tab — or any
+    Any method given a ``tab_id`` that no longer names an open tab — or any
     method that needs "the active tab" when there isn't one — raises
-    ``PageNotFoundError``.
+    ``TabNotFoundError``.
 
-    Public page ids: every backend is constructed with a required, non-empty
+    Public tab ids: every backend is constructed with a required, non-empty
     ``id_namespace`` and must emit and accept ids in the
-    ``page_id.format_page_id(namespace, handle)`` form — the MCP server routes
+    ``tab_id.format_page_id(namespace, handle)`` form — the MCP server routes
     an id back to its session by splitting it with the same helper. The
     namespace makes ids globally unique across the concurrently-running
     per-profile backends the server holds.
@@ -37,27 +37,27 @@ class WebNavigatorBackend(ABC):
         """True if a live browser is currently attached. Must never launch one."""
 
     @abstractmethod
-    def list_pages(self) -> list[PageInfo]:
+    def list_tabs(self) -> list[TabInfo]:
         """Return all open tabs."""
 
     @abstractmethod
-    def list_page_ids(self) -> list[str]:
+    def list_tab_ids(self) -> list[str]:
         """Return the ids of all open tabs, cheaply (no per-tab metadata / focus changes)."""
 
     @abstractmethod
-    def new_page(self, url: str | None = None) -> PageInfo:
+    def new_blank_tab(self) -> TabInfo:
         """Open a new tab, optionally navigating to url."""
 
     @abstractmethod
-    def close_page(self, page_id: str) -> None:
+    def close_tab(self, tab_id: str) -> None:
         """Close a tab by id. Raise if it's the last tab."""
 
     @abstractmethod
-    def select_page(self, page_id: str) -> None:
+    def select_tab(self, tab_id: str) -> None:
         """Switch to a tab by id."""
 
     @abstractmethod
-    def navigate(self, url: str) -> PageInfo:
+    def navigate(self, url: str) -> TabInfo:
         """Navigate the current tab to url. Url is pre-validated."""
 
     @abstractmethod
@@ -65,22 +65,22 @@ class WebNavigatorBackend(ABC):
         """Return the id of the currently active tab."""
 
     @abstractmethod
-    def get_page_source(self, page_id: str | None = None) -> str:
-        """Return the rendered HTML (post-JS DOM) of a tab; active tab if page_id is None."""
+    def get_page_source(self, tab_id: str | None = None) -> str:
+        """Return the rendered HTML (post-JS DOM) of a tab; active tab if tab_id is None."""
 
     @abstractmethod
-    def reload(self, page_id: str | None = None) -> PageInfo:
-        """Reload a tab in the browser; active tab if page_id is None."""
+    def reload(self, tab_id: str | None = None) -> TabInfo:
+        """Reload a tab in the browser; active tab if tab_id is None."""
 
     @abstractmethod
     def current_url(self) -> str:
         """Return the URL of the active tab. Caller focuses the tab first."""
 
     @abstractmethod
-    def screenshot(self, page_id: str | None = None) -> bytes:
-        """Capture a PNG screenshot of a tab's viewport; active tab if page_id is None.
+    def screenshot(self, tab_id: str | None = None) -> bytes:
+        """Capture a PNG screenshot of a tab's viewport; active tab if tab_id is None.
 
-        Read-only — never mutates page state. Returns the raw PNG bytes; the
+        Read-only — never mutates tab state. Returns the raw PNG bytes; the
         caller is responsible for any encoding (e.g. base64 for transport).
         """
 

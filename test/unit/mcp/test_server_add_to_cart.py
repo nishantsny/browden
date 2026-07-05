@@ -58,7 +58,7 @@ async def test_happy_path_clicks():
          patch.object(server, "_ALLOWLIST", _ENABLED_ALLOWLIST):
         result = await server.add_to_cart("#add-to-cart-button", "h1")
     assert result["clicked"] is True
-    session.add_to_cart_click.assert_awaited_once_with("#add-to-cart-button", page_id="h1")
+    session.add_to_cart_click.assert_awaited_once_with("#add-to-cart-button", tab_id="h1")
 
 
 @pytest.mark.asyncio
@@ -120,5 +120,5 @@ async def test_page_gone_returns_error():
     session = _session(url=None, elements=[])
     with patch("browser_guard.mcp.server._route", return_value=session):
         result = await server.add_to_cart("#x", "h1")
-    assert "error" in result and result["page_id"] == "h1"
+    assert "error" in result and result["tab_id"] == "h1"
     session.add_to_cart_click.assert_not_awaited()

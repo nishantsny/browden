@@ -11,7 +11,7 @@ from browser_guard.web_navigator.selenium_chrome import SeleniumChromeBackend
 
 PNG_MAGIC = b"\x89PNG\r\n\x1a\n"
 
-# A trivially-rendered page: a full-viewport coloured box so there are real
+# A trivially-rendered tab: a full-viewport coloured box so there are real
 # pixels to capture.
 DATA_URL = (
     "data:text/html,"
@@ -29,9 +29,10 @@ def backend(tmp_path):
 
 
 def test_screenshot_returns_png_bytes(backend):
-    page = backend.new_page(DATA_URL)
+    tab = backend.new_blank_tab()
+    backend.navigate(DATA_URL)
 
-    png = backend.screenshot(page.id)
+    png = backend.screenshot(tab.id)
 
     assert isinstance(png, bytes)
     assert png.startswith(PNG_MAGIC)
@@ -39,8 +40,9 @@ def test_screenshot_returns_png_bytes(backend):
 
 
 def test_screenshot_defaults_to_active_tab(backend):
-    backend.new_page(DATA_URL)
+    tab = backend.new_blank_tab()
+    backend.navigate(DATA_URL)
 
-    png = backend.screenshot()  # no page_id -> active tab
+    png = backend.screenshot()  # no tab_id -> active tab
 
     assert png.startswith(PNG_MAGIC)

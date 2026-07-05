@@ -12,20 +12,20 @@ spurious reap.
 import time
 
 
-class PageRegistry:
+class TabRegistry:
     def __init__(self, clock=time.monotonic):
         self._clock = clock
         self._last_access: dict[str, float] = {}
 
-    def touch(self, page_id: str, now: float | None = None) -> None:
-        self._last_access[page_id] = self._clock() if now is None else now
+    def touch(self, tab_id: str, now: float | None = None) -> None:
+        self._last_access[tab_id] = self._clock() if now is None else now
 
-    def forget(self, page_id: str) -> None:
-        self._last_access.pop(page_id, None)
+    def forget(self, tab_id: str) -> None:
+        self._last_access.pop(tab_id, None)
 
     def tracked_ids(self) -> list[str]:
         return list(self._last_access)
 
-    def idle_pages(self, ttl: float, now: float | None = None) -> list[str]:
+    def idle_tabs(self, ttl: float, now: float | None = None) -> list[str]:
         current = self._clock() if now is None else now
         return [pid for pid, ts in self._last_access.items() if current - ts >= ttl]
