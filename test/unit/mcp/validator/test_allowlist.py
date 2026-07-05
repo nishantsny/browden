@@ -87,13 +87,5 @@ def test_from_file_all_comments_is_deny_all(tmp_path):
     assert not al.section("add_to_cart").is_allowed("amazon.com", "/")
 
 
-def test_shipped_default_reads_open_writes_denied():
-    # The allowlist.yaml that ships with the package: read is wide open, the
-    # add_to_cart block is present only as a commented-out showcase.
-    from pathlib import Path
-    import browser_guard.mcp.validator as validator
-    shipped = Path(validator.__file__).parent / "allowlist.yaml"
-    al = ActionAllowlist.from_file(shipped)
-    assert al.section("read").is_allowed("anything.example.com", "/whatever")
-    assert not al.section("add_to_cart").is_allowed("amazon.com", "/dp/X")
-    assert al.label_pattern("add_to_cart", "amazon.com") is None
+# The shipped sample (now at configs/samples/allowlist.yaml) is covered by
+# test/unit/configs/test_loader.py through the schema-validating loader.
