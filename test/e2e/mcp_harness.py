@@ -29,6 +29,10 @@ class McpServerHarness:
         # session-scoped harness has already spawned the server — set it here
         # so local runs (without CI's job-level env) don't launch headed Chrome.
         env.setdefault("BROWSER_GUARD_HEADLESS", "1")
+        # Pin the allowlist to the repo sample so the test server's policy
+        # doesn't depend on whatever ~/.browser_guard config the host has.
+        env["BROWSER_GUARD_ALLOWLIST"] = str(
+            Path(__file__).resolve().parents[2] / "configs" / "samples" / "allowlist.yaml")
         
         log_path = self.tmp_path / "mcp_server.log"
         self._log_file = open(log_path, "w")
