@@ -2,7 +2,7 @@
 
 These go through ``BrowserSessionManager`` — the same path the MCP tools take — so they
 exercise the full chain: live Selenium ``get_page_source`` -> soup cache ->
-``dom.query`` -> ``dom.serialize`` node. The tab is an inline ``data:``
+``dom.query`` -> ``dom.serialize`` node. The page is an inline ``data:``
 document, so the run is deterministic and offline.
 """
 import urllib.parse
@@ -10,7 +10,7 @@ import urllib.parse
 import pytest
 
 from browser_guard.web_navigator.selenium_chrome import SeleniumChromeBackend
-from browser_guard.web_navigator.session import BrowserSessionManager
+from browser_guard.mcp.session_management.BrowserSessionManager import BrowserSessionManager
 
 HTML = """<html><body>
   <div id="logo" class="brand mark">BG</div>
@@ -26,36 +26,36 @@ DATA_URL = "data:text/html," + urllib.parse.quote(HTML)
 
 
 @pytest.fixture
-def session():
-    backend = SeleniumChromeBackend()
-    s = BrowserSessionManager(backend, start_reaper=False)
+def session(tmp_path):
+    backend = SeleniumChromeBackend(profile_dir=str(tmp_path / "profile"))
+    s = BrowserSessionManager(backend, namespace="e2e", start_reaper=False)
     yield s
     backend._drv().quit()
 
 
 @pytest.mark.asyncio
 async def test_get_element_by_id(session):
-    tab = await session.new_blank_tab()
-    await session.navigate(DATA_URL, tab_id=tab.id)
+    blank = await session.new_blank_tab()
+    page = await session.navigate(DATA_URL, id=blank["id"])
 
-    res = await session.get_element_by_id("logo", tab_id=tab.id)
+    res = await session.get_element_by_id("logo", id=page["id"])
 
     assert res["found"] is True
     assert res["element"]["id"] == "logo"
     assert res["element"]["classes"] == ["brand", "mark"]
     assert res["element"]["text"] == "BG"
 
-    missing = await session.get_element_by_id("nope", tab_id=tab.id)
+    missing = await session.get_element_by_id("nope", id=page["id"])
     assert missing["found"] is False
     assert missing["element"] is None
 
 
 @pytest.mark.asyncio
 async def test_get_elements_by_class_name(session):
-    tab = await session.new_blank_tab()
-    await session.navigate(DATA_URL, tab_id=tab.id)
+    blank = await session.new_blank_tab()
+    page = await session.navigate(DATA_URL, id=blank["id"])
 
-    res = await session.get_elements_by_class_name("item js-item", tab_id=tab.id)
+    res = await session.get_elements_by_class_name("item js-item", id=page["id"])
 
     assert res["total_count"] == 3
     assert res["returned"] == 3
@@ -65,10 +65,10 @@ async def test_get_elements_by_class_name(session):
 
 @pytest.mark.asyncio
 async def test_query_selector_single_match(session):
-    tab = await session.new_blank_tab()
-    await session.navigate(DATA_URL, tab_id=tab.id)
+    blank = await session.new_blank_tab()
+    page = await session.navigate(DATA_URL, id=blank["id"])
 
-    res = await session.query_selector("p.note", tab_id=tab.id)
+    res = await session.query_selector("p.note", id=page["id"])
 
     assert res["found"] is True
     assert res["element"]["tag"] == "p"
@@ -77,43 +77,43 @@ async def test_query_selector_single_match(session):
 
 @pytest.mark.asyncio
 async def test_query_selector_all_paginates(session):
-    tab = await session.new_blank_tab()
-    await session.navigate(DATA_URL, tab_id=tab.id)
+    blank = await session.new_blank_tab()
+    page = await session.navigate(DATA_URL, id=blank["id"])
 
-    first = await session.query_selector_all("li.item", tab_id=tab.id, limit=2, offset=0)
+    first = await session.query_selector_all("li.item", id=page["id"], limit=2, offset=0)
     assert first["total_count"] == 3
     assert first["returned"] == 2
     assert first["next_offset"] == 2
 
-    rest = await session.query_selector_all("li.item", tab_id=tab.id, limit=2, offset=2)
+    rest = await session.query_selector_all("li.item", id=page["id"], limit=2, offset=2)
     assert rest["returned"] == 1
     assert rest["next_offset"] is None
 
 
 @pytest.mark.asyncio
 async def test_query_selector_invalid_css_is_structured_error(session):
-    tab = await session.new_blank_tab()
-    await session.navigate(DATA_URL, tab_id=tab.id)
+    blank = await session.new_blank_tab()
+    page = await session.navigate(DATA_URL, id=blank["id"])
 
-    res = await session.query_selector("div::::bad", tab_id=tab.id)
+    res = await session.query_selector("div::::bad", id=page["id"])
 
     assert "invalid CSS selector" in res["error"]
-    assert res["tab_id"] == tab.id
+    assert res["id"] == page["id"]
 
 
 @pytest.mark.asyncio
-async def test_force_reload_tab(session):
-    tab = await session.new_blank_tab()
-    await session.navigate(DATA_URL, tab_id=tab.id)
+async def test_force_reload_page(session):
+    blank = await session.new_blank_tab()
+    page = await session.navigate(DATA_URL, id=blank["id"])
     # Prime the cache, then force a reload and confirm the report.
-    await session.get_element_by_id("logo", tab_id=tab.id)
+    await session.get_element_by_id("logo", id=page["id"])
 
-    res = await session.force_reload_tab(tab_id=tab.id)
+    res = await session.force_reload_tab(id=page["id"])
 
-    assert res["tab_id"] == tab.id
+    assert res["id"] == page["id"]
     assert res["reloaded"] is True
     assert res["url"].startswith("data:text/html")
 
-    # The tab still queries correctly after the reload.
-    again = await session.get_element_by_id("logo", tab_id=tab.id)
+    # The page still queries correctly after the reload.
+    again = await session.get_element_by_id("logo", id=page["id"])
     assert again["found"] is True

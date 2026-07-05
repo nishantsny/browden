@@ -180,9 +180,9 @@ def _launch_chrome(profile_dir: Path) -> tuple[subprocess.Popen, int]:
 
 
 def _wait_for_title(drv, timeout: float = TITLE_WAIT_SECONDS) -> None:
-    """Wait briefly for the tab title to populate after navigation.
+    """Wait briefly for the page title to populate after navigation.
 
-    drv.get() returns when the load event fires, but many tabs set their
+    drv.get() returns when the load event fires, but many pages set their
     final title via JavaScript after that. Best-effort: don't raise if the
     title never appears.
     """
@@ -213,23 +213,29 @@ class SeleniumChromeBackend(WebNavigatorBackend):
     """Selenium WebDriver implementation of the navigator backend.
 
     Each instance owns exactly one Chrome session bound to one profile
-    directory (``--user-data-dir``). ``profile_dir`` defaults to the shared
-    module ``PROFILE_DIR``; pass a distinct path to drive an independent Chrome
-    process — distinct profiles don't share the per-dir ``SingletonLock``, so
-    two backends on two profiles run concurrently without clobbering each
-    other's window focus.
+    directory (``--user-data-dir``). ``profile_dir`` is required — the caller
+    picks the path (the MCP server resolves the shared default via
+    ``_profile_key``); distinct profiles don't share the per-dir
+    ``SingletonLock``, so two backends on two profiles run concurrently without
+    clobbering each other's window focus.
+
+    Page ids are raw Selenium window handles: the backend has no notion of the
+    server's composite ``<profile>-<handle>`` id (see ``WebNavigatorBackend``).
     """
 
-    def __init__(self, profile_dir=None):
+    def __init__(self, profile_dir):
+        # profile_dir is required and immutable: it binds this backend to one
+        # Chrome --user-data-dir (the caller resolves the shared default path;
+        # the backend never falls back to a module default). Exposed read-only
+        # via get_profile_dir().
+        if not profile_dir:
+            raise ValueError("profile_dir is required")
         self._driver = None
         self._chrome_proc = None
-        # None -> resolve to the module default lazily in _drv(), so an
-        # env/monkeypatch of PROFILE_DIR still takes effect.
-        self._profile_dir = Path(profile_dir) if profile_dir else None
+        self._profile_dir = Path(profile_dir).expanduser()
 
-    @property
-    def profile_dir(self) -> Path:
-        return self._profile_dir or PROFILE_DIR
+    def get_profile_dir(self) -> Path:
+        return self._profile_dir
 
     def _teardown(self) -> None:
         """Drop the WebDriver session and stop the Chrome we launched.
@@ -248,6 +254,22 @@ class SeleniumChromeBackend(WebNavigatorBackend):
         _terminate(self._chrome_proc)
         self._chrome_proc = None
 
+    def is_running(self) -> bool:
+        """True if a live Chrome is currently attached. Probes without launching.
+
+        The observing counterpart to ``_drv()``'s heal-by-relaunch: callers that
+        only want to look (list_tabs across profiles) must not spawn a browser
+        as a side effect.
+        """
+        if self._driver is None:
+            return False
+        try:
+            _ = self._driver.window_handles
+            return True
+        except Exception:
+            self._teardown()
+            return False
+
     def _drv(self):
         if self._driver is not None:
             try:
@@ -261,7 +283,7 @@ class SeleniumChromeBackend(WebNavigatorBackend):
                 # If either check fails, the state is bad; clean up and restart
                 self._teardown()
         if self._driver is None:
-            profile = self.profile_dir
+            profile = self._profile_dir
             logger.info(f"Starting new Chrome session (profile={profile})")
             self._chrome_proc, port = _launch_chrome(profile)
             # Attach to the Chrome we just launched instead of letting
@@ -278,17 +300,18 @@ class SeleniumChromeBackend(WebNavigatorBackend):
     def list_tabs(self) -> list[TabInfo]:
         drv = self._drv()
         current_handle = drv.current_window_handle
-        tabs = []
+        pages = []
         for handle in drv.window_handles:
             drv.switch_to.window(handle)
-            tabs.append(TabInfo(
-                id=handle,
+            pages.append(TabInfo(
+                per_session_id=handle,
                 url=drv.current_url,
                 title=drv.title,
                 selected=(handle == current_handle),
+                profile_dir=str(self._profile_dir),
             ))
         drv.switch_to.window(current_handle)
-        return tabs
+        return pages
 
     def list_tab_ids(self) -> list[str]:
         return list(self._drv().window_handles)
@@ -297,10 +320,11 @@ class SeleniumChromeBackend(WebNavigatorBackend):
         drv = self._drv()
         drv.switch_to.new_window("tab")
         return TabInfo(
-            id=drv.current_window_handle,
+            per_session_id=drv.current_window_handle,
             url=drv.current_url,
             title=drv.title,
             selected=True,
+            profile_dir=str(self._profile_dir),
         )
 
     def close_tab(self, tab_id: str) -> None:
@@ -329,10 +353,11 @@ class SeleniumChromeBackend(WebNavigatorBackend):
             raise TabNotFoundError("there is no active tab to navigate") from None
         _wait_for_title(drv)
         return TabInfo(
-            id=drv.current_window_handle,
+            per_session_id=drv.current_window_handle,
             url=drv.current_url,
             title=drv.title,
             selected=True,
+            profile_dir=str(self._profile_dir),
         )
 
     def current_tab_id(self) -> str:
@@ -354,10 +379,11 @@ class SeleniumChromeBackend(WebNavigatorBackend):
         drv.refresh()
         _wait_for_title(drv)
         return TabInfo(
-            id=drv.current_window_handle,
+            per_session_id=drv.current_window_handle,
             url=drv.current_url,
             title=drv.title,
             selected=True,
+            profile_dir=str(self._profile_dir),
         )
 
     def current_url(self) -> str:

@@ -14,7 +14,7 @@ class FakeBackend:
 
     def reload(self, tab_id=None):
         self.reload_calls += 1
-        return TabInfo(id=tab_id or "active", url="https://www.amazon.com/", title="T", selected=True)
+        return TabInfo(per_session_id=tab_id or "active", url="https://www.amazon.com/", title="T", selected=True, profile_dir="/p")
 
 
 def test_first_get_parses_without_reloading(fake_clock):

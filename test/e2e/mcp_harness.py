@@ -26,6 +26,10 @@ class McpServerHarness:
         env["BROWSER_GUARD_HEADLESS"] = "1"
         # Set explicitly in the child env
         env["XDG_CACHE_HOME"] = str(self.tmp_path)
+        # The conftest's autouse headless monkeypatch runs per-test, after this
+        # session-scoped harness has already spawned the server — set it here
+        # so local runs (without CI's job-level env) don't launch headed Chrome.
+        env.setdefault("BROWSER_GUARD_HEADLESS", "1")
         # Pin the allowlist to the repo sample so the test server's policy
         # doesn't depend on whatever ~/.browser_guard config the host has.
         env["BROWSER_GUARD_ALLOWLIST"] = str(
