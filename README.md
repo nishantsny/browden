@@ -113,8 +113,14 @@ Two things to keep in mind:
 ## Restrictions
 
 `navigate()` and `new_page(url=…)` run every URL through `validate_url`,
-which gates against a per-host allowlist defined in
-[`browser_guard/mcp/validator/allowlist.json`](browser_guard/mcp/validator/allowlist.json).
+which gates against a per-host allowlist config. The server picks the file
+at startup, most specific first: `--allowlist <path>` on the command line >
+the `BROWSER_GUARD_ALLOWLIST` env var > `~/.browser_guard/allowlist.yaml`
+(installed by the [setup script](#talks-to-agents-via-sse-recommended)) >
+the repo sample at
+[`configs/samples/allowlist.yaml`](configs/samples/allowlist.yaml). The file
+is schema-verified on load (`browser_guard/configs/loader/`) — a malformed
+config fails startup with a message naming the offending field.
 
 - Bare domains are normalized to `https://`.
 - A `netloc` is required.
@@ -125,8 +131,15 @@ which gates against a per-host allowlist defined in
 - Anything not on the allowlist is rejected.
 
 Failures raise `ValidationError`, which FastMCP surfaces as a structured
-tool error. Extend the allowlist by editing `allowlist.json` and adding
-the URL shape you actually need — start narrow.
+tool error. Extend the allowlist by editing `~/.browser_guard/allowlist.yaml`
+and adding the URL shape you actually need — start narrow — then restart the
+service.
+
+The sample default keeps reads wide open (`read: "*"`) and every write
+action disabled: the `add_to_cart` block in the sample is commented out,
+showcasing what enabling amazon.com looks like without turning it on.
+Uncomment it (or add your own host + label entry) to allow the one write
+action.
 
 ## MCP's runtime
 
@@ -144,41 +157,50 @@ If you want the MCP server to stay active in the background, use the SSE (Server
    cd browser-guard
    uv venv && uv pip install -e .
    ```
-2. **Generate the Service File:**
-   Ensure your virtual environment is active so the script picks up the correct Python binary, then run the installer:
+2. **Run the one-time setup** (with the virtual environment active, so the
+   service picks up the right Python):
    ```bash
-   python -m browser_guard.scripts.install_service
+   python setup/onetime_setup.py
    ```
-   *(Optional: Use `--port 8080`, `--python /custom/bin/python`, or `--display :1` if you need to override the defaults).*
-3. **Start the Service:**
-   ```bash
-   systemctl --user daemon-reload
-   systemctl --user enable --now browser-guard
-   ```
-4. **Configure Your Agent (e.g., Claude, Gemini, Codex):**
-   Add the SSE connection to your agent's configuration file (e.g., `~/.claude.json` or `.gemini/settings.json`). Ensure the port matches the one you configured (8000 is the default):
+   This copies the sample allowlist to `~/.browser_guard/allowlist.yaml`
+   (skipped if you already have one), writes a systemd user unit serving SSE
+   on port **22001**, runs `systemctl --user daemon-reload` and
+   `enable --now`, and prints the JSON to add to your agent settings.
+
+   Options: `--port 22001`, `--config-dir ~/.browser_guard`,
+   `--service-name browser-guard` (use a different name/port to stand up a
+   second instance without touching an existing one), plus `--python` and
+   `--display` overrides. Rerunning is safe — an existing config is never
+   overwritten.
+3. **Configure Your Agent (e.g., Claude, Gemini, Codex):**
+   Add the block the script printed to your agent's configuration file
+   (e.g., `~/.claude.json` or `.gemini/settings.json`); with the defaults:
    ```json
    "mcpServers": {
      "browser-guard": {
        "type": "sse",
-       "url": "http://localhost:8000/sse"
+       "url": "http://127.0.0.1:22001/sse"
      }
    }
    ```
 
 ### Talks to agents via STDIO
 
-For simple local use where the agent manages the process life cycle.
+For simple local use where the agent manages the process life cycle. This
+path is manual — the setup script only automates SSE.
 
 Add an entry to your `~/.claude.json` `mcpServers` block:
 
 ```json
 "browser-guard": {
   "command": "/path/to/browser-guard/.venv/bin/python",
-  "args": ["-m", "browser_guard.mcp.server"],
+  "args": ["-m", "browser_guard.mcp.server", "--allowlist", "/home/you/.browser_guard/allowlist.yaml"],
   "env": { "DISPLAY": ":0" }
 }
 ```
+
+`--allowlist` is optional — without it the server falls back to
+`~/.browser_guard/allowlist.yaml` and then the repo sample.
 
 `DISPLAY` is only needed when launching headed Chrome from a non-graphical
 parent process (e.g. an MCP server spawned by Claude Code). Restart the

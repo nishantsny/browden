@@ -1,8 +1,15 @@
+import argparse
 import atexit
 import os
 from pathlib import Path
 
 from ..common.logger import logger
+from ..configs.loader import (
+    ConfigError,
+    SAMPLE_ALLOWLIST,
+    load_allowlist,
+    resolve_allowlist_path,
+)
 from ..dependencies.mcp import FastMCP, Image
 from ..web_navigator.selenium_chrome import SeleniumChromeBackend
 from ..web_navigator.selenium_chrome import backend as selenium_backend
@@ -37,7 +44,10 @@ mcp = FastMCP(
     port=int(os.environ.get("MCP_PORT", DEFAULT_PORT))
 )
 
-_ALLOWLIST = ActionAllowlist.from_file(Path(__file__).parent / "validator" / "allowlist.json")
+# Import-time default: the repo sample (reads open, writes deny-all), so unit
+# tests and library imports see a deterministic policy. main() re-resolves
+# (CLI > env > user config > sample) and replaces this before serving.
+_ALLOWLIST = load_allowlist(SAMPLE_ALLOWLIST) if SAMPLE_ALLOWLIST.exists() else ActionAllowlist({})
 logger.info("Browser Guard MCP module initialized")
 
 # One PageSession (hence one Chrome process) per profile directory. Requests
@@ -156,7 +166,8 @@ async def add_to_cart(css_selector: str, page_id: str, profile_dir: str | None =
 
     Two server-side gates, both default-deny, must pass:
       1. The tab's host must be listed under the ``add_to_cart`` section of the
-         allowlist (currently amazon.com / amazon.in only).
+         allowlist. The shipped default has no hosts enabled — the amazon.com
+         entry in allowlist.yaml is commented out until you opt in.
       2. ``css_selector`` must resolve to exactly one element that is, by
          trustworthy signals, a genuine add-to-cart button — not Buy Now,
          checkout, subscribe, remove, or an agent-targeted decoy.
@@ -287,10 +298,38 @@ async def force_reload_page(page_id: str, profile_dir: str | None = None) -> dic
     return result
 
 
-if __name__ == "__main__":
+def main(argv: list[str] | None = None) -> None:
+    """CLI entry point: resolve + load the allowlist, then serve.
+
+    The loaded, schema-verified allowlist replaces the module default so every
+    tool (the internal consumers of ``_ALLOWLIST``) gates against the config
+    the operator chose.
+    """
+    global _ALLOWLIST
+    parser = argparse.ArgumentParser(
+        prog="browser-guard", description="Browser Guard MCP server")
+    parser.add_argument(
+        "--allowlist",
+        help="Path to the allowlist YAML config (default: $BROWSER_GUARD_ALLOWLIST, "
+             "then ~/.browser_guard/allowlist.yaml, then the repo sample)")
+    args = parser.parse_args(argv)
+
+    path = resolve_allowlist_path(args.allowlist)
+    if path is None:
+        parser.error("no allowlist config found — run setup/onetime_setup.py or pass --allowlist")
+    try:
+        _ALLOWLIST = load_allowlist(path)
+    except ConfigError as e:
+        parser.error(str(e))
+    logger.info(f"Loaded allowlist config from {path}")
+
     transport = os.environ.get("MCP_TRANSPORT", "stdio")
     logger.info(f"MCP Server starting (transport={transport})")
     if transport == "sse":
         mcp.run(transport="sse")
     else:
         mcp.run(transport="stdio")
+
+
+if __name__ == "__main__":
+    main()

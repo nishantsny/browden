@@ -25,6 +25,10 @@ class McpServerHarness:
         env["MCP_PORT"] = str(self.port)
         # Set explicitly in the child env
         env["XDG_CACHE_HOME"] = str(self.tmp_path)
+        # Pin the allowlist to the repo sample so the test server's policy
+        # doesn't depend on whatever ~/.browser_guard config the host has.
+        env["BROWSER_GUARD_ALLOWLIST"] = str(
+            Path(__file__).resolve().parents[2] / "configs" / "samples" / "allowlist.yaml")
         
         log_path = self.tmp_path / "mcp_server.log"
         self._log_file = open(log_path, "w")
