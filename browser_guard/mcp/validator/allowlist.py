@@ -61,12 +61,12 @@ class ActionAllowlist:
     def __init__(self, sections: dict[str, dict[str, object]]):
         self._sections: dict[str, Allowlist] = {}
         self._labels: dict[str, dict[str, re.Pattern[str]]] = {}
-        self.max_chromium_sessions = 10
+        self.max_browser_sessions = 10
         self.max_tabs_per_session = 20
         for action, rules in sections.items():
             if action == "infra":
                 if isinstance(rules, dict):
-                    self.max_chromium_sessions = int(rules.get("max_chromium_sessions", 10))
+                    self.max_browser_sessions = int(rules.get("max_browser_sessions", 10))
                     self.max_tabs_per_session = int(rules.get("max_tabs_per_session", 20))
                 continue
             paths: dict[str, list[str]] = {}

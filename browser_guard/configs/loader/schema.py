@@ -48,7 +48,7 @@ def validate_allowlist_data(data, *, source: str = "allowlist") -> dict:
             if not isinstance(rules, dict):
                 raise ConfigError(f"{source}: infra must be a mapping, got {type(rules).__name__}")
             for key, value in rules.items():
-                if key not in {"max_chromium_sessions", "max_tabs_per_session"}:
+                if key not in {"max_browser_sessions", "max_tabs_per_session"}:
                     raise ConfigError(f"{source}: unknown infra key {key}")
                 if not isinstance(value, int) or value <= 0:
                     raise ConfigError(f"{source}: infra.{key} must be a positive integer, got {value}")
