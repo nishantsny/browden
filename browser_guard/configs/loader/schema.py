@@ -44,6 +44,16 @@ def validate_allowlist_data(data, *, source: str = "allowlist") -> dict:
             f"{source}: top level must be a mapping of action -> host rules, "
             f"got {type(data).__name__}")
     for action, rules in data.items():
+        if action == "infra":
+            if not isinstance(rules, dict):
+                raise ConfigError(f"{source}: infra must be a mapping, got {type(rules).__name__}")
+            for key, value in rules.items():
+                if key not in {"max_chromium_sessions", "max_tabs_per_session"}:
+                    raise ConfigError(f"{source}: unknown infra key {key}")
+                if not isinstance(value, int) or value <= 0:
+                    raise ConfigError(f"{source}: infra.{key} must be a positive integer, got {value}")
+            continue
+
         if not isinstance(action, str) or not action:
             raise ConfigError(f"{source}: action names must be non-empty strings, got {action!r}")
         if not isinstance(rules, dict):

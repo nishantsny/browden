@@ -19,3 +19,7 @@ read:
 #   amazon.com:
 #     paths: [".*"]
 #     label: '(?i)\badd to cart\b'
+
+infra:
+  max_chromium_sessions: 10
+  max_tabs_per_session: 20
