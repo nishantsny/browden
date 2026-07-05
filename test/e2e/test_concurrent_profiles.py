@@ -55,7 +55,7 @@ async def test_concurrent_navigation_across_distinct_profiles(sessions):
     # these are genuinely separate browser sessions, not one shared window.
     listed = await asyncio.gather(*(s.list_pages() for s in sessions))
     for i, my_pages in enumerate(listed):
-        urls_seen = " ".join(p.url for p in my_pages)
+        urls_seen = " ".join(p["url"] for p in my_pages)
         assert f"PROFILE_{i}" in urls_seen
         sibling = f"PROFILE_{(i + 1) % N}"
         assert sibling not in urls_seen

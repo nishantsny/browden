@@ -53,6 +53,19 @@ class PageSession:
         if start_reaper:
             self.start_reaper()
 
+    @property
+    def profile_dir(self) -> str:
+        return str(self._backend.profile_dir)
+
+    async def is_live(self) -> bool:
+        """True if this session's browser is currently running.
+
+        Never launches a browser — unlike the driving methods, which lazily
+        (re)start one on first use. Lets aggregators (list_pages across
+        profiles) skip dead sessions instead of resurrecting them.
+        """
+        return await self._run_driver(self._backend.is_running)
+
     # -- driver dispatch ----------------------------------------------------
 
     async def _run_driver(self, fn, *args, **kwargs):
@@ -84,13 +97,15 @@ class PageSession:
 
     # -- navigation tools ---------------------------------------------------
 
-    async def list_pages(self):
+    async def list_pages(self) -> list[dict]:
         self.sweep_idle()
         pages = await self._run_driver(self._backend.list_pages)
         logger.info(f"Listed {len(pages)} pages")
+        result = []
         for p in pages:
             self._registry.touch(p.id)
-        return pages
+            result.append(p.as_page_dict(profile_dir=self.profile_dir))
+        return result
 
     async def new_page(self, url: str | None = None):
         self.sweep_idle()

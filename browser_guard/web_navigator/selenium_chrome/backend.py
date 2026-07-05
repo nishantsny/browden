@@ -18,6 +18,7 @@ from ...dependencies.selenium import (
     webdriver,
 )
 from ..interface import PageNotFoundError, WebNavigatorBackend
+from ..page_id import format_page_id, split_page_id
 from ..utils.network_utils import get_free_port
 
 
@@ -230,15 +231,15 @@ class SeleniumChromeBackend(WebNavigatorBackend):
 
     def _public(self, handle: str) -> str:
         if self.id_namespace is not None:
-            return f"{self.id_namespace}-{handle}"
+            return format_page_id(self.id_namespace, handle)
         return handle
 
     def _internal(self, page_id: str) -> str:
         if self.id_namespace is not None:
-            prefix = f"{self.id_namespace}-"
-            if not page_id.startswith(prefix):
+            namespace, handle = split_page_id(page_id)
+            if namespace != self.id_namespace:
                 raise PageNotFoundError(f"invalid page_id prefix for {page_id!r}")
-            return page_id[len(prefix):]
+            return handle
         return page_id
 
     @property
@@ -261,6 +262,22 @@ class SeleniumChromeBackend(WebNavigatorBackend):
             self._driver = None
         _terminate(self._chrome_proc)
         self._chrome_proc = None
+
+    def is_running(self) -> bool:
+        """True if a live Chrome is currently attached. Probes without launching.
+
+        The observing counterpart to ``_drv()``'s heal-by-relaunch: callers that
+        only want to look (list_pages across profiles) must not spawn a browser
+        as a side effect.
+        """
+        if self._driver is None:
+            return False
+        try:
+            _ = self._driver.window_handles
+            return True
+        except Exception:
+            self._teardown()
+            return False
 
     def _drv(self):
         if self._driver is not None:

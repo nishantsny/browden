@@ -85,7 +85,7 @@ human-run browser. The Chrome binary is auto-discovered on `PATH`
 `new_page` takes an optional **`profile_dir`**. Omit it and the request runs
 against the shared default profile above. Pass a path and the request runs in
 its own Chrome profile (`--user-data-dir`) — the server keeps **one Chrome
-session per profile directory**, created locklessly on first use.
+session per profile directory**, created lazily on first use.
 
 This is what makes concurrency possible. A single Selenium session has one
 focused window, and the server does **not** lock concurrent requests — so
@@ -106,6 +106,8 @@ Two things to keep in mind:
 
 - Each `page_id` is globally unique and encodes its profile path. You do not
   need to pass `profile_dir` to follow-up tools (they will route automatically).
+- `list_pages` aggregates tabs across every live profile; profiles whose
+  Chrome has exited are skipped, never relaunched by listing.
 - Each profile is an independent, isolated browser: separate cookies, storage,
   and logins. They share nothing.
 

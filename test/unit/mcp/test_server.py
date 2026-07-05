@@ -19,9 +19,8 @@ def test_tab_entry_point_docs_warn_about_concurrency():
     import browser_guard.mcp.server as server
     for name in ("new_page", "list_pages"):
         doc = (getattr(server, name).__doc__ or "").lower()
-        if name == "new_page":
-            assert "sequential" in doc or "one tab" in doc
-            assert "race" in doc
+        assert "sequential" in doc or "one tab" in doc
+        assert "race" in doc
 
 
 def test_no_backend_or_session_at_import():
@@ -43,7 +42,7 @@ def test_get_session_is_lazy_and_cached():
         s1 = server._get_session()
         s2 = server._get_session()
         assert s1 is s2
-        assert s1 is s2
+        assert mock_session_cls.call_count == 1
 
 
 def test_distinct_profile_dirs_get_distinct_sessions(tmp_path):
@@ -58,9 +57,21 @@ def test_distinct_profile_dirs_get_distinct_sessions(tmp_path):
         # same profile -> same cached session; different profile -> different one
         assert sa1 is sa2
         assert sa1 is not sb
-        # each backend was built bound to the profile the caller asked for
+        # each backend was built bound to the (canonicalized) profile asked for
         profiles = {c.kwargs.get("profile_dir") for c in mock_backend.call_args_list}
-        assert profiles == {str(a), str(b)}
+        assert profiles == {server._profile_key(str(a)), server._profile_key(str(b))}
+
+
+def test_digest_collision_extends_namespace(tmp_path):
+    import hashlib
+    import browser_guard.mcp.server as server
+    importlib.reload(server)
+    key = server._profile_key(str(tmp_path / "p"))
+    full = hashlib.sha256(key.encode()).hexdigest()
+    # Another profile already owns this key's 8-char prefix.
+    server._sessions[full[:8]] = MagicMock()
+    assert server._digest_for(key) == full[:9]
+    assert server._digest_for(key) == full[:9]  # memoized, stable across calls
 
 
 def test_profile_key_is_stable_and_distinguishes_dirs(tmp_path):
@@ -76,6 +87,7 @@ def test_profile_key_is_stable_and_distinguishes_dirs(tmp_path):
 
 def _fake_session(**methods):
     s = MagicMock()
+    s.is_live = AsyncMock(return_value=True)
     for name, value in methods.items():
         setattr(s, name, AsyncMock(return_value=value))
     return s
@@ -85,11 +97,27 @@ def _fake_session(**methods):
 async def test_list_pages_tool_delegates_to_session():
     import browser_guard.mcp.server as server
     importlib.reload(server)
-    session = _fake_session(list_pages=[PageInfo(id="pre-h1", url="u", title="t", selected=True)])
-    server._sessions["pre"] = server._SessionEntry("/fake/path", session)
+    session = _fake_session(list_pages=[{"page_id": "pre-h1", "url": "u", "title": "t", "selected": True, "profile_dir": "/fake/path"}])
+    session.profile_dir = "/fake/path"
+    server._sessions["pre"] = session
     result = await server.list_pages()
     assert result == [{"page_id": "pre-h1", "url": "u", "title": "t", "selected": True, "profile_dir": "/fake/path"}]
     session.list_pages.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_list_pages_skips_dead_sessions_without_driving_them():
+    import browser_guard.mcp.server as server
+    importlib.reload(server)
+    live = _fake_session(list_pages=[{"page_id": "aa-h1", "url": "u", "title": "t", "selected": True, "profile_dir": "/a"}])
+    dead = _fake_session(list_pages=[{"page_id": "bb-h1", "url": "u", "title": "t", "selected": True, "profile_dir": "/b"}])
+    dead.is_live = AsyncMock(return_value=False)
+    dead.profile_dir = "/b"
+    server._sessions.update({"aa": live, "bb": dead})
+    result = await server.list_pages()
+    assert [p["page_id"] for p in result] == ["aa-h1"]
+    # The dead session is skipped entirely — never driven (no Chrome relaunch).
+    dead.list_pages.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -192,10 +220,18 @@ async def test_screenshot_tool_requires_page_id():
         await server.screenshot()  # page_id is required, no "active tab" default
 
 
-@pytest.mark.asyncio
-async def test_route_unknown_page_id():
+def test_route_unknown_page_id_raises():
     import browser_guard.mcp.server as server
     importlib.reload(server)
-    result = server._route("unknown-1234")
+    with pytest.raises(server.UnknownPageIdError):
+        server._route("unknown-1234")
+
+
+@pytest.mark.asyncio
+async def test_tool_returns_envelope_for_unknown_page_id():
+    """The @_tool wrapper converts UnknownPageIdError into the standard envelope."""
+    import browser_guard.mcp.server as server
+    importlib.reload(server)
+    result = await server.query_selector("body", page_id="deadbeef-123")
     assert "error" in result
-    assert result["page_id"] == "unknown-1234"
+    assert result["page_id"] == "deadbeef-123"

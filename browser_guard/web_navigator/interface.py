@@ -23,7 +23,17 @@ class WebNavigatorBackend(ABC):
     Any method given a ``page_id`` that no longer names an open tab — or any
     method that needs "the active tab" when there isn't one — raises
     ``PageNotFoundError``.
+
+    Public page ids: a backend constructed with an ``id_namespace`` must emit
+    and accept ids in the ``page_id.format_page_id(namespace, handle)`` form —
+    the MCP server routes an id back to its session by splitting it with the
+    same helper. A backend that skips this emits bare handles the server
+    cannot route.
     """
+
+    @abstractmethod
+    def is_running(self) -> bool:
+        """True if a live browser is currently attached. Must never launch one."""
 
     @abstractmethod
     def list_pages(self) -> list[PageInfo]:

@@ -25,16 +25,22 @@ class FakeBackend:
 
     def __init__(self):
         self.active = "h1"
+        self.profile_dir = "/fake/profile"
         self.source = PAGE_HTML
         self.calls = []
         self.closed = []
         self.missing: set[str] = set()
         self.live: set[str] | None = {"h1", "h2"}  # ids list_page_ids reports; None -> it raises
         self.close_raises = None  # set to an exception instance to simulate failure
+        self.running = True  # what is_running reports
 
     def _check(self, page_id):
         if page_id in self.missing:
             raise PageNotFoundError(f"tab {page_id!r} is not open")
+
+    def is_running(self):
+        self.calls.append("is_running")
+        return self.running
 
     def list_pages(self):
         self.calls.append("list_pages")
@@ -96,6 +102,21 @@ def make_session(backend=None, clock=None):
 
 def test_no_reaper_task_when_disabled():
     assert make_session()._reaper_task is None
+
+
+def test_profile_dir_comes_from_backend():
+    assert make_session().profile_dir == "/fake/profile"
+
+
+@pytest.mark.asyncio
+async def test_is_live_reflects_backend_without_driving():
+    backend = FakeBackend()
+    s = make_session(backend)
+    assert await s.is_live() is True
+    backend.running = False
+    assert await s.is_live() is False
+    # Only the probe ran — nothing that could (re)launch a browser.
+    assert backend.calls == ["is_running", "is_running"]
 
 
 @pytest.mark.asyncio
