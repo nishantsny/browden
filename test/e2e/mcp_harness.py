@@ -25,6 +25,10 @@ class McpServerHarness:
         env["MCP_PORT"] = str(self.port)
         # Set explicitly in the child env
         env["XDG_CACHE_HOME"] = str(self.tmp_path)
+        # The conftest's autouse headless monkeypatch runs per-test, after this
+        # session-scoped harness has already spawned the server — set it here
+        # so local runs (without CI's job-level env) don't launch headed Chrome.
+        env.setdefault("BROWSER_GUARD_HEADLESS", "1")
         
         log_path = self.tmp_path / "mcp_server.log"
         self._log_file = open(log_path, "w")

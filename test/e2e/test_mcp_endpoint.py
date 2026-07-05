@@ -17,7 +17,6 @@ async def test_mcp_endpoint(mcp_server, mcp_client_session):
         # new_page() (no url) -> returns an id; list_pages includes it.
         new_page_result = await mcp_client.call_tool("new_page", {})
         new_page_data = json.loads(new_page_result.content[0].text)
-        print("NEW PAGE DATA:", new_page_data)
         
         page_id = new_page_data.get("id", new_page_data.get("page_id"))
         assert page_id is not None
