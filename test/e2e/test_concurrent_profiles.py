@@ -49,7 +49,7 @@ async def test_concurrent_navigation_across_distinct_profiles(sessions):
     # call through asyncio.to_thread against its own driver, so these run in
     # parallel rather than queueing behind one browser.
     async def _open(session, url):
-        tab = await session.new_blank_tab()
+        tab = await session.new_blank_tab(max_tabs=10)
         return await session.navigate(url, id=tab["id"])
     pages = await asyncio.gather(*(_open(s, u) for s, u in zip(sessions, urls)))
 

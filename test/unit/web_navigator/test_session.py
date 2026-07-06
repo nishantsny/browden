@@ -180,7 +180,7 @@ async def test_navigate_new_page_close_page_invalidate_cache():
     await s.navigate("https://www.amazon.com/", id="ns-h1")
     assert "h1" not in s._cache._entries  # navigate busted it
 
-    await s.new_blank_tab()
+    await s.new_blank_tab(max_tabs=10)
     await s.get_element_by_id("logo", id="ns-h2")
     assert "h2" in s._cache._entries
     await s.close_tab("ns-h2")
