@@ -2,12 +2,12 @@
 
 Self-contained — renders an inline ``data:`` document instead of hitting the
 network, so the test is deterministic and needs no allowlisted host. Runs
-headless via ``BROWSER_GUARD_HEADLESS`` (the conftest fixture sets it), so it
+headless via ``BROWDEN_HEADLESS`` (the conftest fixture sets it), so it
 works on a CI runner or any machine without a display.
 """
 import pytest
 
-from browser_guard.web_navigator.selenium_chrome import SeleniumChromeBackend
+from browden.web_navigator.selenium_chrome import SeleniumChromeBackend
 
 PNG_MAGIC = b"\x89PNG\r\n\x1a\n"
 

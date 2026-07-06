@@ -1,7 +1,7 @@
 import pytest
 
-from browser_guard.configs import loader as loader_pkg
-from browser_guard.configs.loader import (
+from browden.configs import loader as loader_pkg
+from browden.configs.loader import (
     ConfigError,
     SAMPLE_ALLOWLIST,
     load_allowlist,
@@ -123,17 +123,17 @@ def test_schema_violations_raise_config_error(tmp_path, content, match):
 # -- path resolution ----------------------------------------------------------
 
 def test_resolve_explicit_beats_everything(monkeypatch, tmp_path):
-    monkeypatch.setenv("BROWSER_GUARD_ALLOWLIST", str(tmp_path / "env.yaml"))
+    monkeypatch.setenv("BROWDEN_ALLOWLIST", str(tmp_path / "env.yaml"))
     assert resolve_allowlist_path(str(tmp_path / "cli.yaml")) == tmp_path / "cli.yaml"
 
 
 def test_resolve_env_beats_user_config(monkeypatch, tmp_path):
-    monkeypatch.setenv("BROWSER_GUARD_ALLOWLIST", str(tmp_path / "env.yaml"))
+    monkeypatch.setenv("BROWDEN_ALLOWLIST", str(tmp_path / "env.yaml"))
     assert resolve_allowlist_path() == tmp_path / "env.yaml"
 
 
 def test_resolve_user_config_beats_sample(monkeypatch, tmp_path):
-    monkeypatch.delenv("BROWSER_GUARD_ALLOWLIST", raising=False)
+    monkeypatch.delenv("BROWDEN_ALLOWLIST", raising=False)
     monkeypatch.setattr(loader_pkg.loader, "USER_CONFIG_DIR", tmp_path)
     user = tmp_path / "allowlist.yaml"
     user.write_text("read:\n  enabled: false\n")
@@ -141,6 +141,6 @@ def test_resolve_user_config_beats_sample(monkeypatch, tmp_path):
 
 
 def test_resolve_falls_back_to_sample(monkeypatch, tmp_path):
-    monkeypatch.delenv("BROWSER_GUARD_ALLOWLIST", raising=False)
+    monkeypatch.delenv("BROWDEN_ALLOWLIST", raising=False)
     monkeypatch.setattr(loader_pkg.loader, "USER_CONFIG_DIR", tmp_path / "absent")
     assert resolve_allowlist_path() == SAMPLE_ALLOWLIST

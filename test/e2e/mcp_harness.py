@@ -5,7 +5,7 @@ import subprocess
 import sys
 import time
 from pathlib import Path
-from browser_guard.web_navigator.utils.network_utils import get_free_port
+from browden.web_navigator.utils.network_utils import get_free_port
 
 class McpServerHarness:
     def __init__(self, tmp_path: Path, allowlist_path: Path | None = None):
@@ -26,24 +26,24 @@ class McpServerHarness:
         env["MCP_TRANSPORT"] = "sse"
         env["MCP_HOST"] = "127.0.0.1"
         env["MCP_PORT"] = str(self.port)
-        env["BROWSER_GUARD_HEADLESS"] = "1"
+        env["BROWDEN_HEADLESS"] = "1"
         # Set explicitly in the child env
         env["XDG_CACHE_HOME"] = str(self.tmp_path)
         # The conftest's autouse headless monkeypatch runs per-test, after this
         # session-scoped harness has already spawned the server — set it here
         # so local runs (without CI's job-level env) don't launch headed Chrome.
-        env.setdefault("BROWSER_GUARD_HEADLESS", "1")
+        env.setdefault("BROWDEN_HEADLESS", "1")
         # Pin the allowlist so the test server's policy doesn't depend on
-        # whatever ~/.browser_guard config the host has: the caller's custom
+        # whatever ~/.browden config the host has: the caller's custom
         # config if given, else the repo sample.
         default_allowlist = (
             Path(__file__).resolve().parents[2] / "configs" / "samples" / "allowlist.yaml")
-        env["BROWSER_GUARD_ALLOWLIST"] = str(self.allowlist_path or default_allowlist)
+        env["BROWDEN_ALLOWLIST"] = str(self.allowlist_path or default_allowlist)
         
         log_path = self.tmp_path / "mcp_server.log"
         self._log_file = open(log_path, "w")
         
-        cmd = [sys.executable, "-m", "browser_guard.mcp.server"]
+        cmd = [sys.executable, "-m", "browden.mcp.server"]
         self._proc = subprocess.Popen(
             cmd,
             env=env,

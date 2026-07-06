@@ -2,8 +2,8 @@ import gzip
 
 import pytest
 
-from browser_guard.mcp.validator import TrancoList
-from browser_guard.mcp.validator.tranco import BUNDLED_TOP_N, DEFAULT_TRANCO_PATH
+from browden.mcp.validator import TrancoList
+from browden.mcp.validator.tranco import BUNDLED_TOP_N, DEFAULT_TRANCO_PATH
 
 
 def test_bundled_snapshot_exists_and_has_100k():

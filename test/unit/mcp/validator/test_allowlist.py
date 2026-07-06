@@ -1,6 +1,6 @@
 import pytest
 
-from browser_guard.mcp.validator import ActionAllowlist
+from browden.mcp.validator import ActionAllowlist
 
 
 @pytest.fixture

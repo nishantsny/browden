@@ -1,9 +1,9 @@
 # =============================================================================
-# browser-guard read / deny system — an annotated walkthrough.
+# browden read / deny system — an annotated walkthrough.
 #
 # This is a *documentation* sample: it explains every knob of the read gate and
-# the denylist. To actually use it, copy it to ~/.browser_guard/allowlist.yaml
-# (or point --allowlist / $BROWSER_GUARD_ALLOWLIST at it) and edit to taste.
+# the denylist. To actually use it, copy it to ~/.browden/allowlist.yaml
+# (or point --allowlist / $BROWDEN_ALLOWLIST at it) and edit to taste.
 #
 # WHY THIS EXISTS
 # ---------------

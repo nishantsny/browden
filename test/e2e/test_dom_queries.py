@@ -9,8 +9,8 @@ import urllib.parse
 
 import pytest
 
-from browser_guard.web_navigator.selenium_chrome import SeleniumChromeBackend
-from browser_guard.mcp.session_management.BrowserSessionManager import BrowserSessionManager
+from browden.web_navigator.selenium_chrome import SeleniumChromeBackend
+from browden.mcp.session_management.BrowserSessionManager import BrowserSessionManager
 
 HTML = """<html><body>
   <div id="logo" class="brand mark">BG</div>

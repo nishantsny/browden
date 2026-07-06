@@ -20,7 +20,7 @@ from pathlib import Path
 
 from ...common.logger import logger
 
-# validator/ -> mcp/ -> browser_guard/, then configs/data/
+# validator/ -> mcp/ -> browden/, then configs/data/
 _DATA_DIR = Path(__file__).resolve().parents[2] / "configs" / "data"
 DEFAULT_TRANCO_PATH = _DATA_DIR / "tranco-top-100k.txt.gz"
 BUNDLED_TOP_N = 100_000

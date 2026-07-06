@@ -1,5 +1,5 @@
 """Runs the real setup/onetime_setup.py end to end under a throwaway service
-name and port, so an existing browser-guard service is untouched. Skipped on
+name and port, so an existing browden service is untouched. Skipped on
 hosts without a systemd user session (e.g. some CI runners / macOS)."""
 import shutil
 import socket
@@ -33,14 +33,14 @@ def _run_setup(args):
                     reason="no systemd user session on this host")
 def test_onetime_setup_installs_config_and_service(tmp_path):
     sys.path.insert(0, str(REPO_ROOT))
-    from browser_guard.web_navigator.utils.network_utils import get_free_port
+    from browden.web_navigator.utils.network_utils import get_free_port
 
     port = get_free_port()
-    service = f"browser-guard-e2e-{port}"
+    service = f"browden-e2e-{port}"
     config_dir = tmp_path / "cfg"
     unit_path = Path.home() / ".config" / "systemd" / "user" / f"{service}.service"
     # Pin the service to this interpreter so setup skips venv creation/install
-    # (this test already runs in an env with browser-guard installed).
+    # (this test already runs in an env with browden installed).
     args = ["--port", str(port), "--config-dir", str(config_dir),
             "--service-name", service, "--python", sys.executable]
 

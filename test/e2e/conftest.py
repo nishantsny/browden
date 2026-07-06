@@ -1,6 +1,6 @@
 """Shared setup for the e2e suite: real Chrome, headless, isolated profile.
 
-The backend reads ``BROWSER_GUARD_HEADLESS`` and ``XDG_CACHE_HOME`` when it
+The backend reads ``BROWDEN_HEADLESS`` and ``XDG_CACHE_HOME`` when it
 launches Chrome, so this autouse fixture sets both *before* any backend is
 built. Headless lets the suite run without a display (CI, a server box); a
 throwaway profile under a temp ``XDG_CACHE_HOME`` keeps the test out of the
@@ -12,7 +12,7 @@ import pytest
 
 @pytest.fixture(autouse=True)
 def _headless_isolated_chrome(tmp_path, monkeypatch):
-    monkeypatch.setenv("BROWSER_GUARD_HEADLESS", "1")
+    monkeypatch.setenv("BROWDEN_HEADLESS", "1")
     # The server's _default_profile_dir() reads XDG_CACHE_HOME live, so pointing
     # the env at a throwaway location keeps the test off the user's real profile.
     monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / "cache"))

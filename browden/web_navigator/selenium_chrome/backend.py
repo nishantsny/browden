@@ -34,13 +34,13 @@ def _switch(drv, tab_id: str) -> None:
 
 
 def _headless_enabled() -> bool:
-    """Whether to launch Chrome headless, controlled by ``BROWSER_GUARD_HEADLESS``.
+    """Whether to launch Chrome headless, controlled by ``BROWDEN_HEADLESS``.
 
     A real human-facing session wants a visible window, so this defaults to off.
-    Set ``BROWSER_GUARD_HEADLESS=1`` (or true/yes/on) for environments without a
+    Set ``BROWDEN_HEADLESS=1`` (or true/yes/on) for environments without a
     display — e2e tests and CI runners.
     """
-    return os.environ.get("BROWSER_GUARD_HEADLESS", "").strip().lower() in ("1", "true", "yes", "on")
+    return os.environ.get("BROWDEN_HEADLESS", "").strip().lower() in ("1", "true", "yes", "on")
 
 
 SINGLETON_FILES = ("SingletonLock", "SingletonCookie", "SingletonSocket")
@@ -61,10 +61,10 @@ CHROME_BINARY_NAMES = (
 def _find_chrome_binary() -> str:
     """Locate the Chrome/Chromium executable to launch directly.
 
-    Honours ``BROWSER_GUARD_CHROME_BINARY`` (or the common ``CHROME_BIN``)
+    Honours ``BROWDEN_CHROME_BINARY`` (or the common ``CHROME_BIN``)
     first, then falls back to the usual binary names on PATH.
     """
-    explicit = os.environ.get("BROWSER_GUARD_CHROME_BINARY") or os.environ.get("CHROME_BIN")
+    explicit = os.environ.get("BROWDEN_CHROME_BINARY") or os.environ.get("CHROME_BIN")
     if explicit:
         return explicit
     for name in CHROME_BINARY_NAMES:
@@ -73,7 +73,7 @@ def _find_chrome_binary() -> str:
             return found
     raise RuntimeError(
         "Could not find a Chrome/Chromium binary on PATH; "
-        "set BROWSER_GUARD_CHROME_BINARY to its full path."
+        "set BROWDEN_CHROME_BINARY to its full path."
     )
 
 

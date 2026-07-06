@@ -1,7 +1,7 @@
 import pytest
 
-from browser_guard.dependencies.bs4 import BeautifulSoup
-from browser_guard.dom import query
+from browden.dependencies.bs4 import BeautifulSoup
+from browden.dom import query
 
 HTML = """
 <div id="a" class="card hot"></div>

@@ -30,11 +30,11 @@ DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 8000
 
 _INSTRUCTIONS = (
-    "browser-guard drives a real Chrome session. Within a single profile-dir there is ONE browser session. You can open multiple tabs within that one session, though concurrent requests are only supported across different sessions, but within the same session (this is a limitation of selenium: the underlying automation library). A new profile-dir can be chosen while crating a new tab. If you choose a previously used profile-dir, then the previous session will be reused. Creating a new tab will return a tab-id which is unique across all sessions, pass it back verbatim on other tools."
+    "browden drives a real Chrome session. Within a single profile-dir there is ONE browser session. You can open multiple tabs within that one session, though concurrent requests are only supported across different sessions, but within the same session (this is a limitation of selenium: the underlying automation library). A new profile-dir can be chosen while crating a new tab. If you choose a previously used profile-dir, then the previous session will be reused. Creating a new tab will return a tab-id which is unique across all sessions, pass it back verbatim on other tools."
 )
 
 mcp = FastMCP(
-    "browser-guard",
+    "browden",
     instructions=_INSTRUCTIONS,
     host=os.environ.get("MCP_HOST", DEFAULT_HOST),
     port=int(os.environ.get("MCP_PORT", DEFAULT_PORT))
@@ -44,7 +44,7 @@ mcp = FastMCP(
 # tests and library imports see a deterministic policy. main() re-resolves
 # (CLI > env > user config > sample) and replaces this before serving.
 _ALLOWLIST = load_allowlist(SAMPLE_ALLOWLIST) if SAMPLE_ALLOWLIST.exists() else ActionAllowlist({})
-logger.info("Browser Guard MCP module initialized")
+logger.info("Browden MCP module initialized")
 
 # All per-profile session state and the customer<->backend id mapping live in
 # the store (see session_management/BrowserSessionStore.py).
@@ -59,7 +59,7 @@ def _default_profile_dir() -> Path:
     concrete path.
     """
     root = os.environ.get("XDG_CACHE_HOME") or str(Path.home() / ".cache")
-    return Path(root) / "browser-guard" / "chrome-profile"
+    return Path(root) / "browden" / "chrome-profile"
 
 
 def _resolve_profile_dir(profile_dir: str | None) -> Path:
@@ -333,11 +333,11 @@ def main(argv: list[str] | None = None) -> None:
     """
     global _ALLOWLIST
     parser = argparse.ArgumentParser(
-        prog="browser-guard", description="Browser Guard MCP server")
+        prog="browden", description="Browden MCP server")
     parser.add_argument(
         "--allowlist",
-        help="Path to the allowlist YAML config (default: $BROWSER_GUARD_ALLOWLIST, "
-             "then ~/.browser_guard/allowlist.yaml, then the repo sample)")
+        help="Path to the allowlist YAML config (default: $BROWDEN_ALLOWLIST, "
+             "then ~/.browden/allowlist.yaml, then the repo sample)")
     args = parser.parse_args(argv)
 
     path = resolve_allowlist_path(args.allowlist)
