@@ -3,9 +3,9 @@ import time
 
 import pytest
 
-from browser_guard.common.tab import TabInfo
-from browser_guard.web_navigator.interface import TabNotFoundError
-from browser_guard.mcp.session_management.BrowserSessionManager import IDLE_TTL_SECONDS, BrowserSessionManager
+from browden.common.tab import TabInfo
+from browden.web_navigator.interface import TabNotFoundError
+from browden.mcp.session_management.BrowserSessionManager import IDLE_TTL_SECONDS, BrowserSessionManager
 
 PAGE_HTML = """
 <html><body>

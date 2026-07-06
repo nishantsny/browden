@@ -1,5 +1,5 @@
-from browser_guard.common.tab import TabInfo
-from browser_guard.web_navigator.soup_cache import TTL_SECONDS, SoupCache
+from browden.common.tab import TabInfo
+from browden.web_navigator.soup_cache import TTL_SECONDS, SoupCache
 
 
 class FakeBackend:

@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
-"""One-time setup for Browser Guard (SSE transport only; stdio stays manual).
+"""One-time setup for Browden (SSE transport only; stdio stays manual).
 
 Run it with any Python — `python3 setup/onetime_setup.py`; no venv needed first.
 
 What it does, in order:
-  1. Creates a venv at <repo>/.venv and installs browser-guard into it
+  1. Creates a venv at <repo>/.venv and installs browden into it
      (via `uv`, falling back to stdlib venv + pip). Pass --python to use an
      existing interpreter instead and skip this step.
   2. Copies configs/samples/allowlist.yaml to <config-dir>/allowlist.yaml
-     (default ~/.browser_guard) — skipped if a config is already there.
+     (default ~/.browden) — skipped if a config is already there.
   3. Writes a systemd *user* unit that serves SSE on <port>, pinned to that venv.
   4. Runs `systemctl --user daemon-reload` and `enable --now <service-name>`.
   5. Prints the JSON block to add to your agent's settings by hand.
@@ -28,13 +28,13 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[1]
 SAMPLE_ALLOWLIST = REPO_ROOT / "configs" / "samples" / "allowlist.yaml"
 DEFAULT_PORT = 22001  # usually unused; well clear of dev servers on 8000/3000
-DEFAULT_CONFIG_DIR = "~/.browser_guard"
-DEFAULT_SERVICE_NAME = "browser-guard"
+DEFAULT_CONFIG_DIR = "~/.browden"
+DEFAULT_SERVICE_NAME = "browden"
 DEFAULT_VENV = REPO_ROOT / ".venv"
 
 UNIT_TEMPLATE = """\
 [Unit]
-Description=Browser Guard MCP Server (SSE, {service_name})
+Description=Browden MCP Server (SSE, {service_name})
 After=network.target
 
 [Service]
@@ -43,7 +43,7 @@ Environment=MCP_TRANSPORT=sse
 Environment=MCP_HOST=127.0.0.1
 Environment=MCP_PORT={port}
 WorkingDirectory={repo_root}
-ExecStart={python} -m browser_guard.mcp.server --allowlist {allowlist}
+ExecStart={python} -m browden.mcp.server --allowlist {allowlist}
 Restart=always
 RestartSec=5
 
@@ -58,7 +58,7 @@ def _run(cmd: list[str]) -> None:
 
 
 def ensure_venv(venv_dir: Path) -> Path:
-    """Create ``venv_dir`` (if absent) and install browser-guard into it editable.
+    """Create ``venv_dir`` (if absent) and install browden into it editable.
 
     Prefers ``uv``; falls back to the stdlib ``venv`` + ``pip``. Idempotent — an
     existing venv is reused and the (fast) editable reinstall just refreshes it.
@@ -75,7 +75,7 @@ def ensure_venv(venv_dir: Path) -> Path:
         if not python.exists():
             _run([sys.executable, "-m", "venv", str(venv_dir)])
         _run([str(python), "-m", "pip", "install", "-e", str(REPO_ROOT)])
-    print(f"[ok]   browser-guard installed in {venv_dir}")
+    print(f"[ok]   browden installed in {venv_dir}")
     return python
 
 

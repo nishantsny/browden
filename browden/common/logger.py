@@ -4,7 +4,7 @@ import sys
 def configure_logging():
     """Configure logging to stderr for MCP compatibility."""
     # Create a logger for the package
-    logger = logging.getLogger("browser_guard")
+    logger = logging.getLogger("browden")
     
     # Avoid duplicate handlers if called multiple times
     if not logger.handlers:

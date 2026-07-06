@@ -3,7 +3,7 @@ requires = ["setuptools>=77", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "browser-guard"
+name = "browden"
 version = "0.1.0"
 description = "A protective shell around browser-automation MCPs"
 authors = [{ name = "Nishant", email = "nishantsny@gmail.com" }]
@@ -24,12 +24,12 @@ dev = ["pytest>=8", "pytest-asyncio>=0.23"]
 asyncio_mode = "auto"
 
 [project.scripts]
-browser-guard = "browser_guard.mcp.server:main"
+browden = "browden.mcp.server:main"
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["browser_guard*"]
+include = ["browden*"]
 
 [tool.setuptools.package-data]
 # Bundle the offline Tranco top-sites snapshot the read allowlist reads.
-"browser_guard.configs" = ["data/*.gz"]
+"browden.configs" = ["data/*.gz"]

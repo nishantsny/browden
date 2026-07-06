@@ -9,7 +9,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from browser_guard.mcp.validator import ActionAllowlist, ValidationError
+from browden.mcp.validator import ActionAllowlist, ValidationError
 
 # Mirror of allowlist.yaml with the showcase click block uncommented.
 _ENABLED_ALLOWLIST = ActionAllowlist({
@@ -47,7 +47,7 @@ def _session(*, url, elements):
 async def test_shipped_default_denies_click_everywhere():
     # The click block in the shipped allowlist.yaml is commented out, so
     # even amazon.com is refused until the user opts in.
-    import browser_guard.mcp.server as server
+    import browden.mcp.server as server
     __import__("importlib").reload(server)
     session = _session(url="https://www.amazon.com/dp/B0FBRRM2VQ", elements=[_atc_node()])
     with patch.object(server._store, "route", return_value=session):
@@ -58,7 +58,7 @@ async def test_shipped_default_denies_click_everywhere():
 
 @pytest.mark.asyncio
 async def test_happy_path_clicks():
-    import browser_guard.mcp.server as server
+    import browden.mcp.server as server
     importlib = __import__("importlib")
     importlib.reload(server)
     session = _session(url="https://www.amazon.com/dp/B0FBRRM2VQ", elements=[_atc_node()])
@@ -73,7 +73,7 @@ async def test_happy_path_clicks():
 async def test_denylist_vetoes_click_even_when_click_host_is_allowed():
     # amazon.com is on the click allowlist AND the denylist — denylist wins, so
     # the element is never even inspected.
-    import browser_guard.mcp.server as server
+    import browden.mcp.server as server
     __import__("importlib").reload(server)
     session = _session(url="https://www.amazon.com/dp/B0FBRRM2VQ", elements=[_atc_node()])
     with patch.object(server._store, "route", return_value=session), \
@@ -86,7 +86,7 @@ async def test_denylist_vetoes_click_even_when_click_host_is_allowed():
 
 @pytest.mark.asyncio
 async def test_host_not_allowed_is_rejected():
-    import browser_guard.mcp.server as server
+    import browden.mcp.server as server
     __import__("importlib").reload(server)
     session = _session(url="https://evil.example.com/p", elements=[_atc_node()])
     with patch.object(server._store, "route", return_value=session), \
@@ -100,7 +100,7 @@ async def test_host_not_allowed_is_rejected():
 async def test_buy_now_rejected_by_site_label():
     # "Buy Now" is a real control (the predicate no longer vetoes it on intent),
     # but amazon.com requires the "add to cart" label — so Gate 3 refuses it.
-    import browser_guard.mcp.server as server
+    import browden.mcp.server as server
     __import__("importlib").reload(server)
     session = _session(url="https://www.amazon.com/dp/X",
                        elements=[_atc_node(value="Buy Now")])
@@ -116,7 +116,7 @@ async def test_allow_all_host_clicks_any_real_control():
     # A host listed with paths but NO label means "any click here is fine" — so a
     # "Place your order" button (once vetoed by the hardcoded negative list) now
     # clicks. Integrity still holds: it must be a real, non-decoy control.
-    import browser_guard.mcp.server as server
+    import browden.mcp.server as server
     __import__("importlib").reload(server)
     allow_all = ActionAllowlist({
         "read": {"website_overrides": {"*": [".*"]}},
@@ -136,7 +136,7 @@ async def test_allow_all_host_clicks_any_real_control():
 async def test_allow_all_host_still_rejects_decoy():
     # "Any click" does not extend to page-injected agent decoys — that guard is
     # intent-independent and always applies.
-    import browser_guard.mcp.server as server
+    import browden.mcp.server as server
     __import__("importlib").reload(server)
     allow_all = ActionAllowlist({
         "read": {"website_overrides": {"*": [".*"]}},
@@ -154,7 +154,7 @@ async def test_allow_all_host_still_rejects_decoy():
 
 @pytest.mark.asyncio
 async def test_ambiguous_selector_is_rejected():
-    import browser_guard.mcp.server as server
+    import browden.mcp.server as server
     __import__("importlib").reload(server)
     session = _session(url="https://www.amazon.com/dp/X",
                        elements=[_atc_node(), _atc_node()])
@@ -168,7 +168,7 @@ async def test_ambiguous_selector_is_rejected():
 @pytest.mark.asyncio
 async def test_label_mismatch_for_site_is_rejected():
     # "Add to bag" passes the generic predicate but amazon.com requires "add to cart".
-    import browser_guard.mcp.server as server
+    import browden.mcp.server as server
     __import__("importlib").reload(server)
     session = _session(url="https://www.amazon.com/dp/X",
                        elements=[_atc_node(value="Add to bag")])
@@ -181,7 +181,7 @@ async def test_label_mismatch_for_site_is_rejected():
 
 @pytest.mark.asyncio
 async def test_page_gone_returns_error():
-    import browser_guard.mcp.server as server
+    import browden.mcp.server as server
     __import__("importlib").reload(server)
     session = _session(url=None, elements=[])
     with patch.object(server._store, "route", return_value=session):

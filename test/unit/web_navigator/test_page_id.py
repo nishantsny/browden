@@ -1,7 +1,7 @@
 """Unit tests for the page-id wire-format helpers (format/split pair)."""
 import pytest
 
-from browser_guard.web_navigator.page_id import (
+from browden.web_navigator.page_id import (
     SEPARATOR,
     format_page_id,
     split_page_id,

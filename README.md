@@ -1,4 +1,4 @@
-# browser-guard
+# browden
 
 **A safe, read-only MCP shell around a real Chrome browser.** It lets an LLM
 agent *look at* and *navigate* the web through your own browser — reading pages,
@@ -8,11 +8,11 @@ unguarded power of a CDP or Playwright client.
 By default the agent can read and navigate, and nothing else. The one write
 action that exists (`click`) ships **disabled** and, even when enabled, can
 only click an allowlisted button on an allowlisted site. That's what makes it
-safe to point browser-guard at a Chrome profile you actually use.
+safe to point browden at a Chrome profile you actually use.
 
 ## Disclaimer
 
-browser-guard drives a **real, undetected** Chrome, so a site can't tell your
+browden drives a **real, undetected** Chrome, so a site can't tell your
 agent's visits from your own. That puts the responsibility on you: only point it
 at sites whose Terms of Service permit automated access, and read those terms
 first.
@@ -20,7 +20,7 @@ first.
 ## Table of contents
 
 - [Disclaimer](#disclaimer)
-- [Why browser-guard](#why-browser-guard)
+- [Why browden](#why-browden)
 - [Quick start](#quick-start)
 - [Tools](#tools)
 - [Profiles](#profiles)
@@ -31,7 +31,7 @@ first.
 - [Future work](#future-work)
 - [License](#license)
 
-## Why browser-guard
+## Why browden
 
 - **Read-only by default.** The agent gets a small, audited surface: list/open/
   close/select tabs, navigate, read the DOM, screenshot. There is exactly one
@@ -46,7 +46,7 @@ first.
   your own list). It shrinks the attack surface, not a substitute for treating page
   content as untrusted — a reputable domain can still host a hostile comment or ad.
 - **Safe on your real profile.** Because the agent *can't* take write actions on
-  your browser, you can point browser-guard at your primary Chrome profile and
+  your browser, you can point browden at your primary Chrome profile and
   let it reuse your existing logins — the agent can read your logged-in pages but
   cannot click "Buy", change settings, send mail, or delete anything.
 - **Fully local.** It runs entirely on your machine and drives a Chrome on your
@@ -61,10 +61,10 @@ first.
 ## Quick start
 
 ```bash
-git clone https://github.com/nishantsny/browser-guard.git
-cd browser-guard
+git clone https://github.com/nishantsny/browden.git
+cd browden
 
-# Creates a venv, installs browser-guard, starts the background (SSE) service,
+# Creates a venv, installs browden, starts the background (SSE) service,
 # and prints the agent config to paste below.
 python3 setup/onetime_setup.py
 ```
@@ -73,7 +73,7 @@ Then paste the printed block into your agent's MCP config (e.g. `~/.claude.json`
 
 ```json
 "mcpServers": {
-  "browser-guard": {
+  "browden": {
     "type": "sse",
     "url": "http://127.0.0.1:22001/sse"
   }
@@ -86,7 +86,7 @@ all the setup options.
 
 ## Tools
 
-browser-guard exposes twelve tools over a swappable `WebNavigatorBackend`
+browden exposes twelve tools over a swappable `WebNavigatorBackend`
 (Selenium + Chrome by default). Each tool that acts on a specific tab takes the
 tab's `id` — the value returned by `new_blank_tab` / `list_tabs`. Pass it back
 verbatim; it is globally unique and routes itself to the right profile.
@@ -121,7 +121,7 @@ cookies, storage, and logins. The crucial rule:
 > **One profile = one Chrome window at a time.** A profile directory can be held
 > by only a single Chrome process (it's guarded by Chrome's `SingletonLock`).
 
-browser-guard keeps **one browser session per profile**, launched lazily on
+browden keeps **one browser session per profile**, launched lazily on
 first use. That has two consequences:
 
 - **Different profiles run in parallel.** Give a request its own `profile_dir`
@@ -137,13 +137,13 @@ first use. That has two consequences:
 - **Let the agent create one** (or pass a fresh `profile_dir`) when you just want
   the agent to drive a browser. This is the normal, friction-free path.
 - **Point it at your real Chrome profile** to reuse your existing logins. Since
-  that profile can only be open in one window, browser-guard *becomes* that
+  that profile can only be open in one window, browden *becomes* that
   window: you can watch it, but you shouldn't also run your everyday Chrome on
   the same profile at the same time, and the window is there for the agent to
   drive — not for you to click around in.
 
 If you omit `profile_dir`, requests use a shared default profile at
-`~/.cache/browser-guard/chrome-profile`, so logins persist across restarts.
+`~/.cache/browden/chrome-profile`, so logins persist across restarts.
 
 ## Safety: the allowlist
 
@@ -179,7 +179,7 @@ open. The policy has **three layers**, evaluated in order (first match wins):
 
 Bare domains are normalized to `https://`, `www.` is stripped, and query
 strings/fragments pass through untouched; anything not allowed is rejected with a
-structured error. The config lives at `~/.browser_guard/allowlist.yaml` (installed
+structured error. The config lives at `~/.browden/allowlist.yaml` (installed
 by the setup script; falls back to the repo sample at
 `configs/samples/allowlist.yaml`). It's schema-checked on load — a malformed file
 fails startup with the offending field named. A fully-commented tour of the
@@ -244,14 +244,14 @@ Key points of the flow:
 Keeps the Chrome session warm across agent restarts.
 
 ```bash
-git clone https://github.com/nishantsny/browser-guard.git
-cd browser-guard
+git clone https://github.com/nishantsny/browden.git
+cd browden
 python3 setup/onetime_setup.py
 ```
 
-The setup script creates a venv at `.venv` and installs browser-guard into it
+The setup script creates a venv at `.venv` and installs browden into it
 (via `uv`, falling back to stdlib `venv` + `pip`), copies the sample allowlist to
-`~/.browser_guard/allowlist.yaml` (never overwriting an existing one), writes a
+`~/.browden/allowlist.yaml` (never overwriting an existing one), writes a
 **systemd user service** serving SSE on port **22001** pinned to that venv,
 enables it, and prints the JSON block to add to your agent. It's idempotent.
 Useful flags: `--port`, `--config-dir`, `--service-name` (stand up a second
@@ -266,10 +266,10 @@ new list:
 
 ```bash
 python3 setup/fetch_tranco.py                    # re-download the top-100k snapshot
-systemctl --user restart browser-guard.service   # reload it into the running server
+systemctl --user restart browden.service   # reload it into the running server
 ```
 
-The setup script installs browser-guard *editable*, so the file `fetch_tranco.py`
+The setup script installs browden *editable*, so the file `fetch_tranco.py`
 rewrites is the same one the server reads — the restart is all it takes to load
 the new list. Pass `--top-n N` to keep a different number of domains, and use your
 own `--service-name` in the restart if you installed under one. (If you instead
@@ -281,14 +281,14 @@ For simple local use where the agent manages the process lifecycle. Add to your
 agent's `mcpServers`:
 
 ```json
-"browser-guard": {
-  "command": "/path/to/browser-guard/.venv/bin/python",
-  "args": ["-m", "browser_guard.mcp.server", "--allowlist", "/home/you/.browser_guard/allowlist.yaml"],
+"browden": {
+  "command": "/path/to/browden/.venv/bin/python",
+  "args": ["-m", "browden.mcp.server", "--allowlist", "/home/you/.browden/allowlist.yaml"],
   "env": { "DISPLAY": ":0" }
 }
 ```
 
-`--allowlist` is optional (it falls back to `~/.browser_guard/allowlist.yaml`
+`--allowlist` is optional (it falls back to `~/.browden/allowlist.yaml`
 then the repo sample). `DISPLAY` is only needed when launching headed Chrome
 from a non-graphical parent process. Restart the agent to register the server.
 
@@ -302,7 +302,7 @@ downloads), `beautifulsoup4`, and `pyyaml`.
 uv venv && uv pip install -e ".[dev]"
 pytest test/unit/                    # never launches a browser
 pytest test/e2e/                     # drives a real Chrome
-BROWSER_GUARD_HEADLESS=1 pytest test/e2e/   # on a machine with no display
+BROWDEN_HEADLESS=1 pytest test/e2e/   # on a machine with no display
 ```
 
 The e2e suite renders inline `data:` pages in a throwaway profile (no network,

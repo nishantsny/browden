@@ -13,10 +13,10 @@ import yaml
 from ...mcp.validator.allowlist import ActionAllowlist
 from .schema import ConfigError, validate_allowlist_data
 
-# loader/ -> configs/ -> browser_guard/ -> repo root
+# loader/ -> configs/ -> browden/ -> repo root
 _REPO_ROOT = Path(__file__).resolve().parents[3]
 SAMPLE_ALLOWLIST = _REPO_ROOT / "configs" / "samples" / "allowlist.yaml"
-USER_CONFIG_DIR = Path("~/.browser_guard")
+USER_CONFIG_DIR = Path("~/.browden")
 
 
 def load_allowlist(path: Path | str) -> ActionAllowlist:
@@ -36,13 +36,13 @@ def load_allowlist(path: Path | str) -> ActionAllowlist:
 def resolve_allowlist_path(explicit: str | None = None) -> Path | None:
     """Pick the allowlist file to load, most specific first.
 
-    Explicit CLI argument > ``BROWSER_GUARD_ALLOWLIST`` env var >
-    ``~/.browser_guard/allowlist.yaml`` (installed by setup/onetime_setup.py) >
+    Explicit CLI argument > ``BROWDEN_ALLOWLIST`` env var >
+    ``~/.browden/allowlist.yaml`` (installed by setup/onetime_setup.py) >
     the repo sample. None if nothing is found.
     """
     if explicit:
         return Path(explicit).expanduser()
-    env = os.environ.get("BROWSER_GUARD_ALLOWLIST")
+    env = os.environ.get("BROWDEN_ALLOWLIST")
     if env:
         return Path(env).expanduser()
     user = (USER_CONFIG_DIR / "allowlist.yaml").expanduser()

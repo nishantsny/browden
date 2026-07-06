@@ -2,7 +2,7 @@
 """Refresh the bundled Tranco top-sites snapshot the read allowlist uses.
 
 The read allowlist's Tranco option (see configs/samples/allowlist-read-deny.yaml)
-matches hosts against ``browser_guard/configs/data/tranco-top-100k.txt.gz`` — the
+matches hosts against ``browden/configs/data/tranco-top-100k.txt.gz`` — the
 top-N most-visited registrable domains, held offline so there is no network call
 at request time. This script regenerates that file from the latest Tranco list.
 
@@ -25,7 +25,7 @@ import zipfile
 from pathlib import Path
 
 TRANCO_ZIP_URL = "https://tranco-list.eu/top-1m.csv.zip"
-OUT_PATH = Path(__file__).resolve().parents[1] / "browser_guard" / "configs" / "data" / "tranco-top-100k.txt.gz"
+OUT_PATH = Path(__file__).resolve().parents[1] / "browden" / "configs" / "data" / "tranco-top-100k.txt.gz"
 
 
 def fetch(top_n: int, url: str, out_path: Path) -> int:

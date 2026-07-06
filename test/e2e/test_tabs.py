@@ -9,7 +9,7 @@ import urllib.parse
 
 import pytest
 
-from browser_guard.web_navigator.selenium_chrome import SeleniumChromeBackend
+from browden.web_navigator.selenium_chrome import SeleniumChromeBackend
 
 
 def _data_url(token: str) -> str:

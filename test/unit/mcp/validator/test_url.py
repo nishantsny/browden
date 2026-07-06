@@ -1,6 +1,6 @@
 import pytest
 
-from browser_guard.mcp.validator import Allowlist, ValidationError, validate_url
+from browden.mcp.validator import Allowlist, ValidationError, validate_url
 
 
 @pytest.fixture

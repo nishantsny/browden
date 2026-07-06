@@ -2,7 +2,7 @@ import re
 
 import pytest
 
-from browser_guard.mcp.validator import is_clickable_control, label_matches
+from browden.mcp.validator import is_clickable_control, label_matches
 
 
 def node(tag="input", *, text="", **attrs):

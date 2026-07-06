@@ -1,4 +1,4 @@
-# browser-guard access policy.
+# browden access policy.
 #
 # Three independent layers, evaluated in this order for every URL:
 #

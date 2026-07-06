@@ -1,6 +1,6 @@
 import pytest
 
-from browser_guard.web_navigator.selenium_chrome import SeleniumChromeBackend
+from browden.web_navigator.selenium_chrome import SeleniumChromeBackend
 
 # A self-contained page so the test is deterministic and offline: a real network
 # host can redirect (amazon.com -> www.amazon.com) and break an exact-URL assert.
