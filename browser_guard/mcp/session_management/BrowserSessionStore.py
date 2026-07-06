@@ -4,9 +4,9 @@ One :class:`BrowserSessionManager` (hence one Chrome process) per profile
 directory. Requests that share a profile share its session and run serially
 through it; requests on *different* profiles get independent Chrome sessions and
 run concurrently, since distinct ``--user-data-dir`` profiles don't share window
-focus or the per-dir ``SingletonLock``. The default (``profile_dir=None``) is
-resolved to the shared default profile *path* (via :meth:`profile_key`) before
-the backend is built, so existing single-profile behaviour is unchanged.
+focus or the per-dir ``SingletonLock``. The server resolves the profile path
+(the caller's, or the shared default) and builds the backend before handing it
+to :meth:`get_or_create_session`; the store sees only the backend interface.
 
 Sessions are keyed by a per-profile namespace (a digest of the profile path).
 The server — not the backend — composes the customer-facing ``id`` as
@@ -15,12 +15,10 @@ The server — not the backend — composes the customer-facing ``id`` as
 """
 import atexit
 import hashlib
-from pathlib import Path
 
 from ...common.logger import logger
+from ...web_navigator.interface import WebNavigatorBackend
 from ...web_navigator.page_id import split_page_id
-from ...web_navigator.selenium_chrome import SeleniumChromeBackend
-from ...web_navigator.selenium_chrome import backend as selenium_backend
 from .BrowserSessionManager import BrowserSessionManager
 
 
@@ -43,17 +41,6 @@ class BrowserSessionStore:
         self._digests: dict[str, str] = {}
         self._atexit_registered = False
 
-    def profile_key(self, profile_dir: str | None) -> str:
-        """Canonical registry key for a profile dir; None -> the default profile's path.
-
-        Reads the backend module's ``PROFILE_DIR`` for the default rather than
-        constructing a backend, so it stays cheap and side-effect-free (and works
-        when the backend class is mocked in tests).
-        """
-        if profile_dir:
-            return str(Path(profile_dir).expanduser().resolve())
-        return str(selenium_backend.PROFILE_DIR)
-
     def digest_for(self, key: str) -> str:
         """Mint (and memoize) the id namespace for a profile path.
 
@@ -72,22 +59,27 @@ class BrowserSessionStore:
             digest = self._digests[key] = full[:n]
         return digest
 
-    def get_or_create_session(self, profile_dir: str | None = None) -> BrowserSessionManager:
-        """Lazily build (and cache) the coordinator for ``profile_dir``.
+    def get_or_create_session(self, backend: WebNavigatorBackend) -> BrowserSessionManager:
+        """Cache (and return) the coordinator for ``backend``'s profile.
 
-        The session is handed its profile namespace so it can compose its own
-        tabs' ids. Called from inside a tool coroutine, so an event loop is
-        already running — safe for ``BrowserSessionManager.__init__`` to
-        ``asyncio.create_task`` the reaper. Never invoked at import time. Runs
-        synchronously on the single event loop (no await between lookup and
-        insert), so get-then-set cannot interleave.
+        The caller (the server) builds ``backend`` bound to a concrete, resolved
+        profile path; the store keys sessions by a digest of that path and sees
+        only the :class:`WebNavigatorBackend` interface. A ``backend`` whose
+        profile already has a live session is discarded unused — construction is
+        side-effect-free (no Chrome launched until first driven), so the cost is
+        just an object — and the existing session is returned.
+
+        Called from inside a tool coroutine, so an event loop is already running
+        — safe for ``BrowserSessionManager.__init__`` to ``asyncio.create_task``
+        the reaper. Runs synchronously on the single event loop (no await between
+        lookup and insert), so get-then-set cannot interleave.
         """
-        key = self.profile_key(profile_dir)
+        key = str(backend.get_profile_dir())
         digest = self.digest_for(key)
         session = self._sessions.get(digest)
         if session is None:
             logger.info(f"Initializing BrowserSessionManager (profile={key})")
-            session = BrowserSessionManager(SeleniumChromeBackend(profile_dir=key), namespace=digest)
+            session = BrowserSessionManager(backend, namespace=digest)
             self._sessions[digest] = session
             if not self._atexit_registered:
                 atexit.register(self._shutdown)

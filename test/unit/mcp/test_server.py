@@ -25,7 +25,7 @@ def test_tab_entry_point_docs_warn_about_concurrency():
 
 def test_no_backend_or_session_at_import():
     """Importing server must not construct a backend, a BrowserSessionManager, or a reaper task."""
-    with patch("browser_guard.mcp.session_management.BrowserSessionStore.SeleniumChromeBackend") as mock_backend, \
+    with patch("browser_guard.mcp.server.SeleniumChromeBackend") as mock_backend, \
          patch("browser_guard.mcp.session_management.BrowserSessionStore.BrowserSessionManager") as mock_session:
         import browser_guard.mcp.server as server
         importlib.reload(server)
@@ -36,13 +36,14 @@ def test_no_backend_or_session_at_import():
 
 def test_shutdown_registered_once_and_closes_every_session():
     import browser_guard.mcp.session_management.BrowserSessionStore as store_mod
+    from browser_guard.web_navigator.selenium_chrome import SeleniumChromeBackend
     with patch.object(store_mod, "atexit") as mock_atexit, \
-         patch("browser_guard.mcp.session_management.BrowserSessionStore.SeleniumChromeBackend"), \
          patch("browser_guard.mcp.session_management.BrowserSessionStore.BrowserSessionManager",
                side_effect=lambda *a, **k: MagicMock()):
         store = store_mod.BrowserSessionStore()
         # Building three profiles' sessions registers the atexit hook exactly once.
-        sessions = [store.get_or_create_session(f"/p/{i}") for i in range(3)]
+        # (Constructing a backend launches no Chrome, so this stays cheap.)
+        sessions = [store.get_or_create_session(SeleniumChromeBackend(f"/p/{i}")) for i in range(3)]
         assert mock_atexit.register.call_count == 1
         hook = mock_atexit.register.call_args.args[0]
         assert hook == store._shutdown
@@ -66,10 +67,11 @@ def test_shutdown_continues_after_one_session_fails():
 def test_get_session_is_lazy_and_cached():
     import browser_guard.mcp.server as server
     importlib.reload(server)
-    with patch("browser_guard.mcp.session_management.BrowserSessionStore.SeleniumChromeBackend"), \
-         patch("browser_guard.mcp.session_management.BrowserSessionStore.BrowserSessionManager") as mock_session_cls:
-        s1 = server._store.get_or_create_session()
-        s2 = server._store.get_or_create_session()
+    # Two backends for the same (default) profile map to one cached session;
+    # the store never launches Chrome — building a backend is side-effect-free.
+    with patch("browser_guard.mcp.session_management.BrowserSessionStore.BrowserSessionManager") as mock_session_cls:
+        s1 = server._store.get_or_create_session(server._backend_for(None))
+        s2 = server._store.get_or_create_session(server._backend_for(None))
         assert s1 is s2
         assert mock_session_cls.call_count == 1
 
@@ -78,24 +80,24 @@ def test_distinct_profile_dirs_get_distinct_sessions(tmp_path):
     import browser_guard.mcp.server as server
     importlib.reload(server)
     a, b = tmp_path / "a", tmp_path / "b"
-    with patch("browser_guard.mcp.session_management.BrowserSessionStore.SeleniumChromeBackend") as mock_backend, \
-         patch("browser_guard.mcp.session_management.BrowserSessionStore.BrowserSessionManager", side_effect=lambda *a, **k: MagicMock()):
-        sa1 = server._store.get_or_create_session(str(a))
-        sa2 = server._store.get_or_create_session(str(a))
-        sb = server._store.get_or_create_session(str(b))
+    with patch("browser_guard.mcp.session_management.BrowserSessionStore.BrowserSessionManager",
+               side_effect=lambda *a, **k: MagicMock()) as mock_mgr:
+        sa1 = server._store.get_or_create_session(server._backend_for(str(a)))
+        sa2 = server._store.get_or_create_session(server._backend_for(str(a)))
+        sb = server._store.get_or_create_session(server._backend_for(str(b)))
         # same profile -> same cached session; different profile -> different one
         assert sa1 is sa2
         assert sa1 is not sb
-        # each backend was built bound to the (canonicalized) profile asked for
-        profiles = {c.kwargs.get("profile_dir") for c in mock_backend.call_args_list}
-        assert profiles == {server._store.profile_key(str(a)), server._store.profile_key(str(b))}
+        # each session was built on a backend bound to the (resolved) profile asked for
+        profiles = {str(c.args[0].get_profile_dir()) for c in mock_mgr.call_args_list}
+        assert profiles == {str(a.resolve()), str(b.resolve())}
 
 
 def test_digest_collision_extends_namespace(tmp_path):
     import hashlib
     import browser_guard.mcp.server as server
     importlib.reload(server)
-    key = server._store.profile_key(str(tmp_path / "p"))
+    key = str(server._resolve_profile_dir(str(tmp_path / "p")))
     full = hashlib.sha256(key.encode()).hexdigest()
     # Another profile already owns this key's 8-char prefix.
     server._store._sessions[full[:8]] = MagicMock()
@@ -103,15 +105,28 @@ def test_digest_collision_extends_namespace(tmp_path):
     assert server._store.digest_for(key) == full[:9]  # memoized, stable across calls
 
 
-def test_profile_key_is_stable_and_distinguishes_dirs(tmp_path):
+def test_resolve_profile_dir_is_stable_and_distinguishes_dirs(tmp_path):
     import browser_guard.mcp.server as server
     importlib.reload(server)
     # None is stable across calls (so the default profile maps to one session).
-    assert server._store.profile_key(None) == server._store.profile_key(None)
-    # Distinct dirs yield distinct keys; the same dir is stable.
+    assert server._resolve_profile_dir(None) == server._resolve_profile_dir(None)
+    # Distinct dirs yield distinct paths; the same dir is stable.
     a, b = str(tmp_path / "a"), str(tmp_path / "b")
-    assert server._store.profile_key(a) == server._store.profile_key(a)
-    assert server._store.profile_key(a) != server._store.profile_key(b)
+    assert server._resolve_profile_dir(a) == server._resolve_profile_dir(a)
+    assert server._resolve_profile_dir(a) != server._resolve_profile_dir(b)
+
+
+def test_default_profile_dir_honours_xdg(monkeypatch, tmp_path):
+    import browser_guard.mcp.server as server
+    monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path))
+    assert server._default_profile_dir() == tmp_path / "browser-guard" / "chrome-profile"
+
+
+def test_default_profile_dir_falls_back_to_home(monkeypatch, tmp_path):
+    import browser_guard.mcp.server as server
+    monkeypatch.delenv("XDG_CACHE_HOME", raising=False)
+    monkeypatch.setenv("HOME", str(tmp_path))
+    assert server._default_profile_dir() == tmp_path / ".cache" / "browser-guard" / "chrome-profile"
 
 
 def _fake_session(**methods):
@@ -267,7 +282,7 @@ def test_route_unknown_page_id_raises():
 def test_route_selects_session_by_namespace(tmp_path):
     import browser_guard.mcp.server as server
     importlib.reload(server)
-    key = server._store.profile_key(str(tmp_path / "p"))
+    key = str(server._resolve_profile_dir(str(tmp_path / "p")))
     ns = server._store.digest_for(key)
     session = MagicMock()
     server._store._sessions[ns] = session

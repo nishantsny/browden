@@ -33,12 +33,6 @@ def _switch(drv, tab_id: str) -> None:
         raise TabNotFoundError(f"tab {tab_id!r} is not open") from None
 
 
-def _default_profile_dir() -> Path:
-    """Resolve the Chrome profile path, respecting XDG_CACHE_HOME."""
-    root = os.environ.get("XDG_CACHE_HOME") or str(Path.home() / ".cache")
-    return Path(root) / "browser-guard" / "chrome-profile"
-
-
 def _headless_enabled() -> bool:
     """Whether to launch Chrome headless, controlled by ``BROWSER_GUARD_HEADLESS``.
 
@@ -49,7 +43,6 @@ def _headless_enabled() -> bool:
     return os.environ.get("BROWSER_GUARD_HEADLESS", "").strip().lower() in ("1", "true", "yes", "on")
 
 
-PROFILE_DIR = _default_profile_dir()
 SINGLETON_FILES = ("SingletonLock", "SingletonCookie", "SingletonSocket")
 TITLE_WAIT_SECONDS = 3
 # Cold Chrome starts can take several seconds; under concurrent launches (many
@@ -225,10 +218,10 @@ class SeleniumChromeBackend(WebNavigatorBackend):
 
     Each instance owns exactly one Chrome session bound to one profile
     directory (``--user-data-dir``). ``profile_dir`` is required — the caller
-    picks the path (the MCP server resolves the shared default via
-    ``_profile_key``); distinct profiles don't share the per-dir
-    ``SingletonLock``, so two backends on two profiles run concurrently without
-    clobbering each other's window focus.
+    picks the path (the MCP server resolves the shared default and hands it in;
+    the backend never falls back to a default of its own); distinct profiles
+    don't share the per-dir ``SingletonLock``, so two backends on two profiles
+    run concurrently without clobbering each other's window focus.
 
     Page ids are raw Selenium window handles: the backend has no notion of the
     server's composite ``<profile>-<handle>`` id (see ``WebNavigatorBackend``).
