@@ -153,6 +153,17 @@ def test_chrome_args_have_no_automation_flags(tmp_path, monkeypatch):
     assert "--test-type" not in joined
     # Headed by default: no headless switch unless asked for.
     assert not any(a.startswith("--headless") for a in args)
+    # Software WebGL fallback is always on: a GPU-less host must still expose a
+    # WebGL context, or anti-bot sensors (Akamai) flag the session — issue #29.
+    assert "--enable-unsafe-swiftshader" in args
+
+
+def test_chrome_args_enable_swiftshader_when_headless(tmp_path, monkeypatch):
+    monkeypatch.setenv("BROWSER_GUARD_CHROME_BINARY", "/usr/bin/google-chrome")
+    monkeypatch.setenv("BROWSER_GUARD_HEADLESS", "1")
+    args = _chrome_args(tmp_path / "profile", 9222)
+    # The WebGL fallback matters headless too (CI, containers): keep it on.
+    assert "--enable-unsafe-swiftshader" in args
 
 
 def test_chrome_args_headless_when_enabled(tmp_path, monkeypatch):

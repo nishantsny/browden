@@ -110,6 +110,17 @@ def _chrome_args(profile_dir: Path, port: int) -> list[str]:
         "--remote-allow-origins=*",
         "--no-first-run",
         "--no-default-browser-check",
+        # Guarantee a WebGL context even on GPU-less hosts (VMs, containers, our
+        # Hyper-V deployment box: hyperv_drm exposes no DRM render node, so
+        # Chrome's ANGLE/EGL backend can't initialise hardware GL). Chrome >= 121
+        # no longer falls back to its bundled SwiftShader for WebGL by default,
+        # so getContext('webgl') returns null — a browser advertising *zero*
+        # WebGL support is a decisive bot signal for Akamai & friends, which
+        # then 403 the site's order-data XHRs (see issue #29). Re-enabling the
+        # software fallback yields a real context (ANGLE/SwiftShader renderer)
+        # and clears that flag. On a host with a real GPU this is inert — Chrome
+        # keeps using hardware GL and only reaches for SwiftShader as a fallback.
+        "--enable-unsafe-swiftshader",
     ]
     if _headless_enabled():
         # New headless mode + the flags a sandboxed CI container needs.
