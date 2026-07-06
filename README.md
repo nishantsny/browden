@@ -1,196 +1,227 @@
 # browser-guard
 
-A protective MCP shell around browser automation. Exposes a small, audited
-surface to an LLM agent so it can drive a real Chrome session without being
-handed the full power of a CDP or Playwright client.
+**A safe, read-only MCP shell around a real Chrome browser.** It lets an LLM
+agent *look at* and *navigate* the web through your own browser — reading pages,
+querying the DOM, taking screenshots — without ever handing the agent the full,
+unguarded power of a CDP or Playwright client.
 
-## Capabilities
+By default the agent can read and navigate, and nothing else. The one write
+action that exists (`add_to_cart`) ships **disabled** and, even when enabled, can
+only click an allowlisted button on an allowlisted site. That's what makes it
+safe to point browser-guard at a Chrome profile you actually use.
 
-Eleven tools, mapped to a swappable `WebNavigatorBackend`.
+## Table of contents
 
-**Tabs**
+- [Why browser-guard](#why-browser-guard)
+- [Quick start](#quick-start)
+- [Tools](#tools)
+- [Profiles](#profiles)
+- [Safety: the allowlist](#safety-the-allowlist)
+- [Technical design](#technical-design)
+- [Installation reference](#installation-reference)
+- [Development](#development)
+- [Future work](#future-work)
+- [License](#license)
 
-| Tool          | Purpose                                              |
-| ------------- | ---------------------------------------------------- |
-| `list_tabs`  | List all open tabs across all profiles.              |
-| `new_blank_tab`    | Open a new tab, optionally at a URL and profile_dir. |
-| `close_tab`  | Close a tab by id (refuses the last one).            |
-| `select_tab` | Switch the active tab.                               |
-| `navigate`    | Navigate a named tab to a URL.                       |
+## Why browser-guard
 
-**Reading page content** — mirrors the four browser DOM-query APIs, server-side, over the rendered (post-JS) DOM:
+- **Read-only by default.** The agent gets a small, audited surface: list/open/
+  close/select tabs, navigate, read the DOM, screenshot. There is exactly one
+  write action, and it is disabled out of the box.
+- **Safe on your real profile.** Because the agent *can't* take write actions on
+  your browser, you can point browser-guard at your primary Chrome profile and
+  let it reuse your existing logins — the agent can read your logged-in pages but
+  cannot click "Buy", change settings, send mail, or delete anything.
+- **Fully local.** It runs entirely on your machine and drives a Chrome on your
+  machine. No cloud, no proxy — nothing about your browsing leaves the host.
+- **One-click install.** A single setup script installs a background service and
+  prints the exact config block to paste into your agent.
+- **Customizable allowlist.** Navigation is gated per host, and the lone write
+  action only fires on allowlisted buttons on allowlisted sites — both under a
+  YAML config you control.
 
-| Tool                          | Mirrors                            |
-| ----------------------------- | ---------------------------------- |
-| `get_element_by_id`           | `document.getElementById`          |
-| `get_elements_by_class_name`  | `document.getElementsByClassName`  |
-| `query_selector`              | `document.querySelector`           |
-| `query_selector_all`          | `document.querySelectorAll`        |
-| `force_reload_tab`           | reload a tab + refresh its cache   |
-| `screenshot`                  | capture a PNG of the tab's viewport |
+## Quick start
 
-`screenshot` is read-only — it grabs live pixels from the rendered page and
-returns a PNG image, without touching the DOM cache. It does not read the
-snapshot, so it always reflects exactly what's on screen now.
+```bash
+git clone https://github.com/nishantsny/browser-guard.git
+cd browser-guard
+uv venv && uv pip install -e .
 
-Every tool that acts on a specific tab — `navigate`, `select_tab`,
-`close_tab`, `force_reload_tab`, `screenshot`, and all four DOM queries — takes a
-**required `global_id`** (the `global_id` returned by `new_blank_tab` / `list_tabs`). None of
-them default to "the active tab", since the active tab is shared state the
-human also controls, and an implicit default would silently act on whichever
-tab happened to be focused. A `global_id` that no longer names an open tab comes
-back as `{"error": …, "global_id": …}` (and that tab is dropped from the cache);
-so does an invalid CSS selector — structured errors, not exceptions.
+# One-time setup: installs a background (SSE) service and prints the agent config.
+python setup/onetime_setup.py
+```
 
-Results are plain JSON "nodes" — `tag`, `id`, `classes`, `attributes`,
-collapsed `text`, sizes (`text_length`, `html_length`, `child_count`) — with
-attribute values and text truncated to keep responses small (true lengths are
-reported; outer HTML is omitted unless you pass `include_html=true`). The list
-tools (`get_elements_by_class_name`, `query_selector_all`) are paginated
-(`limit` ≤ 50, `offset`, `next_offset`).
+Then paste the printed block into your agent's MCP config (e.g. `~/.claude.json`):
 
-**Caching.** The parsed DOM for a tab is cached for one hour. A query against a
-tab whose cache has expired transparently reloads that tab in the browser,
-re-parses, and tells the caller it did (`reloaded: true`); `navigate` /
-`new_blank_tab` / `close_tab` invalidate the relevant tab's cache; `force_reload_tab`
-busts it on demand. See [`design-docs/tab_caching.md`](design-docs/tab_caching.md)
-for the snapshot semantics and where they bite.
+```json
+"mcpServers": {
+  "browser-guard": {
+    "type": "sse",
+    "url": "http://127.0.0.1:22001/sse"
+  }
+}
+```
 
-**Idle-tab cleanup.** A tab that goes one hour without a DOM query or navigation
-is closed and dropped from tracking, via a periodic sweep plus a lazy sweep on
-every tool call (the last remaining tab is left open). See
-[`design-docs/cleanup_resources.md`](design-docs/cleanup_resources.md)
-for how the reaper and the WebDriver session stay out of each other's way without
-a lock.
+Restart your agent and ask it to open a tab and read a page. See
+[Installation reference](#installation-reference) for the stdio alternative and
+all the setup options.
 
-Default backend is `SeleniumChromeBackend` using a persistent Chrome profile
-at `~/.cache/browser-guard/chrome-profile`, so logins survive restarts. The
-backend self-heals after a dead Chrome session and clears stale
-`Singleton{Lock,Cookie,Socket}` files left by unclean shutdowns.
+## Tools
 
-**Undetected launch.** The backend launches Chrome *itself* —
-`google-chrome --user-data-dir=<profile> --remote-debugging-port=<port> …` via
-a plain subprocess — and then *attaches* Selenium over the DevTools port
-(`debuggerAddress`). It deliberately does **not** let ChromeDriver spawn
-Chrome, because ChromeDriver injects automation switches
-(`--enable-automation`, the `AutomationControlled` blink feature, `--test-type`)
-that set `navigator.webdriver = true` and show the "controlled by automated
-test software" infobar. Launching Chrome ourselves with only benign flags keeps
-`navigator.webdriver` false and the window indistinguishable from an ordinary,
-human-run browser. The Chrome binary is auto-discovered on `PATH`
-(`google-chrome`, `chromium`, …); override it with `BROWSER_GUARD_CHROME_BINARY`.
+browser-guard exposes twelve tools over a swappable `WebNavigatorBackend`
+(Selenium + Chrome by default). Each tool that acts on a specific tab takes the
+tab's `id` — the value returned by `new_blank_tab` / `list_tabs`. Pass it back
+verbatim; it is globally unique and routes itself to the right profile.
 
-## Profiles & concurrency
+| Tool | What it does |
+| --- | --- |
+| `list_tabs` | List every open tab across all profiles |
+| `new_blank_tab` | Open a new tab (optionally in a chosen `profile_dir`) |
+| `select_tab` | Focus a tab by `id` |
+| `navigate` | Point a tab at a URL (gated by the allowlist) |
+| `close_tab` | Close a tab by `id` |
+| `get_element_by_id` | `document.getElementById`, server-side |
+| `get_elements_by_class_name` | `document.getElementsByClassName`, server-side |
+| `query_selector` | `document.querySelector`, server-side |
+| `query_selector_all` | `document.querySelectorAll`, server-side (paginated) |
+| `screenshot` | PNG of the tab's current viewport |
+| `force_reload_tab` | Reload a tab and refresh its cached DOM |
+| `add_to_cart` | **The only write action** — click an allowlisted "add to cart" button (disabled by default) |
 
-`new_blank_tab` takes an optional **`profile_dir`**. Omit it and the request runs
-against the shared default profile above. Pass a path and the request runs in
-its own Chrome profile (`--user-data-dir`) — the server keeps **one Chrome
-session per profile directory**, created lazily on first use.
+The DOM-query tools read a **parsed snapshot** of the rendered (post-JavaScript)
+page and return compact JSON nodes (`tag`, `id`, `classes`, `attributes`,
+collapsed `text`, sizes), with long values truncated to keep responses small.
+The snapshot is cached per tab and transparently refreshed when stale, so
+repeated queries against the same page are cheap. Missing tabs and invalid
+selectors come back as structured `{"error": …}` results, never exceptions.
 
-This is what makes concurrency possible. A single Selenium session has one
-focused window, and the server does **not** lock concurrent requests — so
-within a profile you must **drive one tab at a time**: issue tool calls
-sequentially and wait for each to return. Even though a profile can hold
-several tabs, firing calls in parallel — including against *different*
-`global_id`s — races over that shared focused window and gives undefined results.
-(This contract is advertised to agents via the server's MCP `instructions` and
-the `new_blank_tab` / `list_tabs` tool docs.)
+## Profiles
 
-A distinct `profile_dir`, by contrast, is a *separate Chrome process and
-WebDriver session* — distinct profiles don't share window focus or the
-per-directory `SingletonLock` — so requests on different profiles run genuinely
-in parallel. (Selenium's single-session/single-focus model is the constraint
-here, not Chrome; CDP/Playwright expose per-tab concurrency directly.)
+A **profile** is one Chrome `--user-data-dir`: one browsing session with its own
+cookies, storage, and logins. The crucial rule:
 
-Two things to keep in mind:
+> **One profile = one Chrome window at a time.** A profile directory can be held
+> by only a single Chrome process (it's guarded by Chrome's `SingletonLock`).
 
-- Each `global_id` is globally unique and encodes its profile path. You do not
-  need to pass `profile_dir` to follow-up tools (they will route automatically).
-- `list_tabs` aggregates tabs across every live profile; profiles whose
-  Chrome has exited are skipped, never relaunched by listing.
-- Each profile is an independent, isolated browser: separate cookies, storage,
-  and logins. They share nothing.
+browser-guard keeps **one browser session per profile**, launched lazily on
+first use. That has two consequences:
 
-## Restrictions
+- **Different profiles run in parallel.** Give a request its own `profile_dir`
+  and it gets an independent Chrome process — so separate profiles can be driven
+  concurrently.
+- **Within one profile, drive one tab at a time.** A single session has one
+  focused window and requests are *not* serialized for you; fire calls in
+  parallel against the same profile and they race over that shared window. Issue
+  calls sequentially and wait for each to return.
 
-`navigate()` and `new_blank_tab(url=…)` run every URL through `validate_url`,
-which gates against a per-host allowlist config. The server picks the file
-at startup, most specific first: `--allowlist <path>` on the command line >
-the `BROWSER_GUARD_ALLOWLIST` env var > `~/.browser_guard/allowlist.yaml`
-(installed by the [setup script](#talks-to-agents-via-sse-recommended)) >
-the repo sample at
-[`configs/samples/allowlist.yaml`](configs/samples/allowlist.yaml). The file
-is schema-verified on load (`browser_guard/configs/loader/`) — a malformed
-config fails startup with a message naming the offending field.
+**Which profile should I use?**
 
-- Bare domains are normalized to `https://`.
-- A `netloc` is required.
-- The `(host, path)` pair must match a regex listed under that host. The
-  host is lower-cased and a leading `www.` is stripped before lookup.
-- For URLs that match, query strings, fragments, `&`, and spaces are
-  preserved as-is — only the host+path are gated.
-- Anything not on the allowlist is rejected.
+- **Let the agent create one** (or pass a fresh `profile_dir`) when you just want
+  the agent to drive a browser. This is the normal, friction-free path.
+- **Point it at your real Chrome profile** to reuse your existing logins. Since
+  that profile can only be open in one window, browser-guard *becomes* that
+  window: you can watch it, but you shouldn't also run your everyday Chrome on
+  the same profile at the same time, and the window is there for the agent to
+  drive — not for you to click around in.
 
-Failures raise `ValidationError`, which FastMCP surfaces as a structured
-tool error. Extend the allowlist by editing `~/.browser_guard/allowlist.yaml`
-and adding the URL shape you actually need — start narrow — then restart the
+If you omit `profile_dir`, requests use a shared default profile at
+`~/.cache/browser-guard/chrome-profile`, so logins persist across restarts.
+
+## Safety: the allowlist
+
+Every URL passed to `navigate` / `new_blank_tab` is checked against a per-host
+allowlist before Chrome is told to go there. The shipped default keeps **reads
+wide open** and **every write action disabled**:
+
+- **Navigation** is gated by `(host, path)` regexes under each host. Bare domains
+  are normalized to `https://`, `www.` is stripped, and query strings/fragments
+  pass through untouched. Anything not listed is rejected with a structured
+  error.
+- **The write action** (`add_to_cart`) is default-deny. Enabling it for a host
+  requires both listing the host *and* the exact visible button label it may
+  click — so it can never be steered into "Buy now", checkout, or an
+  agent-targeted decoy control.
+
+The config lives at `~/.browser_guard/allowlist.yaml` (installed by the setup
+script; falls back to the repo sample at `configs/samples/allowlist.yaml`). It's
+schema-checked on load — a malformed file fails startup with the offending field
+named. Start narrow, add the URL shapes you actually need, and restart the
 service.
 
-The sample default keeps reads wide open (`read: "*"`) and every write
-action disabled: the `add_to_cart` block in the sample is commented out,
-showcasing what enabling amazon.com looks like without turning it on.
-Uncomment it (or add your own host + label entry) to allow the one write
-action.
+## Technical design
 
-## MCP's runtime
+The agent never touches Chrome directly. Every tool call crosses the same
+audited path: the **MCP server** validates and routes it, a per-profile
+**session** serializes it onto the **backend**, and only the backend speaks to
+Chrome (over the DevTools protocol on a private debugging port). The agent only
+ever sees the twelve tools and their JSON results.
 
-The MCP is designed to run on your local machine. You can run it either as an on-demand process started by your agent (stdio) or as a persistent background process managed by the OS (SSE). Running as a [background service via systemd](#talks-to-agents-via-sse-recommended) (Linux) is recommended for keeping the Chrome session "warm" and persistent.
+```mermaid
+sequenceDiagram
+    actor Agent as LLM agent
+    participant MCP as MCP server (FastMCP)
+    participant Store as SessionStore
+    participant Session as Session (per profile)
+    participant Backend as Chrome backend
+    participant Chrome as Chrome (real profile)
 
-## Installing the MCP
+    Agent->>MCP: navigate(url, id)  · via SSE/stdio
+    MCP->>MCP: validate_url(url) against the allowlist
+    MCP->>Store: route(id) → the id's profile session
+    Store-->>MCP: Session
+    MCP->>Session: navigate(url, id)
+    Note over Session: one driver op at a time<br/>(off the event loop)
+    Session->>Backend: drive
+    Backend->>Chrome: DevTools/CDP on the debug port
+    Chrome-->>Backend: rendered page
+    Backend-->>Session: TabInfo / parsed DOM
+    Session-->>MCP: JSON (with composite id)
+    MCP-->>Agent: result
+```
 
-### Talks to agents via SSE (Recommended)
+Key points of the flow:
 
-If you want the MCP server to stay active in the background, use the SSE (Server-Sent Events) transport.
+- **The MCP process** owns policy (URL allowlist, write-action gating) and the
+  set of sessions. It resolves a request's `profile_dir` to a concrete path,
+  builds a backend for it, and hands that to the session store.
+- **The session store** keeps one **session** per profile and routes each tab
+  `id` (a `<profile>-<handle>` composite) back to the session that owns it.
+- **The session** is the async coordinator: it runs the synchronous, non-thread-
+  safe Selenium backend off the event loop, one operation at a time, and manages
+  the per-tab DOM cache and idle-tab cleanup.
+- **The backend** is the only code that imports a browser library. It launches
+  Chrome *itself* — a plain `google-chrome --user-data-dir=… --remote-debugging-
+  port=…` subprocess — and *attaches* Selenium over the DevTools port. It
+  deliberately avoids letting ChromeDriver spawn Chrome, because ChromeDriver
+  injects automation switches (`--enable-automation`, `AutomationControlled`)
+  that set `navigator.webdriver = true` and show the "controlled by automated
+  software" banner. Launching Chrome ourselves keeps the window
+  indistinguishable from an ordinary, human-run browser.
 
-1. **Install Dependencies:**
-   ```bash
-   git clone https://github.com/nishantsny/browser-guard.git
-   cd browser-guard
-   uv venv && uv pip install -e .
-   ```
-2. **Run the one-time setup** (with the virtual environment active, so the
-   service picks up the right Python):
-   ```bash
-   python setup/onetime_setup.py
-   ```
-   This copies the sample allowlist to `~/.browser_guard/allowlist.yaml`
-   (skipped if you already have one), writes a systemd user unit serving SSE
-   on port **22001**, runs `systemctl --user daemon-reload` and
-   `enable --now`, and prints the JSON to add to your agent settings.
+## Installation reference
 
-   Options: `--port 22001`, `--config-dir ~/.browser_guard`,
-   `--service-name browser-guard` (use a different name/port to stand up a
-   second instance without touching an existing one), plus `--python` and
-   `--display` overrides. Rerunning is safe — an existing config is never
-   overwritten.
-3. **Configure Your Agent (e.g., Claude, Gemini, Codex):**
-   Add the block the script printed to your agent's configuration file
-   (e.g., `~/.claude.json` or `.gemini/settings.json`); with the defaults:
-   ```json
-   "mcpServers": {
-     "browser-guard": {
-       "type": "sse",
-       "url": "http://127.0.0.1:22001/sse"
-     }
-   }
-   ```
+### Background service over SSE (recommended)
 
-### Talks to agents via STDIO
+Keeps the Chrome session warm across agent restarts.
 
-For simple local use where the agent manages the process life cycle. This
-path is manual — the setup script only automates SSE.
+```bash
+git clone https://github.com/nishantsny/browser-guard.git
+cd browser-guard
+uv venv && uv pip install -e .
+python setup/onetime_setup.py   # run with the venv active
+```
 
-Add an entry to your `~/.claude.json` `mcpServers` block:
+The setup script copies the sample allowlist to `~/.browser_guard/allowlist.yaml`
+(never overwriting an existing one), writes a **systemd user service** serving
+SSE on port **22001**, enables it, and prints the JSON block to add to your
+agent. It's idempotent. Useful flags: `--port`, `--config-dir`,
+`--service-name` (stand up a second instance without touching the first), plus
+`--python` and `--display` overrides.
+
+### On-demand over stdio
+
+For simple local use where the agent manages the process lifecycle. Add to your
+agent's `mcpServers`:
 
 ```json
 "browser-guard": {
@@ -200,64 +231,33 @@ Add an entry to your `~/.claude.json` `mcpServers` block:
 }
 ```
 
-`--allowlist` is optional — without it the server falls back to
-`~/.browser_guard/allowlist.yaml` and then the repo sample.
+`--allowlist` is optional (it falls back to `~/.browser_guard/allowlist.yaml`
+then the repo sample). `DISPLAY` is only needed when launching headed Chrome
+from a non-graphical parent process. Restart the agent to register the server.
 
-`DISPLAY` is only needed when launching headed Chrome from a non-graphical
-parent process (e.g. an MCP server spawned by Claude Code). Restart the
-agent to register the server.
+## Development
 
-## Dependencies
-
-- Python ≥ 3.11
-- [`mcp[cli]`](https://pypi.org/project/mcp/) ≥ 1.0 — FastMCP server SDK
-- [`selenium`](https://pypi.org/project/selenium/) ≥ 4.20 — bundles
-  Selenium Manager, so ChromeDriver is auto-downloaded
-- [`beautifulsoup4`](https://pypi.org/project/beautifulsoup4/) ≥ 4.12 — DOM parsing for the query tools
-- Google Chrome installed on the host
-- `pytest`, `pytest-asyncio` (dev only)
-
-Install:
+Requirements: Python ≥ 3.11 and Google Chrome on the host. Runtime deps are
+`mcp[cli]`, `selenium` (bundles Selenium Manager, so ChromeDriver auto-
+downloads), `beautifulsoup4`, and `pyyaml`.
 
 ```bash
 uv venv && uv pip install -e ".[dev]"
-pytest test/unit/
+pytest test/unit/                    # never launches a browser
+pytest test/e2e/                     # drives a real Chrome
+BROWSER_GUARD_HEADLESS=1 pytest test/e2e/   # on a machine with no display
 ```
 
-### Running the e2e tests
-
-`test/e2e/` drives a **real Chrome** through the Selenium backend (the unit
-suite never launches a browser). The tests are self-contained — they render an
-inline `data:` page in a throwaway profile, so they need no network and no
-allowlisted host.
-
-**MCP Server Harness**: A portion of the e2e suite deploys the actual MCP server on an ephemeral localhost port to test the FastMCP endpoint itself. This harness automatically provisions an isolated temporary cache and Chrome profile for the test run (no systemd needed).
-
-```bash
-pytest test/e2e/        # or: pytest test/unit/ test/e2e/ for everything
-```
-
-On a machine without a display (a server box, a CI runner), set
-`BROWSER_GUARD_HEADLESS=1` so Chrome launches headless:
-
-```bash
-BROWSER_GUARD_HEADLESS=1 pytest test/e2e/
-```
-
-The `test/e2e/conftest.py` fixture already exports this for you, and redirects
-`XDG_CACHE_HOME` to a temp dir so the run never touches — or locks — your real
-persistent Chrome profile. The same suites run on every push / PR via the
+The e2e suite renders inline `data:` pages in a throwaway profile (no network,
+no allowlisted host) and includes a harness that stands the real MCP server up
+on an ephemeral port. The same suites run on every push/PR via the
 [`e2e` workflow](.github/workflows/e2e.yml).
 
-## Design docs
+## Future work
 
-- [`design-docs/layout.md`](design-docs/layout.md) — package layout and the import rules between them
-- [`design-docs/tab_caching.md`](design-docs/tab_caching.md) — what the per-tab parsed-DOM cache caches, its TTL / invalidation paths, and the snapshot semantics callers see (`reloaded` flag, dead-tab corner)
-- [`design-docs/cleanup_resources.md`](design-docs/cleanup_resources.md) — why and how tabs, parsed-HTML caches, and registry entries get cleaned up, plus the lock-free concurrency model
-
-## End-to-end evals
-
-Agent-driven scenario evals live under [`agentic_evals/evals/`](agentic_evals/evals/) — one Markdown file per scenario, executed against the live MCP. See [`agentic_evals/explanation.md`](agentic_evals/explanation.md) for the conventions and how to add a scenario.
+- **Non-Chromium browsers** — extend the `WebNavigatorBackend` interface beyond
+  Selenium/Chrome (e.g. Firefox) so the same guarded tool surface drives other
+  engines.
 
 ## License
 
