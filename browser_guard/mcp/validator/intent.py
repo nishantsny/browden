@@ -54,15 +54,22 @@ def _candidate_labels(node: dict) -> list[str]:
 
 
 def label_matches(node: dict, pattern: "re.Pattern[str]") -> bool:
-    """True iff any human-visible label of ``node`` matches ``pattern``.
+    """True iff some human-visible label of ``node`` is matched *in full* by ``pattern``.
 
     Used to enforce the per-site required button text from the allowlist (e.g.
     Amazon must display "Add to cart"), on top of the generic ``is_click``
     check. Matches only trustworthy labels — never raw ``data-*`` attributes.
+
+    The pattern must match the **entire** label (``fullmatch``), not merely a
+    substring of it: the operator's regex fully governs what counts, so a loose
+    pattern can't accidentally pass a control whose visible text is
+    ``"Add to cart and check out"``. A label with incidental surrounding
+    whitespace or a trailing item name still needs that spelled out in the regex
+    (e.g. ``(?i)\\s*add to cart\\s*`` or ``(?i)add to cart\\b.*``).
     """
     if not node:
         return False
-    return any(pattern.search(label) for label in _candidate_labels(node))
+    return any(pattern.fullmatch(label) for label in _candidate_labels(node))
 
 
 def is_click(node: dict) -> bool:

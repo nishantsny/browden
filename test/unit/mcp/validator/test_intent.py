@@ -92,7 +92,21 @@ def test_none_rejected():
 
 def test_label_matches_uses_visible_labels():
     pat = re.compile(r"(?i)\badd to cart\b")
-    assert label_matches(AMAZON_ATC, pat)                      # via value=
+    assert label_matches(AMAZON_ATC, pat)                      # via value="Add to cart"
     assert label_matches(node("button", text="ADD TO CART"), pat)
     assert not label_matches(node("button", text="Add to bag"), pat)
     assert not label_matches(None, pat)
+
+
+def test_label_matches_requires_full_match_not_substring():
+    # The pattern must match the ENTIRE label, not merely appear within it — so a
+    # loose regex can't wave through a control that only *contains* "add to cart".
+    pat = re.compile(r"(?i)add to cart")
+    # Full match, but still case-insensitive (the (?i) flag survives fullmatch):
+    for casing in ("Add to Cart", "add to cart", "ADD TO CART"):
+        assert label_matches(node("button", text=casing), pat)
+    assert not label_matches(node("button", text="Add to cart bundle"), pat)  # trailing text
+    assert not label_matches(node("button", text="Please Add to cart"), pat)  # leading text
+    # An operator who *wants* a trailing item name must say so explicitly.
+    wfm = re.compile(r"(?i)add to cart\b.*")
+    assert label_matches(node("button", **{"aria-label": "Add to Cart, gala apple"}), wfm)
