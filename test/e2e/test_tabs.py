@@ -1,7 +1,7 @@
 """End-to-end: the tab tools (navigate / select_tab / close_tab / list_tabs)
 against a real (headless) Chrome.
 
-Self-contained — every tab is an inline ``data:`` document, so the suite is
+Self-contained — every page is an inline ``data:`` document, so the suite is
 deterministic, offline, and needs no allowlisted host. The conftest fixture
 runs Chrome headless in a throwaway profile.
 """
@@ -24,62 +24,62 @@ URL_B = _data_url("PAGE_BETA")
 
 
 @pytest.fixture
-def backend():
-    b = SeleniumChromeBackend()
+def backend(tmp_path):
+    b = SeleniumChromeBackend(profile_dir=str(tmp_path / "profile"))
     yield b
     b._drv().quit()
 
 
 def test_navigate_changes_active_tab_url(backend):
-    tab = backend.new_blank_tab()
-    tab = backend.navigate(URL_A)
+    backend.new_blank_tab()
+    page = backend.navigate(URL_A)
     assert "PAGE_ALPHA" in backend.current_url()
 
     info = backend.navigate(URL_B)
 
-    assert info.id == tab.id  # navigate stays on the same (active) tab
+    assert info.per_session_id == page.per_session_id  # navigate stays on the same (active) tab
     assert "PAGE_BETA" in info.url
     assert "PAGE_BETA" in backend.current_url()
     assert "PAGE_ALPHA" not in backend.current_url()
 
 
-def test_select_tab_switches_active_tab(backend):
-    a = backend.new_blank_tab()
+def test_select_page_switches_active_tab(backend):
+    backend.new_blank_tab()
     a = backend.navigate(URL_A)
-    b = backend.new_blank_tab()
+    backend.new_blank_tab()
     b = backend.navigate(URL_B)
 
-    backend.select_tab(a.id)
-    assert backend.current_tab_id() == a.id
+    backend.select_tab(a.per_session_id)
+    assert backend.current_tab_id() == a.per_session_id
 
-    backend.select_tab(b.id)
-    assert backend.current_tab_id() == b.id
+    backend.select_tab(b.per_session_id)
+    assert backend.current_tab_id() == b.per_session_id
 
 
-def test_list_tabs_marks_exactly_one_selected(backend):
-    a = backend.new_blank_tab()
+def test_list_pages_marks_exactly_one_selected(backend):
+    backend.new_blank_tab()
     a = backend.navigate(URL_A)
-    b = backend.new_blank_tab()
+    backend.new_blank_tab()
     b = backend.navigate(URL_B)
-    backend.select_tab(a.id)
+    backend.select_tab(a.per_session_id)
 
-    tabs = backend.list_tabs()
+    pages = backend.list_tabs()
 
-    assert {a.id, b.id} <= {p.id for p in tabs}
-    selected = [p for p in tabs if p.selected]
+    assert {a.per_session_id, b.per_session_id} <= {p.per_session_id for p in pages}
+    selected = [p for p in pages if p.selected]
     assert len(selected) == 1
-    assert selected[0].id == a.id
+    assert selected[0].per_session_id == a.per_session_id
 
 
-def test_close_tab_removes_only_that_tab(backend):
-    a = backend.new_blank_tab()
+def test_close_page_removes_only_that_tab(backend):
+    backend.new_blank_tab()
     a = backend.navigate(URL_A)
-    b = backend.new_blank_tab()
+    backend.new_blank_tab()
     b = backend.navigate(URL_B)
-    assert {a.id, b.id} <= {p.id for p in backend.list_tabs()}
+    assert {a.per_session_id, b.per_session_id} <= {p.per_session_id for p in backend.list_tabs()}
 
-    backend.close_tab(b.id)
+    backend.close_tab(b.per_session_id)
 
-    remaining = {p.id for p in backend.list_tabs()}
-    assert b.id not in remaining
-    assert a.id in remaining
+    remaining = {p.per_session_id for p in backend.list_tabs()}
+    assert b.per_session_id not in remaining
+    assert a.per_session_id in remaining

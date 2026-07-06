@@ -15,6 +15,13 @@ from browser_guard.web_navigator.selenium_chrome.backend import (
 )
 
 
+# The backend deals in raw Selenium handles — no namespace. profile_dir is
+# required, defaulted here so tests that don't care can omit it.
+def _backend(**kwargs):
+    kwargs.setdefault("profile_dir", "/tmp/bg-unit-profile")
+    return SeleniumChromeBackend(**kwargs)
+
+
 def _make_fake_driver(handles=("h1",), dead=False):
     drv = MagicMock(name="driver")
     if dead:
@@ -44,7 +51,7 @@ def test_drv_lazy_init(mock_webdriver, mock_launch):
     fake = _make_fake_driver()
     mock_webdriver.Chrome.return_value = fake
 
-    backend = SeleniumChromeBackend()
+    backend = _backend()
     assert backend._driver is None
 
     drv = backend._drv()
@@ -63,29 +70,15 @@ def test_drv_launches_with_provided_profile_dir(mock_webdriver, mock_launch, tmp
     _patch_launch(mock_launch, port=7000)
     mock_webdriver.Chrome.return_value = _make_fake_driver()
     profile = tmp_path / "custom-profile"
-    backend = SeleniumChromeBackend(profile_dir=str(profile))
+    backend = _backend(profile_dir=str(profile))
 
-    assert backend.profile_dir == profile
+    assert backend.get_profile_dir() == profile
 
     backend._drv()
 
     mock_launch.assert_called_once_with(profile)
     # Selenium attaches to the launched Chrome rather than spawning its own.
     assert _debugger_address(mock_webdriver) == "127.0.0.1:7000"
-
-
-@patch("browser_guard.web_navigator.selenium_chrome.backend._launch_chrome")
-@patch("browser_guard.web_navigator.selenium_chrome.backend.PROFILE_DIR")
-@patch("browser_guard.web_navigator.selenium_chrome.backend.webdriver")
-def test_drv_defaults_to_module_profile_dir(mock_webdriver, mock_profile_dir, mock_launch):
-    _patch_launch(mock_launch)
-    mock_webdriver.Chrome.return_value = _make_fake_driver()
-    backend = SeleniumChromeBackend()  # no profile_dir -> module default
-
-    assert backend.profile_dir is mock_profile_dir
-
-    backend._drv()
-    mock_launch.assert_called_once_with(mock_profile_dir)
 
 
 @patch("browser_guard.web_navigator.selenium_chrome.backend._launch_chrome")
@@ -96,7 +89,7 @@ def test_drv_recreates_after_dead_session(mock_webdriver, mock_launch):
     alive = _make_fake_driver()
     mock_webdriver.Chrome.return_value = alive
 
-    backend = SeleniumChromeBackend()
+    backend = _backend()
     backend._driver = dead  # simulate a cached, dead driver
     dead_proc = MagicMock(name="dead_chrome")
     dead_proc.poll.return_value = None  # still "running" so _terminate acts
@@ -253,7 +246,7 @@ def test_drv_swallows_quit_error_on_dead_driver(mock_webdriver, mock_launch):
     alive = _make_fake_driver()
     mock_webdriver.Chrome.return_value = alive
 
-    backend = SeleniumChromeBackend()
+    backend = _backend()
     backend._driver = dead
 
     drv = backend._drv()
@@ -261,7 +254,7 @@ def test_drv_swallows_quit_error_on_dead_driver(mock_webdriver, mock_launch):
 
 
 def _backend_with_driver(drv):
-    backend = SeleniumChromeBackend()
+    backend = _backend()
     backend._driver = drv
     return backend
 
@@ -271,6 +264,8 @@ def test_switch_failure_becomes_page_not_found():
     drv.switch_to.window.side_effect = NoSuchWindowException("no such window\n  (Session info: ...)")
     backend = _backend_with_driver(drv)
 
+    # page_ids are raw Selenium handles; a handle Selenium rejects must surface
+    # as a clean TabNotFoundError, not the driver's stack-trace exception.
     for call in (lambda: backend.select_tab("dead"),
                  lambda: backend.get_page_source("dead"),
                  lambda: backend.reload("dead"),
@@ -279,6 +274,20 @@ def test_switch_failure_becomes_page_not_found():
             call()
         assert "dead" in str(exc.value)
         assert "Session info" not in str(exc.value)  # no driver stack trace leaks through
+
+
+def test_profile_dir_is_required():
+    with pytest.raises(TypeError):
+        SeleniumChromeBackend()  # profile_dir is required
+    with pytest.raises(ValueError):
+        SeleniumChromeBackend(None)  # must be non-empty
+    with pytest.raises(ValueError):
+        SeleniumChromeBackend("")  # must be non-empty
+
+
+def test_get_profile_dir_returns_construction_path(tmp_path):
+    backend = SeleniumChromeBackend(profile_dir=str(tmp_path / "prof"))
+    assert backend.get_profile_dir() == tmp_path / "prof"
 
 
 @patch("browser_guard.web_navigator.selenium_chrome.backend._launch_chrome")
@@ -321,7 +330,7 @@ def test_drv_recreates_when_window_handles_fails(mock_webdriver, mock_launch):
     assert mock_webdriver.Chrome.call_count == 1
 
 
-def test_close_tab_refocuses_a_survivor():
+def test_close_page_refocuses_a_survivor():
     # Closing the focused tab leaves the driver on a dead handle; close_tab must
     # re-focus a remaining window so the next command doesn't see a "dead" session.
     drv = _make_fake_driver(handles=("h1", "h2"))
@@ -338,7 +347,7 @@ def test_close_tab_refocuses_a_survivor():
     assert drv.switch_to.window.call_args.args == ("h1",)
 
 
-def test_close_tab_last_tab_is_refused():
+def test_close_page_last_tab_is_refused():
     drv = _make_fake_driver(handles=("only",))
     backend = _backend_with_driver(drv)
     with pytest.raises(ValueError):
@@ -356,11 +365,11 @@ def test_navigate_failure_becomes_page_not_found():
 
 @patch("browser_guard.web_navigator.selenium_chrome.backend._launch_chrome")
 @patch("browser_guard.web_navigator.selenium_chrome.backend.webdriver")
-def test_list_page_ids_returns_handles_without_switching(mock_webdriver, mock_launch):
+def test_list_tab_ids_returns_handles_without_switching(mock_webdriver, mock_launch):
     _patch_launch(mock_launch)
     drv = _make_fake_driver(handles=("h1", "h2", "h3"))
     mock_webdriver.Chrome.return_value = drv
-    backend = SeleniumChromeBackend()
+    backend = _backend()
 
     assert backend.list_tab_ids() == ["h1", "h2", "h3"]
     drv.switch_to.window.assert_not_called()  # cheap: no per-tab focus changes

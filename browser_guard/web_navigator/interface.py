@@ -1,4 +1,5 @@
 from abc import ABC, abstractmethod
+from pathlib import Path
 
 from ..common.tab import TabInfo
 
@@ -23,7 +24,31 @@ class WebNavigatorBackend(ABC):
     Any method given a ``tab_id`` that no longer names an open tab — or any
     method that needs "the active tab" when there isn't one — raises
     ``TabNotFoundError``.
+
+    Tab ids are **opaque, backend-local handles**. A backend knows only its
+    own tabs; it neither mints nor understands the customer-facing ids the MCP
+    server hands out to agents. The server composes ``<profile>-<handle>`` on
+    the way out and splits it back on the way in, so the backend never sees the
+    profile mapping — it only ever receives its own raw handles.
+
+    Profile identity: a backend is bound to exactly one profile directory,
+    supplied once at construction and immutable thereafter. It is exposed
+    read-only via ``get_profile_dir()``; the server asserts (outside the
+    backend) that an incoming id's profile matches the backend it routes to.
     """
+
+    @abstractmethod
+    def get_profile_dir(self) -> Path:
+        """The profile directory (``--user-data-dir``) this backend drives.
+
+        Set once at construction and never changes. The server uses it to
+        verify that a composed customer id is routed to the backend whose
+        profile it names.
+        """
+
+    @abstractmethod
+    def is_running(self) -> bool:
+        """True if a live browser is currently attached. Must never launch one."""
 
     @abstractmethod
     def list_tabs(self) -> list[TabInfo]:

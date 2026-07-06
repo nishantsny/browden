@@ -16,7 +16,7 @@ import urllib.parse
 import pytest
 
 from browser_guard.web_navigator.selenium_chrome import SeleniumChromeBackend
-from browser_guard.web_navigator.session import BrowserSessionManager
+from browser_guard.mcp.session_management.BrowserSessionManager import BrowserSessionManager
 
 N = 5
 
@@ -28,8 +28,11 @@ def _data_url(token: str) -> str:
 
 @pytest.fixture
 def sessions(tmp_path):
-    backends = [SeleniumChromeBackend(profile_dir=str(tmp_path / f"profile-{i}")) for i in range(N)]
-    sess = [BrowserSessionManager(b, start_reaper=False) for b in backends]
+    backends = [
+        SeleniumChromeBackend(profile_dir=str(tmp_path / f"profile-{i}"))
+        for i in range(N)
+    ]
+    sess = [BrowserSessionManager(b, namespace=f"p{i}", start_reaper=False) for i, b in enumerate(backends)]
     yield sess
     for b in backends:
         try:
@@ -45,20 +48,21 @@ async def test_concurrent_navigation_across_distinct_profiles(sessions):
     # Fire all N navigations at once. Each BrowserSessionManager dispatches its Selenium
     # call through asyncio.to_thread against its own driver, so these run in
     # parallel rather than queueing behind one browser.
-    async def navigate_new(s, u):
-        t = await s.new_blank_tab()
-        return await s.navigate(u, tab_id=t.id)
-    tabs = await asyncio.gather(*(navigate_new(s, u) for s, u in zip(sessions, urls)))
+    async def _open(session, url):
+        tab = await session.new_blank_tab()
+        return await session.navigate(url, id=tab["id"])
+    pages = await asyncio.gather(*(_open(s, u) for s, u in zip(sessions, urls)))
 
-    # Every concurrent request completed and landed on its own tab.
-    for i, tab in enumerate(tabs):
-        assert f"PROFILE_{i}" in tab.url
+    # Every concurrent request completed and landed on its own page.
+    for i, page in enumerate(pages):
+        assert f"PROFILE_{i}" in page["url"]
 
     # Isolation: each profile sees only its own tab, never a sibling's — proving
     # these are genuinely separate browser sessions, not one shared window.
+    # session.list_tabs returns wire dicts with composite ids.
     listed = await asyncio.gather(*(s.list_tabs() for s in sessions))
     for i, my_pages in enumerate(listed):
-        urls_seen = " ".join(p.url for p in my_pages)
+        urls_seen = " ".join(p["url"] for p in my_pages)
         assert f"PROFILE_{i}" in urls_seen
         sibling = f"PROFILE_{(i + 1) % N}"
         assert sibling not in urls_seen
