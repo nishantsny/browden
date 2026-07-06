@@ -1,6 +1,6 @@
 """Schema for the allowlist config file.
 
-The expected shape (see configs/samples/allowlist.yaml):
+The expected shape (see configs/samples/read_only_on_popular_websites.yaml):
 
     denylist:                     # always refused; host -> path regexes
       <host>: [<path regex>, ...]

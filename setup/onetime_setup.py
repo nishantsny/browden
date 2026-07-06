@@ -7,8 +7,9 @@ What it does, in order:
   1. Creates a venv at <repo>/.venv and installs browden into it
      (via `uv`, falling back to stdlib venv + pip). Pass --python to use an
      existing interpreter instead and skip this step.
-  2. Copies configs/samples/allowlist.yaml to <config-dir>/allowlist.yaml
-     (default ~/.browden) — skipped if a config is already there.
+  2. Copies configs/samples/read_only_on_popular_websites.yaml to
+     <config-dir>/allowlist.yaml (default ~/.browden) — skipped if a config is
+     already there.
   3. Fetches the Tranco top-sites snapshot (top 400k) to
      <config-dir>/tranco-top-400k.txt.gz — skipped if it is already there. The
      snapshot is not committed; refresh it later with setup/fetch_tranco.py.
@@ -32,7 +33,7 @@ from pathlib import Path
 from fetch_tranco import DEFAULT_TOP_N, TRANCO_FILENAME, fetch, snapshot_path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-SAMPLE_ALLOWLIST = REPO_ROOT / "configs" / "samples" / "allowlist.yaml"
+SAMPLE_ALLOWLIST = REPO_ROOT / "configs" / "samples" / "read_only_on_popular_websites.yaml"
 DEFAULT_PORT = 22001  # usually unused; well clear of dev servers on 8000/3000
 DEFAULT_CONFIG_DIR = "~/.browden"
 DEFAULT_SERVICE_NAME = "browden"
@@ -96,7 +97,7 @@ def copy_config(config_dir: Path) -> Path:
     return dest
 
 
-def fetch_tranco(config_dir: Path, top_n: int) -> Path:
+def ensure_tranco(config_dir: Path, top_n: int) -> Path:
     """Download the Tranco snapshot next to the allowlist, unless it's there.
 
     Best-effort: a failed download (offline, Tranco unreachable) warns and moves
@@ -172,7 +173,7 @@ def main(argv: list[str] | None = None) -> None:
 
     config_dir = Path(args.config_dir).expanduser().resolve()
     allowlist = copy_config(config_dir)
-    fetch_tranco(config_dir, args.tranco_top_n)
+    ensure_tranco(config_dir, args.tranco_top_n)
 
     if args.python:
         service_python = args.python

@@ -58,7 +58,7 @@ def test_onetime_setup_installs_config_and_service(tmp_path):
 
         # Config copied; unit written; service active.
         assert (config_dir / "allowlist.yaml").read_text() == \
-            (REPO_ROOT / "configs" / "samples" / "allowlist.yaml").read_text()
+            (REPO_ROOT / "configs" / "samples" / "read_only_on_popular_websites.yaml").read_text()
         assert unit_path.exists()
         assert f"--allowlist {config_dir / 'allowlist.yaml'}" in unit_path.read_text()
 

@@ -37,7 +37,8 @@ class McpServerHarness:
         # whatever ~/.browden config the host has: the caller's custom
         # config if given, else the repo sample.
         default_allowlist = (
-            Path(__file__).resolve().parents[2] / "configs" / "samples" / "allowlist.yaml")
+            Path(__file__).resolve().parents[2] / "configs" / "samples"
+            / "read_only_on_popular_websites.yaml")
         env["BROWDEN_ALLOWLIST"] = str(self.allowlist_path or default_allowlist)
         
         log_path = self.tmp_path / "mcp_server.log"

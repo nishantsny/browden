@@ -183,9 +183,13 @@ Bare domains are normalized to `https://`, `www.` is stripped, and query
 strings/fragments pass through untouched; anything not allowed is rejected with a
 structured error. The config lives at `~/.browden/allowlist.yaml` (installed
 by the setup script; falls back to the repo sample at
-`configs/samples/allowlist.yaml`). It's schema-checked on load — a malformed file
-fails startup with the offending field named. A fully-commented tour of the
-read/deny system lives at
+[`configs/samples/read_only_on_popular_websites.yaml`](configs/samples/read_only_on_popular_websites.yaml)).
+It's schema-checked on load — a malformed file fails startup with the offending
+field named. Two ready-to-use samples ship in `configs/samples/`: the read-only
+default above, and
+[`allow_grocery_cart_manipulation.yaml`](configs/samples/allow_grocery_cart_manipulation.yaml)
+— a shopping policy that enables `click` (add-to-cart) on a few grocery sites. A
+fully-commented tour of the read/deny system lives at
 [`configs/samples/allowlist-read-deny.yaml`](configs/samples/allowlist-read-deny.yaml);
 refresh the Tranco snapshot with `python3 setup/fetch_tranco.py`.
 

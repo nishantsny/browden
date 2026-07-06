@@ -16,7 +16,7 @@ from .schema import ConfigError, validate_allowlist_data
 
 # loader/ -> configs/ -> browden/ -> repo root
 _REPO_ROOT = Path(__file__).resolve().parents[3]
-SAMPLE_ALLOWLIST = _REPO_ROOT / "configs" / "samples" / "allowlist.yaml"
+SAMPLE_ALLOWLIST = _REPO_ROOT / "configs" / "samples" / "read_only_on_popular_websites.yaml"
 USER_CONFIG_DIR = Path("~/.browden")
 
 
