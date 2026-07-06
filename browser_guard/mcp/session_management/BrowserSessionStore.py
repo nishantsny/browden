@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 Nishant
+# SPDX-License-Identifier: Apache-2.0
+
 """The per-profile browser-session store and the customer<->backend id mapping.
 
 One :class:`BrowserSessionManager` (hence one Chrome process) per profile

@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 Nishant
+# SPDX-License-Identifier: Apache-2.0
+
 """End-to-end resource-cap enforcement against a real (headless) Chrome.
 
 Runs the MCP server under a tiny 2-session / 2-tab-per-session allowlist (the

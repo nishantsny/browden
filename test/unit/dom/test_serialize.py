@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 Nishant
+# SPDX-License-Identifier: Apache-2.0
+
 from browser_guard.dependencies.bs4 import BeautifulSoup
 from browser_guard.dom.serialize import ATTR_CAP, TEXT_CAP, element_to_node
 

@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 Nishant
+# SPDX-License-Identifier: Apache-2.0
+
 """End-to-end: the tab tools (navigate / select_tab / close_tab / list_tabs)
 against a real (headless) Chrome.
 

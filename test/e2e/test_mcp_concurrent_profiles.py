@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 Nishant
+# SPDX-License-Identifier: Apache-2.0
+
 """Two concurrent MCP clients on two Chrome profiles, through the real server.
 
 Stays offline like the rest of the e2e suite (no external hosts — a live site

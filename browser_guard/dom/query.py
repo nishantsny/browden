@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 Nishant
+# SPDX-License-Identifier: Apache-2.0
+
 """The four DOM-query primitives plus the pagination math the list ones share.
 
 Pure: each takes a parsed ``BeautifulSoup`` tree and returns bs4 elements (or a

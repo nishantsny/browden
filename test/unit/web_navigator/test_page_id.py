@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 Nishant
+# SPDX-License-Identifier: Apache-2.0
+
 """Unit tests for the page-id wire-format helpers (format/split pair)."""
 import pytest
 

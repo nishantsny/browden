@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 Nishant
+# SPDX-License-Identifier: Apache-2.0
+
 """Tool-level tests for the click write action.
 
 The session is mocked, but the three gates (host allowlist, generic predicate,

@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 Nishant
+# SPDX-License-Identifier: Apache-2.0
+
 """Anti-corruption wrapper around `beautifulsoup4` (and its `soupsieve` CSS engine).
 
 All in-project code imports HTML-parsing symbols from here, never directly from

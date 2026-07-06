@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 Nishant
+# SPDX-License-Identifier: Apache-2.0
+
 """Load and resolve allowlist config files.
 
 ``load_allowlist`` is the one path from a YAML file to the internal

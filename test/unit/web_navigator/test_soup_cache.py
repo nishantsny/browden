@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 Nishant
+# SPDX-License-Identifier: Apache-2.0
+
 from browser_guard.common.tab import TabInfo
 from browser_guard.web_navigator.soup_cache import TTL_SECONDS, SoupCache
 

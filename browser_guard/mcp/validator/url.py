@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 Nishant
+# SPDX-License-Identifier: Apache-2.0
+
 from urllib.parse import urlparse, urlunparse
 
 from ...common.logger import logger

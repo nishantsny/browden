@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 Nishant
+# SPDX-License-Identifier: Apache-2.0
+
 """Runs the real setup/onetime_setup.py end to end under a throwaway service
 name and port, so an existing browser-guard service is untouched. Skipped on
 hosts without a systemd user session (e.g. some CI runners / macOS)."""

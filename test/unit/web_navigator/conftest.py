@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 Nishant
+# SPDX-License-Identifier: Apache-2.0
+
 """Shared fixtures for the web_navigator unit tests.
 
 The three modules under this directory all need a deterministic clock to test

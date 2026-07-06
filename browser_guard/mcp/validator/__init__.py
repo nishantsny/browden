@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 Nishant
+# SPDX-License-Identifier: Apache-2.0
+
 """Re-export validator symbols for convenient access."""
 from .allowlist import ActionAllowlist, Allowlist
 from .errors import ValidationError

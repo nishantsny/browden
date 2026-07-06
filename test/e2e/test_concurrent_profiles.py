@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 Nishant
+# SPDX-License-Identifier: Apache-2.0
+
 """End-to-end: prove that distinct profile dirs run concurrently and in isolation.
 
 A single Selenium session has one focused window, so same-profile work is

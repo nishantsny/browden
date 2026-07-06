@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 Nishant
+# SPDX-License-Identifier: Apache-2.0
+
 """Async coordinator over a synchronous browser backend.
 
 ``BrowserSessionManager`` owns one profile's backend, its soup cache, idle

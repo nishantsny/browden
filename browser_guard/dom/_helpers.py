@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 Nishant
+# SPDX-License-Identifier: Apache-2.0
+
 """Internal helpers shared between ``query`` and ``serialize`` — kept out of
 ``__init__.py`` to avoid a circular import (the package's ``__init__`` re-exports
 ``query`` / ``serialize``, which would deadlock if they imported from it).

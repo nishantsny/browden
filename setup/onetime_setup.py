@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# SPDX-FileCopyrightText: 2026 Nishant
+# SPDX-License-Identifier: Apache-2.0
+
 """One-time setup for Browser Guard (SSE transport only; stdio stays manual).
 
 Run it with any Python — `python3 setup/onetime_setup.py`; no venv needed first.

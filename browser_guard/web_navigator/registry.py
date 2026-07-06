@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 Nishant
+# SPDX-License-Identifier: Apache-2.0
+
 """Tracks the last-access time of each open tab so idle ones can be reaped.
 
 Pure and **synchronous by contract** — no ``asyncio`` import. Async coordination

@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 Nishant
+# SPDX-License-Identifier: Apache-2.0
+
 """Serialize a BeautifulSoup element into a plain JSON-able dict (a "node").
 
 Pure: no Selenium, no I/O. The caps below keep tool responses small. A single

@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 Nishant
+# SPDX-License-Identifier: Apache-2.0
+
 """End-to-end: drive a real (headless) Chrome and capture a screenshot.
 
 Self-contained — renders an inline ``data:`` document instead of hitting the

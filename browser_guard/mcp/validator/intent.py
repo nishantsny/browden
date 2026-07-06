@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 Nishant
+# SPDX-License-Identifier: Apache-2.0
+
 """Element-level guard for the ``click`` write action.
 
 The per-action host allowlist (:class:`ActionAllowlist`) decides *where*

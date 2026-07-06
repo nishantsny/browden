@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 Nishant
+# SPDX-License-Identifier: Apache-2.0
+
 """Anti-corruption wrapper around the PyPI `selenium` package."""
 from selenium import webdriver
 from selenium.common.exceptions import NoSuchElementException, NoSuchWindowException

@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 Nishant
+# SPDX-License-Identifier: Apache-2.0
+
 """Schema for the allowlist config file.
 
 The expected shape (see configs/samples/allowlist.yaml):

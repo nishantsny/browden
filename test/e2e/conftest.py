@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 Nishant
+# SPDX-License-Identifier: Apache-2.0
+
 """Shared setup for the e2e suite: real Chrome, headless, isolated profile.
 
 The backend reads ``BROWSER_GUARD_HEADLESS`` and ``XDG_CACHE_HOME`` when it

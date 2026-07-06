@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 Nishant
+# SPDX-License-Identifier: Apache-2.0
+
 """Single owner of the public page-id wire format: ``<namespace>-<handle>``.
 
 The MCP server mints a namespace per profile (a hex digest of the profile

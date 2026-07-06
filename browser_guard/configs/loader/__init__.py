@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 Nishant
+# SPDX-License-Identifier: Apache-2.0
+
 from .schema import ConfigError, validate_allowlist_data
 from .loader import (
     SAMPLE_ALLOWLIST,

@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 Nishant
+# SPDX-License-Identifier: Apache-2.0
+
 """Per-tab cache of parsed HTML (BeautifulSoup) with a TTL-driven auto stale-reload.
 
 **Synchronous by contract** — no ``asyncio`` import. The backend handed in is

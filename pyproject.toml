@@ -8,7 +8,7 @@ version = "0.1.0"
 description = "A protective shell around browser-automation MCPs"
 authors = [{ name = "Nishant", email = "nishantsny@gmail.com" }]
 license = "Apache-2.0"
-license-files = ["LICENSE"]
+license-files = ["LICENSE", "NOTICE"]
 requires-python = ">=3.11"
 dependencies = [
   "mcp[cli]>=1.0",

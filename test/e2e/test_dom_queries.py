@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 Nishant
+# SPDX-License-Identifier: Apache-2.0
+
 """End-to-end: the DOM-query + force_reload tools against a real (headless) Chrome.
 
 These go through ``BrowserSessionManager`` — the same path the MCP tools take — so they
