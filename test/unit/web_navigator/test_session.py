@@ -451,3 +451,65 @@ def test_sweep_idle_skips_reconcile_when_enumeration_fails():
     s.sweep_idle()  # must not raise
 
     assert "h1" in s._registry._last_access  # reconcile skipped, entry untouched
+
+
+# -- per-session tab cap (max_tabs) -----------------------------------------
+
+class LiveCountBackend(FakeBackend):
+    """FakeBackend whose new_blank_tab/close_tab actually move the live tab set,
+    so the tab-cap check (which reads ``list_tab_ids()``) sees a count that rises
+    and falls exactly like the real backend's does."""
+
+    def __init__(self):
+        super().__init__()
+        self.live = {"h1"}  # one tab already open
+        self._next = 1
+
+    def new_blank_tab(self):
+        self.calls.append("new_blank_tab")
+        self._next += 1
+        handle = f"h{self._next}"
+        self.live.add(handle)
+        return TabInfo(per_session_id=handle, url="about:blank", title="t",
+                       selected=True, profile_dir=self.profile_dir)
+
+    def close_tab(self, tab_id):
+        super().close_tab(tab_id)
+        self.live.discard(tab_id)
+
+
+@pytest.mark.asyncio
+async def test_new_blank_tab_raises_at_the_tab_cap():
+    """At the per-session tab cap, new_blank_tab raises instead of opening one."""
+    backend = FakeBackend()
+    backend.live = {"h1", "h2"}  # already at a cap of 2
+    s = make_session(backend)
+
+    with pytest.raises(RuntimeError, match="session limit of 2 tabs reached"):
+        await s.new_blank_tab(max_tabs=2)
+
+    assert "new_blank_tab" not in backend.calls  # never asked the backend to open one
+
+
+@pytest.mark.asyncio
+async def test_tab_cap_is_on_live_count_so_closing_frees_a_slot():
+    """The cap is on the live tab count, not a monotonic total: filling to the
+    cap raises, but closing a tab reopens a slot and the next open succeeds."""
+    backend = LiveCountBackend()  # starts with one live tab, h1
+    s = make_session(backend)
+
+    # Below the cap of 2 -> opening succeeds (h1, then h2).
+    t2 = await s.new_blank_tab(max_tabs=2)
+
+    # At the cap -> the next open raises and opens nothing.
+    with pytest.raises(RuntimeError, match="session limit of 2 tabs reached"):
+        await s.new_blank_tab(max_tabs=2)
+
+    # Close one tab: the live count drops back under the cap...
+    await s.close_tab(t2["id"])
+    assert t2["id"].split("-", 1)[1] not in backend.live
+
+    # ...so opening is allowed again — no exception, and a fresh tab is returned.
+    reopened = await s.new_blank_tab(max_tabs=2)
+    assert reopened["id"] != t2["id"]
+    assert reopened["id"].split("-", 1)[1] in backend.live

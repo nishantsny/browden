@@ -8,8 +8,11 @@ from pathlib import Path
 from browser_guard.web_navigator.utils.network_utils import get_free_port
 
 class McpServerHarness:
-    def __init__(self, tmp_path: Path):
+    def __init__(self, tmp_path: Path, allowlist_path: Path | None = None):
         self.tmp_path = tmp_path
+        # None -> pin the repo sample; a path lets a test run the server under a
+        # custom policy (e.g. the low resource caps in test_resource_caps.py).
+        self.allowlist_path = allowlist_path
         self._proc = None
         self._log_file = None
         
@@ -30,10 +33,12 @@ class McpServerHarness:
         # session-scoped harness has already spawned the server — set it here
         # so local runs (without CI's job-level env) don't launch headed Chrome.
         env.setdefault("BROWSER_GUARD_HEADLESS", "1")
-        # Pin the allowlist to the repo sample so the test server's policy
-        # doesn't depend on whatever ~/.browser_guard config the host has.
-        env["BROWSER_GUARD_ALLOWLIST"] = str(
+        # Pin the allowlist so the test server's policy doesn't depend on
+        # whatever ~/.browser_guard config the host has: the caller's custom
+        # config if given, else the repo sample.
+        default_allowlist = (
             Path(__file__).resolve().parents[2] / "configs" / "samples" / "allowlist.yaml")
+        env["BROWSER_GUARD_ALLOWLIST"] = str(self.allowlist_path or default_allowlist)
         
         log_path = self.tmp_path / "mcp_server.log"
         self._log_file = open(log_path, "w")

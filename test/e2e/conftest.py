@@ -33,6 +33,34 @@ def mcp_server(tmp_path_factory):
 
 
 @pytest.fixture
+def mcp_server_low_caps(tmp_path):
+    """A fresh MCP server capped at 2 browser sessions / 2 tabs per session.
+
+    Function-scoped (not shared like ``mcp_server``): the session cap is
+    process-global store state, so each cap test needs its own server with an
+    empty store — otherwise sessions opened by one test would eat another's
+    slots. The tiny 2/2 caps keep the test cheap (at most two real Chromes).
+    """
+    import sys
+    import os
+    sys.path.insert(0, os.path.dirname(__file__))
+    from mcp_harness import McpServerHarness
+
+    allowlist = tmp_path / "low_caps_allowlist.yaml"
+    allowlist.write_text(
+        'read:\n'
+        '  "*": [".*"]\n'
+        'infra:\n'
+        '  max_browser_sessions: 2\n'
+        '  max_tabs_per_session: 2\n'
+    )
+    harness = McpServerHarness(tmp_path / "harness_cache", allowlist_path=allowlist)
+    harness.start()
+    yield harness
+    harness.stop()
+
+
+@pytest.fixture
 def mcp_client_session():
     from contextlib import asynccontextmanager
     @asynccontextmanager
