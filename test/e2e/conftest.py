@@ -54,7 +54,9 @@ def mcp_server_low_caps(tmp_path):
         '  max_browser_sessions: 2\n'
         '  max_tabs_per_session: 2\n'
     )
-    harness = McpServerHarness(tmp_path / "harness_cache", allowlist_path=allowlist)
+    cache_dir = tmp_path / "harness_cache"
+    cache_dir.mkdir()  # the harness opens its log file in here, so it must exist
+    harness = McpServerHarness(cache_dir, allowlist_path=allowlist)
     harness.start()
     yield harness
     harness.stop()
