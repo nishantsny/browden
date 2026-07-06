@@ -1,0 +1,90 @@
+# =============================================================================
+# browser-guard read / deny system — an annotated walkthrough.
+#
+# This is a *documentation* sample: it explains every knob of the read gate and
+# the denylist. To actually use it, copy it to ~/.browser_guard/allowlist.yaml
+# (or point --allowlist / $BROWSER_GUARD_ALLOWLIST at it) and edit to taste.
+#
+# WHY THIS EXISTS
+# ---------------
+# The agent drives a real Chrome with your real logins. Merely *navigating* to a
+# hostile page is risky: its content is fed to the LLM (prompt-injection) and, in
+# the worst case, its code runs in your browser. So reads are gated, not open.
+#
+# A domain being popular/"good" is NOT proof a given page is safe — reputable
+# sites host untrusted user content too. Treat the read allowlist as a way to
+# shrink attack surface, not as a guarantee. The denylist is your hard override.
+#
+# DECISION ORDER (every URL, top to bottom — first match wins)
+# ------------------------------------------------------------
+#   1. denylist matches?              -> DENY (always, even if reads are disabled)
+#   2. read.enabled == false?         -> ALLOW (read allowlist is off)
+#   3. website_overrides has a rule   -> that rule alone decides (ALLOW iff the
+#      for this host?                     path matches) — it TRIUMPHS over Tranco
+#   4. host in Tranco top-N?          -> ALLOW
+#   5. otherwise                      -> DENY (default-deny)
+# =============================================================================
+
+# ---- 1. denylist ----------------------------------------------------------
+# Always refused, checked before anything else — it beats Tranco, overrides, and
+# even read.enabled: false. Same shape as website_overrides: host -> [path
+# regex], "*" host = any host. Host match is exact after lowercasing and
+# stripping a leading "www." — list subdomains explicitly if you need them.
+denylist:
+  # Block a whole host (all paths):
+  #   tracker.example: [".*"]
+  # Block only part of an otherwise-allowed host:
+  #   reddit.com: ["^/r/some-community/"]
+  # Block a payment/checkout path everywhere it appears on a host:
+  #   shop.example: ["^/checkout", "^/account/delete"]
+  {}
+
+# ---- 2 & 3 & 4. the read allowlist ----------------------------------------
+read:
+  # Master switch. true = enforce the allowlist below. false = disable the
+  # entire read allowlist so every non-denied URL is readable (the denylist
+  # still applies). Useful for a trusted, throwaway profile.
+  enabled: true
+
+  # Option 1 — TRANCO top-sites (popularity gate).
+  #   Allows the most-visited registrable domains on the web from a bundled,
+  #   offline snapshot (github.com, amazon.com, ...). A listed domain also
+  #   covers its subdomains, so allowing "google.com" allows "mail.google.com"
+  #   — but never a lookalike like "google.com.evil.co".
+  #   No network at request time; ~sub-microsecond local lookup.
+  tranco:
+    enabled: true
+    # How far down the ranking to trust. Lower = stricter (fewer, more-
+    # established sites). 1..100000 — the size of the bundled snapshot.
+    #   10000  -> only the ~10k most popular domains
+    #   100000 -> the full bundled list (default)
+    top_n: 100000
+
+  # Option 2 — WEBSITE OVERRIDES (explicit allow; TRIUMPHS over Tranco).
+  #   host -> [path regex]. Once a host is listed here, this rule ALONE decides
+  #   for it — Tranco is not consulted for that host. So overrides both add hosts
+  #   Tranco doesn't rank AND let you tighten one it would otherwise wave through.
+  #   "*" as the host matches any host. Path regexes match the URL path (query
+  #   strings and fragments always pass through). Bare domains normalize to https://.
+  website_overrides:
+    # Allow an internal tool Tranco will never list:
+    #   wiki.corp.internal: [".*"]
+    # Path-scope a *Tranco* site: reddit is in Tranco, but this restricts reads to
+    # one subreddit — the override wins, so nothing else on reddit.com is readable:
+    #   reddit.com: ["^/r/pics/"]
+    # Re-open the whole web (overrides everything Tranco would gate — NOT recommended):
+    #   "*": [".*"]
+    {}
+
+# ---- 5. write actions (for context; gated separately) ---------------------
+# Reads let the agent *look*; writes let it *act*. The one write action, click,
+# is default-deny and additionally vetoed by the denylist above. It needs both
+# the host listed here AND the button's visible text to match `label`.
+# click:
+#   amazon.com:
+#     paths: [".*"]
+#     label: '(?i)\badd to cart\b'
+
+infra:
+  max_browser_sessions: 10
+  max_tabs_per_session: 20

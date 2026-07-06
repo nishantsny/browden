@@ -49,7 +49,8 @@ def mcp_server_low_caps(tmp_path):
     allowlist = tmp_path / "low_caps_allowlist.yaml"
     allowlist.write_text(
         'read:\n'
-        '  "*": [".*"]\n'
+        '  website_overrides:\n'
+        '    "*": [".*"]\n'
         'infra:\n'
         '  max_browser_sessions: 2\n'
         '  max_tabs_per_session: 2\n'

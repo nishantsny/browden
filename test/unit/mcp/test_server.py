@@ -229,6 +229,20 @@ async def test_navigate_tool_validates_then_delegates():
 
 
 @pytest.mark.asyncio
+async def test_navigate_tool_rejects_non_allowlisted_read():
+    # The shipped sample gates reads by Tranco top-100k; an obscure host is denied
+    # before the session is ever routed.
+    from browser_guard.mcp.validator import ValidationError
+    import browser_guard.mcp.server as server
+    importlib.reload(server)
+    session = _fake_session(navigate={"id": "pre-h1"})
+    with patch.object(server._store, "route", return_value=session):
+        with pytest.raises(ValidationError, match="not on allowlist"):
+            await server.navigate("nonexistent-xyz-9876.test", "pre-h1")
+    session.navigate.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_navigate_tool_requires_page_id():
     import browser_guard.mcp.server as server
     importlib.reload(server)
