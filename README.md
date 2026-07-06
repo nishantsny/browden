@@ -270,4 +270,5 @@ on an ephemeral port. The same suites run on every push/PR via the
 
 ## License
 
-[Apache License 2.0](./LICENSE).
+[GNU General Public License v3.0 or later](./LICENSE). Copyleft: if you
+distribute a modified version, you must release your source under the GPL too.
