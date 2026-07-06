@@ -210,10 +210,10 @@ class BrowserSessionManager:
 
     # -- write tools --------------------------------------------------------
 
-    async def add_to_cart_click(self, css_selector: str, *, id: str) -> dict:
+    async def click(self, css_selector: str, *, id: str) -> dict:
         """Click the (already policy-validated) add-to-cart element on ``id``.
 
-        The caller (the ``add_to_cart`` MCP tool) has already gated the host and
+        The caller (the ``click`` MCP tool) has already gated the host and
         verified the element is a genuine add-to-cart control on the cached
         snapshot. Here we re-find it live and click; the soup cache is then
         invalidated because the DOM has changed.
@@ -231,7 +231,7 @@ class BrowserSessionManager:
             return self._tab_gone(id)
         self._cache.invalidate(handle)
         self._registry.touch(handle)
-        logger.info(f"add_to_cart clicked {css_selector!r} on tab {id}")
+        logger.info(f"click: activated {css_selector!r} on tab {id}")
         result.pop("tab_id", None)
         result["id"] = id
         return result

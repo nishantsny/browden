@@ -6,7 +6,7 @@ querying the DOM, taking screenshots — without ever handing the agent the full
 unguarded power of a CDP or Playwright client. 
 
 By default the agent can read and navigate, and nothing else. The one write
-action that exists (`add_to_cart`) ships **disabled** and, even when enabled, can
+action that exists (`click`) ships **disabled** and, even when enabled, can
 only click an allowlisted button on an allowlisted site. That's what makes it
 safe to point browser-guard at a Chrome profile you actually use.
 
@@ -94,7 +94,7 @@ verbatim; it is globally unique and routes itself to the right profile.
 | `query_selector_all` | `document.querySelectorAll`, server-side (paginated) |
 | `screenshot` | PNG of the tab's current viewport |
 | `force_reload_tab` | Reload a tab and refresh its cached DOM |
-| `add_to_cart` | **The only write action** — click an allowlisted "add to cart" button (disabled by default) |
+| `click` | **The only write action** — click an allowlisted "add to cart" button (disabled by default) |
 
 The DOM-query tools read a **parsed snapshot** of the rendered (post-JavaScript)
 page and return compact JSON nodes (`tag`, `id`, `classes`, `attributes`,
@@ -145,7 +145,7 @@ wide open** and **every write action disabled**:
   are normalized to `https://`, `www.` is stripped, and query strings/fragments
   pass through untouched. Anything not listed is rejected with a structured
   error.
-- **The write action** (`add_to_cart`) is default-deny. Enabling it for a host
+- **The write action** (`click`) is default-deny. Enabling it for a host
   requires both listing the host *and* the exact visible button label it may
   click — so it can never be steered into "Buy now", checkout, or an
   agent-targeted decoy control.

@@ -21,7 +21,7 @@ from urllib.parse import urlparse
 from .validator import (
     ActionAllowlist,
     ValidationError,
-    is_add_to_cart,
+    is_click,
     label_matches,
     validate_url,
 )
@@ -169,11 +169,11 @@ async def navigate(url: str, id: str) -> dict:
 
 @mcp.tool()
 @_tool
-async def add_to_cart(css_selector: str, id: str) -> dict:
+async def click(css_selector: str, id: str) -> dict:
     """Click an "Add to cart" control on a tab — the only write action.
 
     Two server-side gates, both default-deny, must pass:
-      1. The tab's host must be listed under the ``add_to_cart`` section of the
+      1. The tab's host must be listed under the ``click`` section of the
          allowlist. The shipped default has no hosts enabled — the amazon.com
          entry in allowlist.yaml is commented out until you opt in.
       2. ``css_selector`` must resolve to exactly one element that is, by
@@ -181,7 +181,7 @@ async def add_to_cart(css_selector: str, id: str) -> dict:
          checkout, subscribe, remove, or an agent-targeted decoy.
     Either gate failing raises a ValidationError and nothing is clicked.
     """
-    logger.info(f"Tool called: add_to_cart (css_selector={css_selector!r}, id={id!r})")
+    logger.info(f"Tool called: click (css_selector={css_selector!r}, id={id!r})")
     session = _store.route(id)
 
     # Gate 1: per-action host allowlist, checked against the tab's live URL.
@@ -189,7 +189,7 @@ async def add_to_cart(css_selector: str, id: str) -> dict:
     if url is None:
         return {"error": f"tab {id} is no longer open — call list_tabs for current tabs",
                 "id": id}
-    validate_url(url, _ALLOWLIST.section("add_to_cart"))  # raises if host not allowed
+    validate_url(url, _ALLOWLIST.section("click"))  # raises if host not allowed
 
     # Gate 2: the element must be a single, genuine add-to-cart control.
     found = await session.query_selector_all(css_selector, id=id, limit=2)
@@ -201,20 +201,20 @@ async def add_to_cart(css_selector: str, id: str) -> dict:
     if total > 1:
         raise ValidationError(f"selector {css_selector!r} is ambiguous ({total} matches) — refusing to click")
     node = found["elements"][0]
-    if not is_add_to_cart(node):
+    if not is_click(node):
         raise ValidationError(
             "selected element is not a recognized add-to-cart control — refusing to click")
 
     # Gate 3: the site-specific required button text from the allowlist (e.g.
     # amazon.com must display "Add to cart").
     host = urlparse(url).hostname or ""
-    label_re = _ALLOWLIST.label_pattern("add_to_cart", host)
+    label_re = _ALLOWLIST.label_pattern("click", host)
     if label_re is not None and not label_matches(node, label_re):
         raise ValidationError(
             f"control text does not match the required add-to-cart label for {host} — refusing to click")
 
-    result = await session.add_to_cart_click(css_selector, id=id)
-    logger.info("Tool finished: add_to_cart")
+    result = await session.click(css_selector, id=id)
+    logger.info("Tool finished: click")
     return result
 
 

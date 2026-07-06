@@ -1,7 +1,7 @@
-"""Element-level guard for the ``add_to_cart`` write action.
+"""Element-level guard for the ``click`` write action.
 
 The per-action host allowlist (:class:`ActionAllowlist`) decides *where*
-``add_to_cart`` may act. This module decides *what* it may activate once on an
+``click`` may act. This module decides *what* it may activate once on an
 allowed host: a single, genuine "add to cart" control — never Buy Now, checkout,
 subscribe, save-for-later, remove, or an agent-targeted decoy.
 
@@ -18,7 +18,7 @@ import re
 # anything button-ish that slips through.
 _ADD_TO_CART_TEXT = re.compile(r"(?i)^\s*add(ed)?\s+to\s+(cart|bag|basket|trolley)\s*$")
 
-# Contexts that look button-ish but must never be driven by add_to_cart.
+# Contexts that look button-ish but must never be driven by click.
 _NEGATIVE = re.compile(
     r"(?i)\b("
     r"buy\s*now|buy\s*with|1[\s-]?click|one[\s-]?click|"
@@ -57,7 +57,7 @@ def label_matches(node: dict, pattern: "re.Pattern[str]") -> bool:
     """True iff any human-visible label of ``node`` matches ``pattern``.
 
     Used to enforce the per-site required button text from the allowlist (e.g.
-    Amazon must display "Add to cart"), on top of the generic ``is_add_to_cart``
+    Amazon must display "Add to cart"), on top of the generic ``is_click``
     check. Matches only trustworthy labels — never raw ``data-*`` attributes.
     """
     if not node:
@@ -65,7 +65,7 @@ def label_matches(node: dict, pattern: "re.Pattern[str]") -> bool:
     return any(pattern.search(label) for label in _candidate_labels(node))
 
 
-def is_add_to_cart(node: dict) -> bool:
+def is_click(node: dict) -> bool:
     """True iff ``node`` is, by trustworthy signals, a genuine add-to-cart control.
 
     Default-deny: every check must pass. ``node`` is a serialized element dict

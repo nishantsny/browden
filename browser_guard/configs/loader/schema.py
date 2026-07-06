@@ -2,7 +2,7 @@
 
 The expected shape (see configs/samples/allowlist.yaml):
 
-    <action name>:                # e.g. read, add_to_cart
+    <action name>:                # e.g. read, click
       <host>:                     # e.g. amazon.com, or "*" as wildcard fallback
         - <path regex>            # list form: just path regexes (read-style)
       <host>:                     # or the object form used by write actions:

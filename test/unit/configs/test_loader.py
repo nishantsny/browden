@@ -12,12 +12,12 @@ from browser_guard.configs.loader import (
 # -- load_allowlist -----------------------------------------------------------
 
 def test_sample_config_loads_reads_open_writes_denied():
-    # The shipped sample: read wide open, the add_to_cart block only present
+    # The shipped sample: read wide open, the click block only present
     # as a commented-out showcase.
     al = load_allowlist(SAMPLE_ALLOWLIST)
     assert al.section("read").is_allowed("anything.example.com", "/whatever")
-    assert not al.section("add_to_cart").is_allowed("amazon.com", "/dp/X")
-    assert al.label_pattern("add_to_cart", "amazon.com") is None
+    assert not al.section("click").is_allowed("amazon.com", "/dp/X")
+    assert al.label_pattern("click", "amazon.com") is None
 
 
 def test_load_builds_working_allowlist(tmp_path):
@@ -25,14 +25,14 @@ def test_load_builds_working_allowlist(tmp_path):
     f.write_text(
         "read:\n"
         '  "*": [".*"]\n'
-        "add_to_cart:\n"
+        "click:\n"
         "  amazon.com:\n"
         '    paths: [".*"]\n'
         "    label: '(?i)\\badd to cart\\b'\n"
     )
     al = load_allowlist(f)
-    assert al.section("add_to_cart").is_allowed("www.amazon.com", "/dp/X")
-    assert al.label_pattern("add_to_cart", "amazon.com").search("Add to Cart")
+    assert al.section("click").is_allowed("www.amazon.com", "/dp/X")
+    assert al.label_pattern("click", "amazon.com").search("Add to Cart")
 
 
 def test_missing_file_raises_config_error(tmp_path):
@@ -63,9 +63,9 @@ def test_empty_document_is_deny_all(tmp_path):
     ('read:\n  "*": []\n', "non-empty list"),
     ('read:\n  "*": [123]\n', "must be a string"),
     ('read:\n  "*": ["["]\n', "invalid path regex"),
-    ('add_to_cart:\n  amazon.com:\n    paths: [".*"]\n    typo: x\n', "unknown keys"),
-    ('add_to_cart:\n  amazon.com:\n    label: 7\n', "label: must be a regex string"),
-    ('add_to_cart:\n  amazon.com:\n    label: "("\n', "label: invalid regex"),
+    ('click:\n  amazon.com:\n    paths: [".*"]\n    typo: x\n', "unknown keys"),
+    ('click:\n  amazon.com:\n    label: 7\n', "label: must be a regex string"),
+    ('click:\n  amazon.com:\n    label: "("\n', "label: invalid regex"),
 ])
 def test_schema_violations_raise_config_error(tmp_path, content, match):
     f = tmp_path / "allowlist.yaml"
