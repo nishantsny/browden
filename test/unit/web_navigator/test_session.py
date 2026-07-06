@@ -1,3 +1,4 @@
+import asyncio
 import time
 
 import pytest
@@ -44,6 +45,9 @@ class FakeBackend:
     def is_running(self):
         self.calls.append("is_running")
         return self.running
+
+    def shutdown(self):
+        self.calls.append("shutdown")
 
     def list_tabs(self):
         self.calls.append("list_tabs")
@@ -105,6 +109,36 @@ def make_session(backend=None, clock=None):
 
 def test_no_reaper_task_when_disabled():
     assert make_session()._reaper_task is None
+
+
+def test_close_shuts_down_backend():
+    backend = FakeBackend()
+    s = make_session(backend)
+    s.close()
+    assert backend.calls == ["shutdown"]
+
+
+@pytest.mark.asyncio
+async def test_close_cancels_the_reaper():
+    # A real reaper task needs a running loop to create; assert close cancels it
+    # and drops the reference (so shutdown works without an active loop later).
+    backend = FakeBackend()
+    s = BrowserSessionManager(backend, namespace="ns", start_reaper=True)
+    task = s._reaper_task
+    assert task is not None
+    s.close()
+    assert s._reaper_task is None
+    assert "shutdown" in backend.calls
+    await asyncio.sleep(0)  # let the loop process the requested cancellation
+    assert task.cancelled()
+
+
+def test_close_is_safe_without_a_reaper():
+    # Called at interpreter exit on a session built with start_reaper=False.
+    backend = FakeBackend()
+    s = make_session(backend)
+    s.close()  # must not raise despite _reaper_task being None
+    assert backend.calls == ["shutdown"]
 
 
 def test_profile_dir_comes_from_backend():

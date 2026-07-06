@@ -248,6 +248,15 @@ class SeleniumChromeBackend(WebNavigatorBackend):
     def get_profile_dir(self) -> Path:
         return self._profile_dir
 
+    def shutdown(self) -> None:
+        """Public teardown for orderly shutdown (see ``WebNavigatorBackend.shutdown``).
+
+        Delegates to the same ``_teardown`` used internally to heal a dead
+        session, so a stopped backend leaves no orphaned Chrome or stale
+        SingletonLock behind.
+        """
+        self._teardown()
+
     def _teardown(self) -> None:
         """Drop the WebDriver session and stop the Chrome we launched.
 

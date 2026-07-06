@@ -51,6 +51,17 @@ class WebNavigatorBackend(ABC):
         """True if a live browser is currently attached. Must never launch one."""
 
     @abstractmethod
+    def shutdown(self) -> None:
+        """Quit the driver and stop the browser this backend launched.
+
+        Synchronous and best-effort: safe to call at interpreter exit (no event
+        loop), when nothing was ever launched, or more than once. Releases the
+        OS resources the backend owns — the WebDriver session, the Chrome
+        subprocess, and its ``SingletonLock`` — which would otherwise outlive
+        the process. The backend must not be driven again after this.
+        """
+
+    @abstractmethod
     def list_tabs(self) -> list[TabInfo]:
         """Return all open tabs."""
 

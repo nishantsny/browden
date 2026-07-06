@@ -90,9 +90,27 @@ class BrowserSessionStore:
             session = BrowserSessionManager(SeleniumChromeBackend(profile_dir=key), namespace=digest)
             self._sessions[digest] = session
             if not self._atexit_registered:
-                atexit.register(lambda: logger.info("MCP Server shutting down"))
+                atexit.register(self._shutdown)
                 self._atexit_registered = True
         return session
+
+    def _shutdown(self) -> None:
+        """Close every profile's browser on interpreter exit.
+
+        Registered exactly once (guarded by ``_atexit_registered``) the first
+        time any session is created, so it fires a single time regardless of how
+        many profiles are in play. The store is the only object with a view of
+        all sessions, so teardown belongs here: without it the Chrome processes
+        the store launched (and their SingletonLocks) outlive the server. Each
+        close is best-effort — one profile failing to shut down must not strand
+        the others.
+        """
+        logger.info("MCP Server shutting down")
+        for session in self._sessions.values():
+            try:
+                session.close()
+            except Exception as e:
+                logger.warning(f"Error closing session during shutdown: {e}")
 
     def sessions(self) -> list[BrowserSessionManager]:
         """All live sessions, for aggregating tabs across profiles."""
