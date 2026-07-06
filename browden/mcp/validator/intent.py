@@ -29,13 +29,20 @@ _CLICKABLE_INPUT_TYPES = ("submit", "button")
 
 
 def _candidate_labels(node: dict) -> list[str]:
-    """The human-visible names of the control, in trust order. Never raw data-* attrs."""
+    """The human-visible names of the control, in trust order. Never raw data-* attrs.
+
+    ``labelledby_text`` is the accessible name the serializer resolved from
+    ``aria-labelledby`` — the visible label when it lives on a referenced element
+    rather than on the control itself (see ``dom.serialize._labelledby_text``).
+    It is the same class of authored label as ``aria-label``, so it belongs here.
+    """
     attrs = node.get("attributes", {})
     return [
         node.get("text") or "",
         attrs.get("value", ""),
         attrs.get("aria-label", ""),
         attrs.get("title", ""),
+        node.get("labelledby_text") or "",
     ]
 
 
