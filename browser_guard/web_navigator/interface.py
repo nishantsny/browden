@@ -120,5 +120,5 @@ class WebNavigatorBackend(ABC):
         tools read a cached snapshot, which cannot click) and refuses unless it
         is the sole match and is displayed + enabled. Returns the pre/post click
         URL and title. Policy — which hosts, which elements — is enforced by the
-        caller (the ``add_to_cart`` tool), never here.
+        caller (the ``click`` tool), never here.
         """

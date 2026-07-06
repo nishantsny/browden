@@ -10,12 +10,12 @@
 read:
   "*": [".*"]
 
-# The one write action, add_to_cart, ships disabled. The block below shows
+# The one write action, click, ships disabled. The block below shows
 # exactly what enabling it for amazon.com looks like — uncomment it to allow
 # clicks on controls whose visible text matches the label regex, and nothing
 # else.
 #
-# add_to_cart:
+# click:
 #   amazon.com:
 #     paths: [".*"]
 #     label: '(?i)\badd to cart\b'

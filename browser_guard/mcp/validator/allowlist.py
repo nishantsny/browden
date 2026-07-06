@@ -46,7 +46,7 @@ class ActionAllowlist:
     * **object form** — path regexes plus a site-specific ``label`` regex the
       activated control's visible name must match (used by write actions)::
 
-          add_to_cart:
+          click:
             amazon.com:
               paths: [".*"]
               label: '(?i)\\badd to cart\\b'
