@@ -8,7 +8,7 @@ The expected shape (see configs/samples/allowlist.yaml):
     read:                         # the read/navigate gate
       enabled: <bool>             # master switch (default true)
       tranco:
-        enabled: <bool>           # allow the bundled top-sites snapshot
+        enabled: <bool>           # allow the fetched top-sites snapshot
         top_n: <positive int>     # how far down the ranking to allow
       website_overrides:          # host -> path regexes; "*" host = any host
         <host>: [<path regex>, ...]

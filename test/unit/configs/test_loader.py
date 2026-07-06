@@ -12,7 +12,7 @@ from browden.configs.loader import (
 # -- load_allowlist -----------------------------------------------------------
 
 def test_sample_config_gates_reads_by_tranco_and_denies_writes():
-    # The shipped sample: reads gated by Tranco top-100k, denylist empty, the
+    # The shipped sample: reads gated by Tranco top-sites, denylist empty, the
     # click block only present as a commented-out showcase.
     al = load_allowlist(SAMPLE_ALLOWLIST)
     assert al.read_policy.is_allowed("google.com", "/")            # top site -> allowed

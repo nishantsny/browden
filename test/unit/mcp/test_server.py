@@ -230,7 +230,7 @@ async def test_navigate_tool_validates_then_delegates():
 
 @pytest.mark.asyncio
 async def test_navigate_tool_rejects_non_allowlisted_read():
-    # The shipped sample gates reads by Tranco top-100k; an obscure host is denied
+    # The shipped sample gates reads by Tranco top-sites; an obscure host is denied
     # before the session is ever routed.
     from browden.mcp.validator import ValidationError
     import browden.mcp.server as server
