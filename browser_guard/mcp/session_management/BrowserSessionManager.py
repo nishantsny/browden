@@ -73,6 +73,21 @@ class BrowserSessionManager:
         """The raw backend handle inside a customer id (routed here by the store)."""
         return split_page_id(id)[1]
 
+    def close(self) -> None:
+        """Stop the reaper and tear down this profile's browser.
+
+        Synchronous and best-effort — called from the store's ``atexit`` handler
+        at interpreter exit, when the event loop is already stopped. So it must
+        not touch the loop (no ``await``/``to_thread``): it just cancels the
+        reaper task (a no-op flag once the loop is gone) and drives the backend's
+        synchronous ``shutdown`` directly, so the Chrome subprocess this session
+        launched doesn't outlive the process.
+        """
+        if self._reaper_task is not None:
+            self._reaper_task.cancel()
+            self._reaper_task = None
+        self._backend.shutdown()
+
     async def is_live(self) -> bool:
         """True if this session's browser is currently running.
 

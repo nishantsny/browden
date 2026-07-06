@@ -34,6 +34,35 @@ def test_no_backend_or_session_at_import():
         assert server._store._sessions == {}
 
 
+def test_shutdown_registered_once_and_closes_every_session():
+    import browser_guard.mcp.session_management.BrowserSessionStore as store_mod
+    with patch.object(store_mod, "atexit") as mock_atexit, \
+         patch("browser_guard.mcp.session_management.BrowserSessionStore.SeleniumChromeBackend"), \
+         patch("browser_guard.mcp.session_management.BrowserSessionStore.BrowserSessionManager",
+               side_effect=lambda *a, **k: MagicMock()):
+        store = store_mod.BrowserSessionStore()
+        # Building three profiles' sessions registers the atexit hook exactly once.
+        sessions = [store.get_or_create_session(f"/p/{i}") for i in range(3)]
+        assert mock_atexit.register.call_count == 1
+        hook = mock_atexit.register.call_args.args[0]
+        assert hook == store._shutdown
+        # Firing it closes every session, once each.
+        hook()
+        for s in sessions:
+            s.close.assert_called_once_with()
+
+
+def test_shutdown_continues_after_one_session_fails():
+    import browser_guard.mcp.session_management.BrowserSessionStore as store_mod
+    store = store_mod.BrowserSessionStore()
+    bad, good = MagicMock(), MagicMock()
+    bad.close.side_effect = RuntimeError("driver already dead")
+    store._sessions = {"aa": bad, "bb": good}
+    store._shutdown()  # must not raise; the good session still gets closed
+    bad.close.assert_called_once_with()
+    good.close.assert_called_once_with()
+
+
 def test_get_session_is_lazy_and_cached():
     import browser_guard.mcp.server as server
     importlib.reload(server)
