@@ -3,6 +3,7 @@ import asyncio
 import functools
 import os
 from collections.abc import Awaitable, Callable
+from pathlib import Path
 
 
 from ..common.logger import logger
@@ -13,6 +14,7 @@ from ..configs.loader import (
     resolve_allowlist_path,
 )
 from ..dependencies.mcp import FastMCP, Image
+from ..web_navigator.selenium_chrome import SeleniumChromeBackend
 from .session_management.BrowserSessionStore import BrowserSessionStore, UnknownTabError
 from urllib.parse import urlparse
 
@@ -47,6 +49,29 @@ logger.info("Browser Guard MCP module initialized")
 # All per-profile session state and the customer<->backend id mapping live in
 # the store (see session_management/BrowserSessionStore.py).
 _store = BrowserSessionStore()
+
+
+def _default_profile_dir() -> Path:
+    """The shared default Chrome profile path (honours ``XDG_CACHE_HOME``).
+
+    Lives here, not in the backend: the backend never falls back to a default —
+    the server is the caller that decides which profile, and hands the backend a
+    concrete path.
+    """
+    root = os.environ.get("XDG_CACHE_HOME") or str(Path.home() / ".cache")
+    return Path(root) / "browser-guard" / "chrome-profile"
+
+
+def _resolve_profile_dir(profile_dir: str | None) -> Path:
+    """The concrete profile path for a request: the caller's, or the default."""
+    if profile_dir:
+        return Path(profile_dir).expanduser().resolve()
+    return _default_profile_dir()
+
+
+def _backend_for(profile_dir: str | None) -> SeleniumChromeBackend:
+    """Build a backend bound to the resolved profile path (empty; no Chrome yet)."""
+    return SeleniumChromeBackend(profile_dir=_resolve_profile_dir(profile_dir))
 
 
 def _tool(fn: Callable[..., Awaitable[dict]]) -> Callable[..., Awaitable[dict]]:
@@ -98,7 +123,7 @@ async def new_blank_tab(profile_dir: str | None = None) -> dict:
     the shared focused window and give undefined results.
     """
     logger.info(f"Tool called: new_blank_tab (profile_dir={profile_dir!r})")
-    session = _store.get_or_create_session(profile_dir)
+    session = _store.get_or_create_session(_backend_for(profile_dir))
     result = await session.new_blank_tab()  # wire dict with composite id
     logger.info("Tool finished: new_blank_tab")
     return result

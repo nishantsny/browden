@@ -13,14 +13,9 @@ import pytest
 @pytest.fixture(autouse=True)
 def _headless_isolated_chrome(tmp_path, monkeypatch):
     monkeypatch.setenv("BROWSER_GUARD_HEADLESS", "1")
+    # The server's _default_profile_dir() reads XDG_CACHE_HOME live, so pointing
+    # the env at a throwaway location keeps the test off the user's real profile.
     monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / "cache"))
-    # backend.PROFILE_DIR was resolved at import time from the real XDG_CACHE_HOME;
-    # repoint it at the throwaway location for the duration of the test.
-    from browser_guard.web_navigator.selenium_chrome import backend as backend_mod
-    monkeypatch.setattr(
-        backend_mod, "PROFILE_DIR",
-        tmp_path / "cache" / "browser-guard" / "chrome-profile",
-    )
     yield
 
 
