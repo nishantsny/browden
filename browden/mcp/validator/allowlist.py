@@ -116,6 +116,18 @@ class ActionAllowlist:
 
       The label is mandatory so that allowing every control reads explicitly as
       ``label: '.*'`` in the config, never as the silent default of an omission.
+    * ``write-text`` — the text-entry write action (the ``fill`` tool), a section
+      *separate* from ``click`` so permitting typing never implies permitting
+      clicks. Same shape (per-host ``label`` regex + optional ``paths``), but the
+      label is matched against the **field's visible label** — its placeholder,
+      aria-label, resolved ``aria-labelledby`` / ``<label>``, or title — so an
+      operator authorizes *which* text boxes may be typed into by the name a human
+      reads next to them::
+
+          write-text:
+            amazon.com:
+              label: '(?i)grocery tip.*'  # only fields labelled "Grocery Tip …"
+              paths: [".*"]
     * ``infra`` — session/tab caps.
 
     ``read_policy`` gates reads; ``denylist`` is the always-deny list (also

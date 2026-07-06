@@ -116,9 +116,19 @@ class WebNavigatorBackend(ABC):
     def click_element(self, css_selector: str) -> dict:
         """Find one element by CSS selector on the active tab and click it.
 
-        The only write primitive. Re-finds the element *live* (the DOM-query
+        A write primitive. Re-finds the element *live* (the DOM-query
         tools read a cached snapshot, which cannot click) and refuses unless it
         is the sole match and is displayed + enabled. Returns the pre/post click
         URL and title. Policy — which hosts, which elements — is enforced by the
         caller (the ``click`` tool), never here.
+        """
+
+    @abstractmethod
+    def fill_element(self, css_selector: str, value: str) -> dict:
+        """Find one text field by CSS selector on the active tab and set its value.
+
+        The write-text primitive. Like :meth:`click_element`, re-finds the element
+        *live* and refuses unless it is the sole match and is displayed + enabled;
+        then clears it and types ``value``. Policy — which hosts, which fields,
+        what value — is enforced by the caller (the ``fill`` tool), never here.
         """

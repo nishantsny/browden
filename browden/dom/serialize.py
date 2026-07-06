@@ -54,6 +54,34 @@ def _labelledby_text(tag) -> str:
     return " ".join(p for p in parts if p)
 
 
+def _field_label(tag) -> str:
+    """The text of the ``<label>`` associated with a form field, or "".
+
+    A text box's human-readable name often lives on a ``<label>`` rather than on
+    the field itself: either ``<label for="<field-id>">`` (document-global, like an
+    idref) or a ``<label>`` ancestor that wraps the field. We resolve it so the
+    ``write-text`` guard (``mcp.validator.intent.field_label_matches``) can match a
+    field by the label a human reads next to it. Only computed for form fields.
+    """
+    if getattr(tag, "name", None) not in ("input", "textarea", "select"):
+        return ""
+    fid = tag.get("id")
+    if isinstance(fid, (list, tuple)):
+        fid = " ".join(str(v) for v in fid)
+    if fid:
+        root = tag
+        for parent in tag.parents:
+            root = parent
+        lab = root.find("label", attrs={"for": fid})
+        if lab is not None:
+            return " ".join(lab.get_text(separator=" ", strip=True).split())
+    # A wrapping <label> (implicit association) — the field sits inside the label.
+    for parent in tag.parents:
+        if getattr(parent, "name", None) == "label":
+            return " ".join(parent.get_text(separator=" ", strip=True).split())
+    return ""
+
+
 def element_to_node(tag, *, include_html: bool = False,
                     max_html_bytes: int = DEFAULT_MAX_HTML_BYTES) -> dict:
     """Return the JSON node for one bs4 ``Tag``. See module docstring for the caps."""
@@ -97,6 +125,9 @@ def element_to_node(tag, *, include_html: bool = False,
     labelledby_text = _labelledby_text(tag)
     if labelledby_text:
         node["labelledby_text"] = labelledby_text[:TEXT_CAP]
+    field_label = _field_label(tag)
+    if field_label:
+        node["field_label"] = field_label[:TEXT_CAP]
     if include_html:
         encoded = html_str.encode("utf-8")
         if len(encoded) > max_html_bytes:

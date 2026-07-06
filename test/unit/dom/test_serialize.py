@@ -75,6 +75,28 @@ def test_no_labelledby_field_when_absent_or_dangling():
     assert "labelledby_text" not in element_to_node(inp)
 
 
+def test_field_label_from_label_for_attribute():
+    html = ('<div><label for="tip">Grocery Tip (optional):</label>'
+            '<input id="tip" type="number"></div>')
+    inp = BeautifulSoup(html, "html.parser").find("input")
+    assert element_to_node(inp)["field_label"] == "Grocery Tip (optional):"
+
+
+def test_field_label_from_wrapping_label():
+    inp = BeautifulSoup('<label>Email <input type="email"></label>', "html.parser").find("input")
+    assert element_to_node(inp)["field_label"] == "Email"
+
+
+def test_no_field_label_when_unassociated_or_not_a_field():
+    # Bare input whose "Grocery Tip" text is a mere sibling (no for=/wrapping label)
+    # gets no field_label — matching the real Amazon tip input.
+    inp = BeautifulSoup('<div><span>Grocery Tip</span><input id="t" type="number"></div>',
+                        "html.parser").find("input")
+    assert "field_label" not in element_to_node(inp)
+    # Non-field elements never get a field_label.
+    assert "field_label" not in element_to_node(_tag("<button>Go</button>"))
+
+
 def test_include_html_within_budget():
     tag = _tag("<b>hi</b>")
     node = element_to_node(tag, include_html=True)

@@ -21,7 +21,9 @@ from urllib.parse import urlparse
 from .validator import (
     ActionAllowlist,
     ValidationError,
+    field_label_matches,
     is_clickable_control,
+    is_fillable_control,
     label_matches,
     validate_url,
 )
@@ -227,6 +229,69 @@ async def click(css_selector: str, id: str) -> dict:
 
     result = await session.click(css_selector, id=id)
     logger.info("Tool finished: click")
+    return result
+
+
+@mcp.tool()
+@_tool
+async def fill(css_selector: str, value: str, id: str) -> dict:
+    """Type text into a field on a tab — the write-text action.
+
+    The text-entry counterpart of ``click``. Three server-side gates, all
+    default-deny, must pass:
+      1. The tab's host must be listed under the ``write-text`` section of the
+         allowlist (and not on the denylist) — a section *separate* from
+         ``click``, so permitting typing never implies permitting clicks, or the
+         reverse.
+      2. ``css_selector`` must resolve to exactly one element that is a real,
+         visible, non-decoy, non-readonly text control (a ``<textarea>``, a
+         text-like ``<input>``, or a ``contenteditable`` element). Integrity, not
+         intent.
+      3. The field's *visible label* — its placeholder / aria-label /
+         aria-labelledby / associated ``<label>`` / title — must fully match the
+         host's required ``write-text`` ``label`` regex, so the operator
+         authorizes *which* boxes may be typed into by the name a human reads next
+         to them (never a hidden ``name``/``id``). ``label: '.*'`` opts into any.
+    Any gate failing raises a ValidationError and nothing is typed.
+    """
+    logger.info(f"Tool called: fill (css_selector={css_selector!r}, id={id!r})")
+    session = _store.route(id)
+
+    # Gate 1: per-action host allowlist ('write-text'); denylist vetoes first.
+    url = await session.current_url(id=id)
+    if url is None:
+        return {"error": f"tab {id} is no longer open — call list_tabs for current tabs",
+                "id": id}
+    parsed = urlparse(url)
+    if _ALLOWLIST.is_denied(parsed.hostname or "", parsed.path):
+        raise ValidationError(f"URL on denylist: {parsed.hostname}{parsed.path}")
+    validate_url(url, _ALLOWLIST.section("write-text"))  # raises if host not allowed
+
+    # Gate 2: the element must be a single, real, visible, non-decoy text box.
+    found = await session.query_selector_all(css_selector, id=id, limit=2)
+    if "error" in found:
+        return found
+    total = found["total_count"]
+    if total == 0:
+        raise ValidationError(f"no element matches selector {css_selector!r}")
+    if total > 1:
+        raise ValidationError(f"selector {css_selector!r} is ambiguous ({total} matches) — refusing to fill")
+    node = found["elements"][0]
+    if not is_fillable_control(node):
+        raise ValidationError(
+            "selected element is not a fillable text control (or is a "
+            "hidden/disabled/readonly/decoy element) — refusing to fill")
+
+    # Gate 3: the host's required write-text label, matched against the field's
+    # visible label. Fail closed if it is somehow absent.
+    host = parsed.hostname or ""
+    label_re = _ALLOWLIST.label_pattern("write-text", host)
+    if label_re is None or not field_label_matches(node, label_re):
+        raise ValidationError(
+            f"field label does not match the required write-text label for {host} — refusing to fill")
+
+    result = await session.fill(css_selector, value, id=id)
+    logger.info("Tool finished: fill")
     return result
 
 
