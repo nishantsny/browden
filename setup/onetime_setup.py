@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""One-time setup for Browden.
+"""One-time setup for Browden — cross-platform (Linux, macOS, Windows).
 
 Run it with any Python — `python3 setup/onetime_setup.py`; no venv needed first.
 
@@ -10,31 +10,33 @@ What it does, in order:
   2. Copies configs/samples/read_only_on_popular_websites.yaml to
      <config-dir>/allowlist.yaml (default ~/.browden) — skipped if a config is
      already there.
-  3. Fetches the Tranco top-sites snapshot (top 400k) to
-     <config-dir>/tranco-top-400k.txt.gz — skipped if it is already there. The
-     snapshot is not committed; refresh it later with setup/fetch_tranco.py.
-  4. Prints the JSON block to add to your agent's settings by hand.
-
-Transport (--mode):
-  * stdio (default) — the agent launches the server on demand; no background
-    service and no port. Does steps 1-3, then prints the stdio config block.
-  * service — additionally writes a systemd *user* unit that serves SSE on
-    <port>, pinned to that venv, and enables it (Linux/systemd only).
+  3. Fetches the Tranco top-sites snapshot to <config-dir> — skipped if it is
+     already there. The snapshot is not committed; refresh it later with
+     setup/fetch_tranco.py.
+  4. In --mode stdio (the default), no service is installed — the agent
+     launches the server itself over stdio, on demand.
+     In --mode service, installs a background service that serves SSE on
+     <port>, pinned to that venv, using the host's native service manager:
+     systemd (Linux), launchd (macOS), or Task Scheduler (Windows).
+  5. Prints the JSON block to add to your agent's settings by hand.
 
 Run it again anytime: the venv/install and config copy are idempotent and the
-systemd steps re-apply cleanly. Use --service-name/--port to stand up a second
-SSE instance without disturbing an existing one.
+service steps re-apply cleanly. Use --service-name/--port to stand up a second
+instance without disturbing an existing one.
 """
 import argparse
 import json
 import os
 import shutil
-import subprocess
 import sys
 from pathlib import Path
 
-# Sibling module in setup/; stdlib-only, so importing it needs no venv.
+# Sibling modules in setup/; stdlib-only, so importing them needs no venv.
 from fetch_tranco import DEFAULT_TOP_N, TRANCO_FILENAME, fetch, snapshot_path
+from installers import (  # noqa: F401 — installers/_pythonw_for re-exported for tests
+    LinuxSystemdInstaller, MacLaunchdInstaller, ServiceInstaller,
+    WindowsTaskInstaller, _pythonw_for, _run, select_installer_cls,
+)
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 SAMPLE_ALLOWLIST = REPO_ROOT / "configs" / "samples" / "read_only_on_popular_websites.yaml"
@@ -43,29 +45,14 @@ DEFAULT_CONFIG_DIR = "~/.browden"
 DEFAULT_SERVICE_NAME = "browden"
 DEFAULT_VENV = REPO_ROOT / ".venv"
 
-UNIT_TEMPLATE = """\
-[Unit]
-Description=Browden MCP Server (SSE, {service_name})
-After=network.target
+def _venv_python(venv_dir: Path) -> Path:
+    """The interpreter path inside a venv — layout differs on Windows.
 
-[Service]
-Environment=DISPLAY={display}
-Environment=MCP_TRANSPORT=sse
-Environment=MCP_HOST=127.0.0.1
-Environment=MCP_PORT={port}
-WorkingDirectory={repo_root}
-ExecStart={python} -m browden.mcp.server --allowlist {allowlist}
-Restart=always
-RestartSec=5
-
-[Install]
-WantedBy=default.target
-"""
-
-
-def _run(cmd: list[str]) -> None:
-    print(f"[run]  {' '.join(cmd)}")
-    subprocess.run(cmd, check=True)
+    POSIX venvs put it at ``bin/python``; Windows at ``Scripts/python.exe``.
+    """
+    if os.name == "nt":
+        return venv_dir / "Scripts" / "python.exe"
+    return venv_dir / "bin" / "python"
 
 
 def ensure_venv(venv_dir: Path) -> Path:
@@ -75,7 +62,7 @@ def ensure_venv(venv_dir: Path) -> Path:
     existing venv is reused and the (fast) editable reinstall just refreshes it.
     Returns the venv's Python interpreter, which the service will run.
     """
-    python = venv_dir / "bin" / "python"
+    python = _venv_python(venv_dir)
     uv = shutil.which("uv")
     if uv:
         if not python.exists():
@@ -121,106 +108,95 @@ def ensure_tranco(config_dir: Path, top_n: int) -> Path:
     return dest
 
 
-def write_unit(service_name: str, port: int, allowlist_path: Path,
-               python: str, display: str) -> Path:
-    unit_dir = Path.home() / ".config" / "systemd" / "user"
-    unit_dir.mkdir(parents=True, exist_ok=True)
-    unit_path = unit_dir / f"{service_name}.service"
-    unit_path.write_text(UNIT_TEMPLATE.format(
-        service_name=service_name, port=port, repo_root=REPO_ROOT,
-        python=python, allowlist=allowlist_path, display=display))
-    print(f"[ok]   wrote systemd user unit {unit_path}")
-    return unit_path
+# --- agent config blocks ----------------------------------------------------
+
+def sse_config(service_name: str, port: int) -> str:
+    return json.dumps({
+        "mcpServers": {
+            service_name: {"type": "sse", "url": f"http://127.0.0.1:{port}/sse"}
+        }
+    }, indent=2)
 
 
-def systemd_enable(service_name: str) -> None:
-    for cmd in (["systemctl", "--user", "daemon-reload"],
-                ["systemctl", "--user", "enable", "--now", f"{service_name}.service"]):
-        print(f"[run]  {' '.join(cmd)}")
-        subprocess.run(cmd, check=True)
-    state = subprocess.run(
-        ["systemctl", "--user", "is-active", f"{service_name}.service"],
-        capture_output=True, text=True).stdout.strip()
-    print(f"[ok]   service {service_name} is {state}")
-    if state != "active":
-        raise SystemExit(
-            f"service {service_name} did not become active — inspect with: "
-            f"journalctl --user -u {service_name}")
+def stdio_config(service_name: str, python: str, allowlist: Path,
+                 display: str | None) -> str:
+    entry: dict = {
+        "command": python,
+        "args": ["-m", "browden.mcp.server", "--allowlist", str(allowlist)],
+    }
+    if display:  # X11 only; irrelevant (and omitted) on macOS/Windows
+        entry["env"] = {"DISPLAY": display}
+    return json.dumps({"mcpServers": {service_name: entry}}, indent=2)
 
 
 def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--mode", choices=("stdio", "service"), default="stdio",
-                        help="transport to set up: stdio (default) prints the "
-                             "on-demand stdio config; service also installs a "
-                             "systemd user service serving SSE")
+                        help="stdio (default): no service — the agent launches the "
+                             "server itself. service: install a background SSE service "
+                             "via the host's native manager (systemd/launchd/Task "
+                             "Scheduler).")
     parser.add_argument("--port", type=int, default=DEFAULT_PORT,
-                        help=f"SSE port (default: {DEFAULT_PORT})")
+                        help=f"SSE port for --mode service (default: {DEFAULT_PORT})")
     parser.add_argument("--config-dir", default=DEFAULT_CONFIG_DIR,
                         help=f"where the allowlist config lives (default: {DEFAULT_CONFIG_DIR})")
     parser.add_argument("--service-name", default=DEFAULT_SERVICE_NAME,
-                        help=f"systemd user service name (default: {DEFAULT_SERVICE_NAME})")
+                        help=f"service/task name (default: {DEFAULT_SERVICE_NAME})")
     parser.add_argument("--venv", default=str(DEFAULT_VENV),
                         help=f"venv to create/use for the service (default: {DEFAULT_VENV})")
     parser.add_argument("--python", default=None,
                         help="use an existing interpreter for the service and skip venv "
                              "creation (default: create/use --venv)")
     parser.add_argument("--display", default=os.environ.get("DISPLAY", ":0"),
-                        help="DISPLAY for headed Chrome (default: current, else :0)")
+                        help="DISPLAY for headed Chrome on Linux/X11 (default: current, else :0)")
     parser.add_argument("--tranco-top-n", type=int, default=DEFAULT_TOP_N,
                         help=f"how many top Tranco domains to fetch (default: {DEFAULT_TOP_N})")
     args = parser.parse_args(argv)
 
     if not SAMPLE_ALLOWLIST.exists():
         raise SystemExit(f"sample config missing: {SAMPLE_ALLOWLIST} — is the repo intact?")
-    if args.mode == "service" and shutil.which("systemctl") is None:
-        raise SystemExit(
-            "systemctl not found — --mode service automates only the systemd "
-            "(Linux) SSE setup; use the default --mode stdio, or see the README.")
 
     config_dir = Path(args.config_dir).expanduser().resolve()
-    allowlist_path = copy_config(config_dir)
+    allowlist = copy_config(config_dir)
     ensure_tranco(config_dir, args.tranco_top_n)
 
     if args.python:
-        python_exe = args.python
-        print(f"[ok]   using existing interpreter {python_exe} (skipping venv)")
+        service_python = args.python
+        print(f"[ok]   using existing interpreter {service_python} (skipping venv)")
     else:
-        python_exe = str(ensure_venv(Path(args.venv).expanduser().resolve()))
+        service_python = str(ensure_venv(Path(args.venv).expanduser().resolve()))
 
-    if args.mode == "service":
-        write_unit(args.service_name, args.port, allowlist_path, python_exe, args.display)
-        systemd_enable(args.service_name)
-        agent_json = json.dumps({
-            "mcpServers": {
-                args.service_name: {
-                    "type": "sse",
-                    "url": f"http://127.0.0.1:{args.port}/sse",
-                }
-            }
-        }, indent=2)
-    else:  # stdio — the agent launches the server itself; nothing to run now.
-        agent_json = json.dumps({
-            "mcpServers": {
-                args.service_name: {
-                    "command": python_exe,
-                    "args": ["-m", "browden.mcp.server",
-                             "--allowlist", str(allowlist_path)],
-                    "env": {"DISPLAY": args.display},
-                }
-            }
-        }, indent=2)
-    print(
-        f"\nDone. Add this to your agent's settings by hand "
-        f"(e.g. ~/.claude.json or .gemini/settings.json):\n\n{agent_json}"
-    )
+    # DISPLAY only matters for headed Chrome on Linux/X11.
+    display = args.display if sys.platform.startswith("linux") else None
+
+    if args.mode == "stdio":
+        agent_json = stdio_config(args.service_name, service_python, allowlist, display)
+        transport_note = (
+            "\nDone (stdio mode). No background service was installed — your agent "
+            "launches the server on demand. Add this to your agent's settings by hand "
+            "(e.g. ~/.claude.json or .gemini/settings.json):\n\n" + agent_json
+        )
+    else:
+        installer = select_installer_cls()(
+            service_name=args.service_name, port=args.port, allowlist=allowlist,
+            python=service_python, display=args.display, repo_root=REPO_ROOT,
+            config_dir=config_dir)
+        installer.install()
+        agent_json = sse_config(args.service_name, args.port)
+        transport_note = (
+            f"\nDone ({installer.manager} service on port {args.port}). Add this to "
+            f"your agent's settings by hand (e.g. ~/.claude.json or "
+            f".gemini/settings.json):\n\n{agent_json}"
+        )
+
+    print(transport_note)
     print(
         f"\nThe Tranco top-sites snapshot the read gate uses lives at "
         f"{snapshot_path(config_dir)} (not committed). Refresh it anytime with:\n\n"
         f"    python3 setup/fetch_tranco.py --config-dir {config_dir}\n"
     )
-    print(guard_allowlist_note(allowlist_path))
+    print(guard_allowlist_note(allowlist))
 
 
 def guard_allowlist_note(allowlist: Path) -> str:

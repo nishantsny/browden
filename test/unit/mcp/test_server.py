@@ -157,11 +157,35 @@ def test_default_profile_dir_honours_xdg(monkeypatch, tmp_path):
     assert server._default_profile_dir() == tmp_path / "browden" / "chrome-profile"
 
 
-def test_default_profile_dir_falls_back_to_home(monkeypatch, tmp_path):
+def test_default_cache_root_linux(monkeypatch, tmp_path):
     import browden.mcp.server as server
     monkeypatch.delenv("XDG_CACHE_HOME", raising=False)
-    monkeypatch.setenv("HOME", str(tmp_path))
-    assert server._default_profile_dir() == tmp_path / ".cache" / "browden" / "chrome-profile"
+    # Patch Path.home() directly: it reads USERPROFILE on Windows and HOME on
+    # POSIX, so setting $HOME wouldn't steer it on the Windows CI runner.
+    monkeypatch.setattr(server.Path, "home", lambda: tmp_path)
+    assert server._default_cache_root("linux", "posix") == tmp_path / ".cache"
+
+
+def test_default_cache_root_macos(monkeypatch, tmp_path):
+    import browden.mcp.server as server
+    monkeypatch.delenv("XDG_CACHE_HOME", raising=False)
+    monkeypatch.setattr(server.Path, "home", lambda: tmp_path)
+    assert server._default_cache_root("darwin", "posix") == tmp_path / "Library" / "Caches"
+
+
+def test_default_cache_root_windows(monkeypatch, tmp_path):
+    import browden.mcp.server as server
+    monkeypatch.delenv("XDG_CACHE_HOME", raising=False)
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path / "AppData" / "Local"))
+    assert server._default_cache_root("win32", "nt") == tmp_path / "AppData" / "Local"
+
+
+def test_default_cache_root_xdg_wins_on_every_platform(monkeypatch, tmp_path):
+    import browden.mcp.server as server
+    monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path))
+    assert server._default_cache_root("darwin", "posix") == tmp_path  # even on mac
+    # ...and the profile dir hangs the fixed subpath off it.
+    assert server._default_profile_dir() == tmp_path / "browden" / "chrome-profile"
 
 
 def _fake_session(**methods):

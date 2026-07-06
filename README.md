@@ -5,7 +5,7 @@
 [![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue.svg)](https://www.python.org/downloads/)
 [![MCP server](https://img.shields.io/badge/MCP-server-1f6feb.svg)](https://modelcontextprotocol.io)
 
-**A local, read-only (configurable) MCP shell around a real Chrome browser.** It lets an LLM
+**A local, cross-platform, read-only (configurable) MCP shell around a real Chrome browser.** It lets an LLM
 agent *look at* and *navigate* the web through your own browser. The agent can read pages,
 querying the DOM, take screenshots, but can never execute any write action. The MCP
 is configurable to allow button-clicks and text-fill, allowlisted per website and visible element. 
@@ -64,7 +64,9 @@ Defer to richer automation tools when you need to *drive* the browser rather tha
   machine. No cloud, no proxy — nothing about your browsing leaves the host.
 - **One-click install for Linux/Mac (minimal for Windows).** A single setup script installs a background service and
   prints the exact config block to paste into your agent.
-
+- **Platform-agnostic.** The same setup script and tool surface run on Linux,
+  macOS, and Windows, each using the OS's native service manager (systemd /
+  launchd / Task Scheduler).
 
 ## Quick start
 
@@ -89,6 +91,33 @@ The setup script will print a MCP config (sample below), paste that into your ag
 For quick test, restart your agent and ask it to open a tab and read a page. 
 
 If you prefer a persistent mcp process, use `setup/onetime_setup.py --mode service`, details in [Installation reference](#installation-reference).
+
+## Dependencies
+
+Requires **Python ≥ 3.11** and **Google Chrome** on the host. Setup is the same
+clone-and-run on every OS; the notes below only cover what differs per platform.
+
+### Linux
+
+- Run the setup command with `python3`.
+- Headed Chrome needs an X11 `DISPLAY` (the `env` block in the stdio config); on
+  a machine with no display, set `BROWDEN_HEADLESS=1`.
+- `--mode service` installs a **systemd user** unit.
+
+### macOS
+
+- Run the setup command with `python3`.
+- Chrome is found at `/Applications/Google Chrome.app` (or `~/Applications`); no
+  `DISPLAY` is needed.
+- `--mode service` installs a **launchd** LaunchAgent.
+
+### Windows
+
+- Run in **PowerShell** (or Windows Terminal), and use `py -3` instead of
+  `python3` — e.g. `py -3 setup\onetime_setup.py`. No administrator rights are
+  needed.
+- Chrome is found under `Program Files`.
+- `--mode service` installs a **Task Scheduler** logon task.
 
 ## Tools
 
@@ -251,14 +280,29 @@ instance without touching the first).
 
 ### Background service over SSE
 
-Runs browden as a **systemd user service** (Linux) so the Chrome session stays
-warm across agent restarts, serving SSE on port **22001** pinned to the venv.
+Runs browden as a background service via the host's **native service manager** —
+systemd (Linux), launchd (macOS), or Task Scheduler (Windows) — so the Chrome
+session stays warm across agent restarts, serving SSE on port **22001** pinned to
+the venv.
 
 ```bash
 git clone https://github.com/nishantsny/browden.git
 cd browden
 python3 setup/onetime_setup.py --mode service
 ```
+
+The same command works on all three platforms — each writes its native
+service description:
+
+| OS | Service manager | What gets written |
+| --- | --- | --- |
+| Linux | systemd (user) | `~/.config/systemd/user/<name>.service` |
+| macOS | launchd | `~/Library/LaunchAgents/<name>.plist` |
+| Windows | Task Scheduler | a logon-triggered task running a windowless launcher |
+
+(Chrome is located on `PATH`, then at the OS's canonical install location — macOS
+`/Applications`, Windows `Program Files`; point `BROWDEN_CHROME_BINARY` at it if
+it lives elsewhere.)
 
 Then paste the printed block into your agent's MCP config:
 

@@ -2,6 +2,7 @@ import os
 import shutil
 import socket
 import subprocess
+import sys
 import time
 import urllib.error
 import urllib.request
@@ -60,11 +61,42 @@ CHROME_BINARY_NAMES = (
 )
 
 
+def _wellknown_chrome_paths(platform: str = sys.platform, os_name: str = os.name) -> list[str]:
+    """OS-specific install locations to try when Chrome isn't on PATH.
+
+    On macOS and Windows, Chrome installs to a fixed application directory that
+    is *not* on ``PATH`` and whose executable isn't named ``google-chrome`` — so
+    ``shutil.which`` never finds it. Check those canonical spots before giving
+    up. Linux keeps to PATH (packaged installs land there), so this is empty.
+
+    ``platform``/``os_name`` are injectable so the per-OS branches are testable
+    from any host without perturbing ``os.name`` (which flips pathlib's flavour).
+    """
+    home = Path.home()
+    if platform == "darwin":
+        return [
+            "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+            str(home / "Applications/Google Chrome.app/Contents/MacOS/Google Chrome"),
+            "/Applications/Chromium.app/Contents/MacOS/Chromium",
+        ]
+    if os_name == "nt":
+        bases = [
+            os.environ.get("PROGRAMFILES", r"C:\Program Files"),
+            os.environ.get("PROGRAMFILES(X86)", r"C:\Program Files (x86)"),
+            os.environ.get("LOCALAPPDATA", str(home / "AppData" / "Local")),
+        ]
+        return [str(Path(b) / "Google" / "Chrome" / "Application" / "chrome.exe")
+                for b in bases if b]
+    return []
+
+
 def _find_chrome_binary() -> str:
     """Locate the Chrome/Chromium executable to launch directly.
 
-    Honours ``BROWDEN_CHROME_BINARY`` (or the common ``CHROME_BIN``)
-    first, then falls back to the usual binary names on PATH.
+    Honours ``BROWDEN_CHROME_BINARY`` (or the common ``CHROME_BIN``) first, then
+    the usual binary names on PATH, then each platform's canonical install
+    location (macOS ``/Applications``, Windows ``Program Files``) — so a stock
+    Chrome install works without setting anything.
     """
     explicit = os.environ.get("BROWDEN_CHROME_BINARY") or os.environ.get("CHROME_BIN")
     if explicit:
@@ -73,9 +105,12 @@ def _find_chrome_binary() -> str:
         found = shutil.which(name)
         if found:
             return found
+    for path in _wellknown_chrome_paths():
+        if Path(path).exists():
+            return path
     raise RuntimeError(
-        "Could not find a Chrome/Chromium binary on PATH; "
-        "set BROWDEN_CHROME_BINARY to its full path."
+        "Could not find a Chrome/Chromium binary on PATH or in the usual install "
+        "locations; set BROWDEN_CHROME_BINARY to its full path."
     )
 
 
