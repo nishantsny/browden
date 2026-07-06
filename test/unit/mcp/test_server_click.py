@@ -120,7 +120,7 @@ async def test_allow_all_host_clicks_any_real_control():
     __import__("importlib").reload(server)
     allow_all = ActionAllowlist({
         "read": {"website_overrides": {"*": [".*"]}},
-        "click": {"amazon.com": {"paths": [".*"]}},  # no label
+        "click": {"amazon.com": {"paths": [".*"], "label": ".*"}},  # explicit allow-any
     })
     session = _session(url="https://www.amazon.com/cart",
                        elements=[{"tag": "button", "id": None, "classes": [],
@@ -140,7 +140,7 @@ async def test_allow_all_host_still_rejects_decoy():
     __import__("importlib").reload(server)
     allow_all = ActionAllowlist({
         "read": {"website_overrides": {"*": [".*"]}},
-        "click": {"amazon.com": {"paths": [".*"]}},
+        "click": {"amazon.com": {"paths": [".*"], "label": ".*"}},
     })
     session = _session(url="https://www.amazon.com/cart",
                        elements=[_atc_node(value="Place your order",

@@ -15,10 +15,9 @@ The expected shape (see configs/samples/allowlist.yaml):
 
     <write action>:               # e.g. click
       <host>:
-        - <path regex>            # list form: just path regexes
-      <host>:                     # or object form with a required label:
+        label: <regex>               # REQUIRED: visible text must fully match
+                                     #   (use '.*' to allow any control on the host)
         paths: [<path regex>, ...]   # optional, defaults to [".*"]
-        label: <regex>               # optional required visible-text regex
 
     infra:
       max_browser_sessions: <positive int>
@@ -122,24 +121,27 @@ def validate_allowlist_data(data, *, source: str = "allowlist") -> dict:
             where = f"{source}: {action}.{host}"
             if not isinstance(host, str) or not host:
                 raise ConfigError(f"{source}: hosts in {action!r} must be non-empty strings, got {host!r}")
-            if isinstance(rule, list):
-                _check_patterns(rule, where)
-            elif isinstance(rule, dict):
-                unknown = set(rule) - {"paths", "label"}
-                if unknown:
-                    raise ConfigError(f"{where}: unknown keys {sorted(unknown)} (allowed: paths, label)")
-                if "paths" in rule:
-                    _check_patterns(rule["paths"], f"{where}.paths")
-                label = rule.get("label")
-                if label is not None:
-                    if not isinstance(label, str):
-                        raise ConfigError(f"{where}.label: must be a regex string, got {type(label).__name__}")
-                    try:
-                        re.compile(label)
-                    except re.error as e:
-                        raise ConfigError(f"{where}.label: invalid regex {label!r}: {e}") from None
-            else:
+            if not isinstance(rule, dict):
                 raise ConfigError(
-                    f"{where}: rule must be a list of path regexes or a mapping "
-                    f"with 'paths'/'label', got {type(rule).__name__}")
+                    f"{where}: rule must be a mapping with a required 'label' "
+                    f"(and optional 'paths'), got {type(rule).__name__}")
+            unknown = set(rule) - {"paths", "label"}
+            if unknown:
+                raise ConfigError(f"{where}: unknown keys {sorted(unknown)} (allowed: paths, label)")
+            if "paths" in rule:
+                _check_patterns(rule["paths"], f"{where}.paths")
+            # label is REQUIRED for write actions: what a control may do must be
+            # stated explicitly, so "allow any click" reads as label: '.*' in the
+            # config rather than being the silent default of an omitted field.
+            if "label" not in rule:
+                raise ConfigError(
+                    f"{where}: 'label' is required — a regex the control's visible text "
+                    f"must fully match (use '.*' to allow any control on this host)")
+            label = rule["label"]
+            if not isinstance(label, str):
+                raise ConfigError(f"{where}.label: must be a regex string, got {type(label).__name__}")
+            try:
+                re.compile(label)
+            except re.error as e:
+                raise ConfigError(f"{where}.label: invalid regex {label!r}: {e}") from None
     return data

@@ -105,14 +105,17 @@ class ActionAllowlist:
             website_overrides:
               "*": [".*"]                 # host -> path regexes; "*" = any host
 
-    * any other key (e.g. ``click``) — a *write action*, whose per-host rules
-      take a list of path regexes or the object form with a required ``label``
-      regex the activated control's visible name must match::
+    * any other key (e.g. ``click``) — a *write action*, whose per-host rule is
+      a mapping with a **required** ``label`` regex (the activated control's
+      visible name must fully match it) and optional ``paths``::
 
           click:
             amazon.com:
-              paths: [".*"]
-              label: '(?i)\\badd to cart\\b'
+              label: '(?i)add to cart'   # required; use '.*' to allow any control
+              paths: [".*"]              # optional, defaults to [".*"]
+
+      The label is mandatory so that allowing every control reads explicitly as
+      ``label: '.*'`` in the config, never as the silent default of an omission.
     * ``infra`` — session/tab caps.
 
     ``read_policy`` gates reads; ``denylist`` is the always-deny list (also
@@ -136,13 +139,14 @@ class ActionAllowlist:
             paths: dict[str, list[str]] = {}
             labels: dict[str, re.Pattern[str]] = {}
             for host, spec in rules.items():
-                if isinstance(spec, dict):
-                    paths[host] = spec.get("paths", [".*"])
-                    label = spec.get("label")
-                    if label:
-                        labels[_canonical_host(host)] = re.compile(label)
-                else:  # list of path regexes (read-style)
-                    paths[host] = spec
+                # A write-action host must declare a label — what a control may
+                # do is never implicit. "Allow any control" is spelled '.*'.
+                if not isinstance(spec, dict) or "label" not in spec:
+                    raise ValueError(
+                        f"{action}.{host}: a write-action host requires a 'label' regex "
+                        f"(use '.*' to allow any control on this host)")
+                paths[host] = spec.get("paths", [".*"])
+                labels[_canonical_host(host)] = re.compile(spec["label"])
             self._sections[action] = Allowlist(paths)
             self._labels[action] = labels
 

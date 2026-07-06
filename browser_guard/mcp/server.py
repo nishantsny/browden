@@ -181,9 +181,10 @@ async def click(css_selector: str, id: str) -> dict:
          visible, non-decoy clickable control (an agent-targeted decoy, a hidden
          or disabled element, or a non-clickable tag is refused). This gate
          judges element *integrity*, not intent.
-      3. If the host configures a ``label`` regex, the control's visible text
-         must match it in full. *What* a control may do is defined here, by the
-         operator — a host with no ``label`` permits any click on it.
+      3. The control's visible text must fully match the host's required
+         ``label`` regex. *What* a control may do is defined here, by the
+         operator — a host that wants to permit any control states it
+         explicitly as ``label: '.*'`` (an omitted label fails config parsing).
     Any gate failing raises a ValidationError and nothing is clicked.
     """
     logger.info(f"Tool called: click (css_selector={css_selector!r}, id={id!r})")
@@ -215,11 +216,12 @@ async def click(css_selector: str, id: str) -> dict:
         raise ValidationError(
             "selected element is not a clickable control (or is a hidden/disabled/decoy element) — refusing to click")
 
-    # Gate 3: the site-specific required label from the allowlist, if the host
-    # configures one. No label => the operator permits any click on this host.
+    # Gate 3: the host's required label. Every listed host has one (config
+    # parsing enforces it); '.*' is how a host opts into any control. Fail
+    # closed if it is somehow absent rather than waving the click through.
     host = urlparse(url).hostname or ""
     label_re = _ALLOWLIST.label_pattern("click", host)
-    if label_re is not None and not label_matches(node, label_re):
+    if label_re is None or not label_matches(node, label_re):
         raise ValidationError(
             f"control text does not match the required label for {host} — refusing to click")
 

@@ -43,6 +43,21 @@ def test_load_builds_working_allowlist(tmp_path):
     assert al.label_pattern("click", "amazon.com").search("Add to Cart")
 
 
+def test_explicit_wildcard_label_allows_any_control(tmp_path):
+    # "Allow any control on this host" is stated explicitly as label: '.*'.
+    f = tmp_path / "allowlist.yaml"
+    f.write_text(
+        "read:\n"
+        '  website_overrides: {"*": [".*"]}\n'
+        "click:\n"
+        "  amazon.com:\n"
+        "    label: '.*'\n"
+    )
+    al = load_allowlist(f)
+    assert al.section("click").is_allowed("amazon.com", "/anything")
+    assert al.label_pattern("click", "amazon.com").fullmatch("Place your order")
+
+
 def test_second_sample_read_deny_is_valid():
     # The annotated read/deny sample must load cleanly through the schema.
     sample = SAMPLE_ALLOWLIST.parent / "allowlist-read-deny.yaml"
@@ -91,6 +106,10 @@ def test_empty_document_is_deny_all(tmp_path):
     ('click:\n  amazon.com:\n    paths: [".*"]\n    typo: x\n', "unknown keys"),
     ('click:\n  amazon.com:\n    label: 7\n', "label: must be a regex string"),
     ('click:\n  amazon.com:\n    label: "("\n', "label: invalid regex"),
+    # label is required — "allow any control" must be explicit as label: '.*'
+    ('click:\n  amazon.com:\n    paths: [".*"]\n', "'label' is required"),
+    ('click:\n  amazon.com: {}\n', "'label' is required"),
+    ('click:\n  amazon.com: [".*"]\n', "must be a mapping with a required 'label'"),
     # infra
     ("infra:\n  max_tabs_per_session: -1\n", "must be a positive integer"),
 ])
