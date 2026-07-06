@@ -7,15 +7,11 @@ What it does, in order:
   1. Creates a venv at <repo>/.venv and installs browden into it
      (via `uv`, falling back to stdlib venv + pip). Pass --python to use an
      existing interpreter instead and skip this step.
-  2. Copies configs/samples/read_only_on_popular_websites.yaml to
-     <config-dir>/allowlist.yaml (default ~/.browden) — skipped if a config is
-     already there.
-  3. Fetches the Tranco top-sites snapshot (top 400k) to
-     <config-dir>/tranco-top-400k.txt.gz — skipped if it is already there. The
-     snapshot is not committed; refresh it later with setup/fetch_tranco.py.
-  4. Writes a systemd *user* unit that serves SSE on <port>, pinned to that venv.
-  5. Runs `systemctl --user daemon-reload` and `enable --now <service-name>`.
-  6. Prints the JSON block to add to your agent's settings by hand.
+  2. Copies configs/samples/allowlist.yaml to <config-dir>/allowlist.yaml
+     (default ~/.browden) — skipped if a config is already there.
+  3. Writes a systemd *user* unit that serves SSE on <port>, pinned to that venv.
+  4. Runs `systemctl --user daemon-reload` and `enable --now <service-name>`.
+  5. Prints the JSON block to add to your agent's settings by hand.
 
 Run it again anytime: the venv/install and config copy are idempotent and the
 systemd steps re-apply cleanly. Use --service-name/--port to stand up a second
@@ -29,11 +25,8 @@ import subprocess
 import sys
 from pathlib import Path
 
-# Sibling module in setup/; stdlib-only, so importing it needs no venv.
-from fetch_tranco import DEFAULT_TOP_N, TRANCO_FILENAME, fetch, snapshot_path
-
 REPO_ROOT = Path(__file__).resolve().parents[1]
-SAMPLE_ALLOWLIST = REPO_ROOT / "configs" / "samples" / "read_only_on_popular_websites.yaml"
+SAMPLE_ALLOWLIST = REPO_ROOT / "configs" / "samples" / "allowlist.yaml"
 DEFAULT_PORT = 22001  # usually unused; well clear of dev servers on 8000/3000
 DEFAULT_CONFIG_DIR = "~/.browden"
 DEFAULT_SERVICE_NAME = "browden"
@@ -97,26 +90,6 @@ def copy_config(config_dir: Path) -> Path:
     return dest
 
 
-def ensure_tranco(config_dir: Path, top_n: int) -> Path:
-    """Download the Tranco snapshot next to the allowlist, unless it's there.
-
-    Best-effort: a failed download (offline, Tranco unreachable) warns and moves
-    on rather than aborting setup — the read gate degrades to "Tranco matches
-    nothing" until you re-run setup/fetch_tranco.py, and the denylist plus any
-    website_overrides still apply.
-    """
-    dest = snapshot_path(config_dir)
-    if dest.exists():
-        print(f"[skip] {dest} already exists — leaving it untouched")
-        return dest
-    try:
-        fetch(top_n, dest)
-    except Exception as e:  # network error, bad zip, etc. — never fatal to setup
-        print(f"[warn] could not fetch Tranco snapshot ({e}); Tranco read-allowlisting "
-              f"is inert until you run: python3 setup/fetch_tranco.py")
-    return dest
-
-
 def write_unit(service_name: str, port: int, allowlist: Path,
                python: str, display: str) -> Path:
     unit_dir = Path.home() / ".config" / "systemd" / "user"
@@ -160,8 +133,6 @@ def main(argv: list[str] | None = None) -> None:
                              "creation (default: create/use --venv)")
     parser.add_argument("--display", default=os.environ.get("DISPLAY", ":0"),
                         help="DISPLAY for headed Chrome (default: current, else :0)")
-    parser.add_argument("--tranco-top-n", type=int, default=DEFAULT_TOP_N,
-                        help=f"how many top Tranco domains to fetch (default: {DEFAULT_TOP_N})")
     args = parser.parse_args(argv)
 
     if not SAMPLE_ALLOWLIST.exists():
@@ -173,7 +144,6 @@ def main(argv: list[str] | None = None) -> None:
 
     config_dir = Path(args.config_dir).expanduser().resolve()
     allowlist = copy_config(config_dir)
-    ensure_tranco(config_dir, args.tranco_top_n)
 
     if args.python:
         service_python = args.python
@@ -195,11 +165,6 @@ def main(argv: list[str] | None = None) -> None:
     print(
         f"\nDone. Add this to your agent's settings by hand "
         f"(e.g. ~/.claude.json or .gemini/settings.json):\n\n{agent_json}"
-    )
-    print(
-        f"\nThe Tranco top-sites snapshot the read gate uses lives at "
-        f"{snapshot_path(config_dir)} (not committed). Refresh it anytime with:\n\n"
-        f"    python3 setup/fetch_tranco.py --config-dir {config_dir}\n"
     )
     print(guard_allowlist_note(allowlist))
 

@@ -11,12 +11,11 @@ from pathlib import Path
 import yaml
 
 from ...mcp.validator.allowlist import ActionAllowlist
-from ...mcp.validator.tranco import TRANCO_FILENAME
 from .schema import ConfigError, validate_allowlist_data
 
 # loader/ -> configs/ -> browden/ -> repo root
 _REPO_ROOT = Path(__file__).resolve().parents[3]
-SAMPLE_ALLOWLIST = _REPO_ROOT / "configs" / "samples" / "read_only_on_popular_websites.yaml"
+SAMPLE_ALLOWLIST = _REPO_ROOT / "configs" / "samples" / "allowlist.yaml"
 USER_CONFIG_DIR = Path("~/.browden")
 
 
@@ -31,9 +30,7 @@ def load_allowlist(path: Path | str) -> ActionAllowlist:
         data = yaml.safe_load(text)
     except yaml.YAMLError as e:
         raise ConfigError(f"{path} is not valid YAML: {e}") from None
-    # The Tranco snapshot lives next to the allowlist file (setup fetches it there).
-    return ActionAllowlist(validate_allowlist_data(data, source=str(path)),
-                           tranco_path=path.parent / TRANCO_FILENAME)
+    return ActionAllowlist(validate_allowlist_data(data, source=str(path)))
 
 
 def resolve_allowlist_path(explicit: str | None = None) -> Path | None:

@@ -2,12 +2,11 @@
 
 Tranco (https://tranco-list.eu) is a research-grade ranking of the most-visited
 domains, hardened against the day-to-day churn and manipulation that skew raw
-popularity lists. We keep an offline snapshot of the top 400 000 registrable
-domains as ``tranco-top-400k.txt.gz`` *next to the allowlist config* — fetched
-there by ``setup`` on first run (``setup/fetch_tranco.py``), never committed —
-and treat membership as a coarse "this is an established site" signal for the
-read gate. Popularity is a proxy for *established*, never a guarantee of *safe*
-— a reputable domain can still serve attacker-controlled content (see README).
+popularity lists. We bundle an offline snapshot of the top 100 000 registrable
+domains (``configs/data/tranco-top-100k.txt.gz``) and treat membership as a
+coarse "this is an established site" signal for the read gate. Popularity is a
+proxy for *established*, never a guarantee of *safe* — a reputable domain can
+still serve attacker-controlled content (see the README).
 
 The check is fully local: no network at request time, O(number-of-labels) set
 lookups. A host counts as listed if it, or any of its parent domains down to the
@@ -21,12 +20,10 @@ from pathlib import Path
 
 from ...common.logger import logger
 
-TRANCO_FILENAME = "tranco-top-400k.txt.gz"
-DEFAULT_TOP_N = 400_000
-# The snapshot lives next to the allowlist config; the loader passes that
-# sibling path in. This is only the fallback for constructions that don't know
-# a config dir (e.g. a bare ActionAllowlist(dict)) — the standard ~/.browden.
-DEFAULT_TRANCO_PATH = (Path("~/.browden") / TRANCO_FILENAME).expanduser()
+# validator/ -> mcp/ -> browden/, then configs/data/
+_DATA_DIR = Path(__file__).resolve().parents[2] / "configs" / "data"
+DEFAULT_TRANCO_PATH = _DATA_DIR / "tranco-top-100k.txt.gz"
+BUNDLED_TOP_N = 100_000
 
 
 def _canonical(host: str) -> str:
@@ -65,11 +62,9 @@ def _load(path_str: str, top_n: int) -> frozenset[str]:
 class TrancoList:
     """Membership test against the top-N Tranco registrable domains."""
 
-    def __init__(self, top_n: int = DEFAULT_TOP_N, path: Path | None = None):
-        # path=None resolves the module-level default at call time (not at
-        # def time), so tests can repoint DEFAULT_TRANCO_PATH at a fixture.
+    def __init__(self, top_n: int = BUNDLED_TOP_N, path: Path = DEFAULT_TRANCO_PATH):
         self._top_n = top_n
-        self._domains = _load(str(path if path is not None else DEFAULT_TRANCO_PATH), top_n)
+        self._domains = _load(str(path), top_n)
 
     def __len__(self) -> int:
         return len(self._domains)

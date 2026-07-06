@@ -1,7 +1,6 @@
 """Runs the real setup/onetime_setup.py end to end under a throwaway service
 name and port, so an existing browden service is untouched. Skipped on
 hosts without a systemd user session (e.g. some CI runners / macOS)."""
-import gzip
 import shutil
 import socket
 import subprocess
@@ -45,30 +44,18 @@ def test_onetime_setup_installs_config_and_service(tmp_path):
     args = ["--port", str(port), "--config-dir", str(config_dir),
             "--service-name", service, "--python", sys.executable]
 
-    # Pre-seed the Tranco snapshot so setup's fetch step is skipped — keeps this
-    # test offline and fast (a real fetch would download the top-400k list).
-    config_dir.mkdir(parents=True, exist_ok=True)
-    snapshot = config_dir / "tranco-top-400k.txt.gz"
-    with gzip.open(snapshot, "wt", encoding="utf-8") as fh:
-        fh.write("google.com\n")
-
     try:
         res = _run_setup(args)
         assert res.returncode == 0, f"setup failed:\n{res.stdout}\n{res.stderr}"
 
         # Config copied; unit written; service active.
         assert (config_dir / "allowlist.yaml").read_text() == \
-            (REPO_ROOT / "configs" / "samples" / "read_only_on_popular_websites.yaml").read_text()
+            (REPO_ROOT / "configs" / "samples" / "allowlist.yaml").read_text()
         assert unit_path.exists()
         assert f"--allowlist {config_dir / 'allowlist.yaml'}" in unit_path.read_text()
 
         # The advertised agent-settings JSON is printed and points at the port.
         assert f"http://127.0.0.1:{port}/sse" in res.stdout
-        # The pre-seeded snapshot is left in place (fetch skipped) and the
-        # printed output tells the user how to refresh it.
-        with gzip.open(snapshot, "rt", encoding="utf-8") as fh:
-            assert fh.read() == "google.com\n"
-        assert "tranco-top-400k.txt.gz" in res.stdout
 
         # The SSE server actually comes up on the chosen port.
         deadline = time.time() + 30
