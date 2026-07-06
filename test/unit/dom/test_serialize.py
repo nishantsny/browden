@@ -45,6 +45,36 @@ def test_text_truncated_reports_true_length():
     assert node["text_truncated"] is True
 
 
+def test_aria_labelledby_resolves_referenced_text():
+    # The "a-button" pattern: a label-less submit control borrows its visible
+    # name from an aria-hidden span via aria-labelledby. The name is resolved
+    # (document-global) even though the referenced span is aria-hidden.
+    html = ('<span class="a-button"><span class="a-button-inner">'
+            '<input type="submit" class="a-button-input" aria-labelledby="btn-x">'
+            '<span aria-hidden="true" id="btn-x">Continue</span>'
+            '</span></span>')
+    inp = BeautifulSoup(html, "html.parser").find("input")
+    node = element_to_node(inp)
+    assert node["labelledby_text"] == "Continue"
+    assert node["text"] == ""  # the control itself carries no text
+
+
+def test_aria_labelledby_multiple_idrefs_joined_in_order():
+    html = ('<div><span id="a">Add</span><span id="b">to cart</span>'
+            '<input type="submit" aria-labelledby="a b"></div>')
+    inp = BeautifulSoup(html, "html.parser").find("input")
+    assert element_to_node(inp)["labelledby_text"] == "Add to cart"
+
+
+def test_no_labelledby_field_when_absent_or_dangling():
+    # No attribute -> field omitted entirely (keeps the common node shape intact).
+    assert "labelledby_text" not in element_to_node(_tag('<input type="submit">'))
+    # Attribute present but pointing at a non-existent id -> resolves to "", omitted.
+    inp = BeautifulSoup('<input type="submit" aria-labelledby="missing">',
+                        "html.parser").find("input")
+    assert "labelledby_text" not in element_to_node(inp)
+
+
 def test_include_html_within_budget():
     tag = _tag("<b>hi</b>")
     node = element_to_node(tag, include_html=True)

@@ -98,6 +98,19 @@ def test_label_matches_uses_visible_labels():
     assert not label_matches(None, pat)
 
 
+def test_label_matches_uses_aria_labelledby_text():
+    # A label-less submit (no text/value/aria-label) whose visible name the
+    # serializer resolved from aria-labelledby into node["labelledby_text"].
+    # This is the Amazon "a-button" checkout/continue button.
+    btn = node("input", type="submit")
+    btn["labelledby_text"] = "Continue"
+    assert label_matches(btn, re.compile(r"(?i)continue"))
+    assert not label_matches(btn, re.compile(r"(?i)add to cart"))
+    # And it still fully governs: a substring-only regex must not pass.
+    btn["labelledby_text"] = "Continue to payment"
+    assert not label_matches(btn, re.compile(r"(?i)continue"))
+
+
 def test_label_matches_requires_full_match_not_substring():
     # The pattern must match the ENTIRE label, not merely appear within it — so a
     # loose regex can't wave through a control that only *contains* "add to cart".
