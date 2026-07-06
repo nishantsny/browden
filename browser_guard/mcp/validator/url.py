@@ -1,16 +1,18 @@
 from urllib.parse import urlparse, urlunparse
 
 from ...common.logger import logger
-from .allowlist import Allowlist
+from .allowlist import Allowlist, ReadPolicy
 from .errors import ValidationError
 
 
-def validate_url(url: str, allowlist: Allowlist) -> str:
-    """Normalize and gate a navigate-target URL against the allowlist.
+def validate_url(url: str, allowlist: "Allowlist | ReadPolicy") -> str:
+    """Normalize and gate a navigate-target URL against a host/path gate.
 
-    A URL is accepted iff its (host, path) matches an entry in the allowlist.
-    For allowed URLs, query strings and fragments are preserved unchanged —
-    so '?', '#', '&' and spaces all pass through.
+    ``allowlist`` is anything with ``is_allowed(host, path)`` — an
+    :class:`Allowlist` (a single write-action section) or the read
+    :class:`ReadPolicy` (denylist + Tranco + overrides). A URL is accepted iff
+    that gate allows its ``(host, path)``. For allowed URLs, query strings and
+    fragments are preserved unchanged — so '?', '#', '&' and spaces pass through.
     """
     if "://" not in url:
         url = "https://" + url

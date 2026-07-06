@@ -1,20 +1,43 @@
-# Per-action allowlist. Top-level keys are action names; under each action,
-# a host maps to either a list of path regexes (list form, used by the read
-# gate) or an object with "paths" and a required visible-text "label" regex
-# (object form, used by write actions).
+# browser-guard access policy.
 #
-# Reads are wide open by default. Write actions are default-deny: an action
-# with no entry here is inert, so nothing can be clicked until you opt a host
-# in explicitly.
+# Three independent layers, evaluated in this order for every URL:
+#
+#   1. denylist        — always wins; a matching URL is refused outright.
+#   2. read allowlist  — a URL may be READ / navigated only if it matches here
+#                        (Tranco top-sites OR your explicit overrides).
+#   3. write actions   — e.g. `click`; default-deny, gated per host + label.
+#
+# See configs/samples/allowlist-read-deny.yaml for a fully-commented tour of the
+# read/deny system.
 
+# ---- denylist: always denied, checked first -------------------------------
+# host -> [path regex] (same shape as website_overrides). "*" host = any host.
+# Matches exact hosts (add subdomains explicitly). Empty by default.
+denylist: {}
+
+# ---- read allowlist -------------------------------------------------------
 read:
-  "*": [".*"]
+  enabled: true            # set false to turn the read allowlist OFF entirely
+                           # (every non-denied URL becomes readable)
 
-# The one write action, click, ships disabled. The block below shows
-# exactly what enabling it for amazon.com looks like — uncomment it to allow
-# clicks on controls whose visible text matches the label regex, and nothing
-# else.
-#
+  # Option 1 — Tranco: allow any of the most-visited registrable domains on the
+  # web, from a bundled offline snapshot (no network at request time). A listed
+  # domain also covers its subdomains. Popularity ~ "established", NOT "safe".
+  tranco:
+    enabled: true
+    top_n: 100000          # 1..100000 (size of the bundled snapshot)
+
+  # Option 2 — explicit overrides: host -> path regexes; "*" host = any host.
+  # An override TRIUMPHS over Tranco: once a host is listed, its rule alone
+  # decides — so this both allows sites Tranco doesn't cover AND lets you
+  # path-scope (or block) one it would otherwise wave through.
+  website_overrides: {}
+    # "*": [".*"]          # uncomment to read ANY site
+    # docs.example.com: ["^/manual/"]   # scope a Tranco site to one path
+
+# ---- write actions --------------------------------------------------------
+# The one write action, `click`, ships disabled (default-deny). Uncomment to
+# allow it on a host whose button text matches the label regex — nothing else.
 # click:
 #   amazon.com:
 #     paths: [".*"]

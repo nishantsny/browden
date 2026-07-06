@@ -29,3 +29,7 @@ browser-guard = "browser_guard.mcp.server:main"
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["browser_guard*"]
+
+[tool.setuptools.package-data]
+# Bundle the offline Tranco top-sites snapshot the read allowlist reads.
+"browser_guard.configs" = ["data/*.gz"]

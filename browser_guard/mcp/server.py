@@ -158,7 +158,7 @@ async def select_tab(id: str) -> dict:
 async def navigate(url: str, id: str) -> dict:
     """Navigate the named tab to url. Url is gated by the per-host allowlist (query strings and fragments pass through)."""
     logger.info(f"Tool called: navigate (url={url!r}, id={id!r})")
-    url = validate_url(url, _ALLOWLIST.section("read"))
+    url = validate_url(url, _ALLOWLIST.read_policy)
     session = _store.route(id)
     result = await session.navigate(url, id=id)  # wire dict (or the tab-gone envelope)
     logger.info("Tool finished: navigate")
@@ -185,10 +185,15 @@ async def click(css_selector: str, id: str) -> dict:
     session = _store.route(id)
 
     # Gate 1: per-action host allowlist, checked against the tab's live URL.
+    # The denylist vetoes first (a denied host is never clickable, even if the
+    # human opened it), then the click section's own host allowlist must pass.
     url = await session.current_url(id=id)
     if url is None:
         return {"error": f"tab {id} is no longer open — call list_tabs for current tabs",
                 "id": id}
+    parsed = urlparse(url)
+    if _ALLOWLIST.is_denied(parsed.hostname or "", parsed.path):
+        raise ValidationError(f"URL on denylist: {parsed.hostname}{parsed.path}")
     validate_url(url, _ALLOWLIST.section("click"))  # raises if host not allowed
 
     # Gate 2: the element must be a single, genuine add-to-cart control.

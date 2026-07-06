@@ -13,7 +13,15 @@ from browser_guard.mcp.validator import ActionAllowlist, ValidationError
 
 # Mirror of allowlist.yaml with the showcase click block uncommented.
 _ENABLED_ALLOWLIST = ActionAllowlist({
-    "read": {"*": [".*"]},
+    "read": {"website_overrides": {"*": [".*"]}},
+    "click": {
+        "amazon.com": {"paths": [".*"], "label": r"(?i)\badd to cart\b"},
+    },
+})
+
+# Same, but amazon.com is also on the denylist — the denylist must win.
+_DENIED_ALLOWLIST = ActionAllowlist({
+    "denylist": {"amazon.com": [".*"]},
     "click": {
         "amazon.com": {"paths": [".*"], "label": r"(?i)\badd to cart\b"},
     },
@@ -59,6 +67,21 @@ async def test_happy_path_clicks():
         result = await server.click("#add-to-cart-button", "h1")
     assert result["clicked"] is True
     session.click.assert_awaited_once_with("#add-to-cart-button", id="h1")
+
+
+@pytest.mark.asyncio
+async def test_denylist_vetoes_click_even_when_click_host_is_allowed():
+    # amazon.com is on the click allowlist AND the denylist — denylist wins, so
+    # the element is never even inspected.
+    import browser_guard.mcp.server as server
+    __import__("importlib").reload(server)
+    session = _session(url="https://www.amazon.com/dp/B0FBRRM2VQ", elements=[_atc_node()])
+    with patch.object(server._store, "route", return_value=session), \
+         patch.object(server, "_ALLOWLIST", _DENIED_ALLOWLIST):
+        with pytest.raises(ValidationError, match="denylist"):
+            await server.click("#add-to-cart-button", "h1")
+    session.query_selector_all.assert_not_awaited()
+    session.click.assert_not_awaited()
 
 
 @pytest.mark.asyncio
