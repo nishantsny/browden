@@ -43,7 +43,7 @@ def test_shutdown_registered_once_and_closes_every_session():
         store = store_mod.BrowserSessionStore()
         # Building three profiles' sessions registers the atexit hook exactly once.
         # (Constructing a backend launches no Chrome, so this stays cheap.)
-        sessions = [store.get_or_create_session(SeleniumChromeBackend(f"/p/{i}")) for i in range(3)]
+        sessions = [store.get_or_create_session(SeleniumChromeBackend(f"/p/{i}"), max_sessions=10) for i in range(3)]
         assert mock_atexit.register.call_count == 1
         hook = mock_atexit.register.call_args.args[0]
         assert hook == store._shutdown
@@ -70,8 +70,8 @@ def test_get_session_is_lazy_and_cached():
     # Two backends for the same (default) profile map to one cached session;
     # the store never launches Chrome — building a backend is side-effect-free.
     with patch("browser_guard.mcp.session_management.BrowserSessionStore.BrowserSessionManager") as mock_session_cls:
-        s1 = server._store.get_or_create_session(server._backend_for(None))
-        s2 = server._store.get_or_create_session(server._backend_for(None))
+        s1 = server._store.get_or_create_session(server._backend_for(None), max_sessions=10)
+        s2 = server._store.get_or_create_session(server._backend_for(None), max_sessions=10)
         assert s1 is s2
         assert mock_session_cls.call_count == 1
 
@@ -82,15 +82,50 @@ def test_distinct_profile_dirs_get_distinct_sessions(tmp_path):
     a, b = tmp_path / "a", tmp_path / "b"
     with patch("browser_guard.mcp.session_management.BrowserSessionStore.BrowserSessionManager",
                side_effect=lambda *a, **k: MagicMock()) as mock_mgr:
-        sa1 = server._store.get_or_create_session(server._backend_for(str(a)))
-        sa2 = server._store.get_or_create_session(server._backend_for(str(a)))
-        sb = server._store.get_or_create_session(server._backend_for(str(b)))
+        sa1 = server._store.get_or_create_session(server._backend_for(str(a)), max_sessions=10)
+        sa2 = server._store.get_or_create_session(server._backend_for(str(a)), max_sessions=10)
+        sb = server._store.get_or_create_session(server._backend_for(str(b)), max_sessions=10)
         # same profile -> same cached session; different profile -> different one
         assert sa1 is sa2
         assert sa1 is not sb
         # each session was built on a backend bound to the (resolved) profile asked for
         profiles = {str(c.args[0].get_profile_dir()) for c in mock_mgr.call_args_list}
         assert profiles == {str(a.resolve()), str(b.resolve())}
+
+
+def test_get_or_create_session_raises_at_the_session_cap(tmp_path):
+    """A new profile beyond max_browser_sessions is refused, not launched."""
+    import browser_guard.mcp.session_management.BrowserSessionStore as store_mod
+    from browser_guard.web_navigator.selenium_chrome import SeleniumChromeBackend
+    with patch("browser_guard.mcp.session_management.BrowserSessionStore.BrowserSessionManager",
+               side_effect=lambda *a, **k: MagicMock()):
+        store = store_mod.BrowserSessionStore()
+        store.get_or_create_session(SeleniumChromeBackend(str(tmp_path / "a")), max_sessions=2)
+        store.get_or_create_session(SeleniumChromeBackend(str(tmp_path / "b")), max_sessions=2)
+        with pytest.raises(RuntimeError, match="limit of 2 reached"):
+            store.get_or_create_session(SeleniumChromeBackend(str(tmp_path / "c")), max_sessions=2)
+        assert len(store._sessions) == 2  # the rejected profile left no partial session behind
+
+
+def test_session_cap_counts_distinct_profiles_not_repeat_requests(tmp_path):
+    """The cap counts live sessions, not requests: re-requesting a profile that
+    already has a session returns the cached one and never raises — even at the
+    cap. Only a genuinely new profile beyond the cap is refused."""
+    import browser_guard.mcp.session_management.BrowserSessionStore as store_mod
+    from browser_guard.web_navigator.selenium_chrome import SeleniumChromeBackend
+    a, b, c = (str(tmp_path / p) for p in "abc")
+    with patch("browser_guard.mcp.session_management.BrowserSessionStore.BrowserSessionManager",
+               side_effect=lambda *a, **k: MagicMock()):
+        store = store_mod.BrowserSessionStore()
+        sa = store.get_or_create_session(SeleniumChromeBackend(a), max_sessions=2)
+        sb = store.get_or_create_session(SeleniumChromeBackend(b), max_sessions=2)
+        # Sitting exactly at the cap, repeat requests for existing profiles reuse
+        # their session and never trip the limit.
+        assert store.get_or_create_session(SeleniumChromeBackend(a), max_sessions=2) is sa
+        assert store.get_or_create_session(SeleniumChromeBackend(b), max_sessions=2) is sb
+        # Only a brand-new profile beyond the cap is what actually raises.
+        with pytest.raises(RuntimeError, match="limit of 2 reached"):
+            store.get_or_create_session(SeleniumChromeBackend(c), max_sessions=2)
 
 
 def test_digest_collision_extends_namespace(tmp_path):

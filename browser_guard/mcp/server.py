@@ -123,8 +123,11 @@ async def new_blank_tab(profile_dir: str | None = None) -> dict:
     the shared focused window and give undefined results.
     """
     logger.info(f"Tool called: new_blank_tab (profile_dir={profile_dir!r})")
-    session = _store.get_or_create_session(_backend_for(profile_dir))
-    result = await session.new_blank_tab()  # wire dict with composite id
+    try:
+        session = _store.get_or_create_session(_backend_for(profile_dir), max_sessions=_ALLOWLIST.max_browser_sessions)
+        result = await session.new_blank_tab(max_tabs=_ALLOWLIST.max_tabs_per_session)  # wire dict with composite id
+    except RuntimeError as e:
+        return {"error": str(e)}
     logger.info("Tool finished: new_blank_tab")
     return result
 

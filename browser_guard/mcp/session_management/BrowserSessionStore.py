@@ -59,7 +59,7 @@ class BrowserSessionStore:
             digest = self._digests[key] = full[:n]
         return digest
 
-    def get_or_create_session(self, backend: WebNavigatorBackend) -> BrowserSessionManager:
+    def get_or_create_session(self, backend: WebNavigatorBackend, max_sessions: int) -> BrowserSessionManager:
         """Cache (and return) the coordinator for ``backend``'s profile.
 
         The caller (the server) builds ``backend`` bound to a concrete, resolved
@@ -78,6 +78,8 @@ class BrowserSessionStore:
         digest = self.digest_for(key)
         session = self._sessions.get(digest)
         if session is None:
+            if len(self._sessions) >= max_sessions:
+                raise RuntimeError(f"Cannot start a new browser session (limit of {max_sessions} reached)")
             logger.info(f"Initializing BrowserSessionManager (profile={key})")
             session = BrowserSessionManager(backend, namespace=digest)
             self._sessions[digest] = session

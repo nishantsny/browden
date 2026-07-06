@@ -35,7 +35,7 @@ def session(tmp_path):
 
 @pytest.mark.asyncio
 async def test_get_element_by_id(session):
-    blank = await session.new_blank_tab()
+    blank = await session.new_blank_tab(max_tabs=10)
     page = await session.navigate(DATA_URL, id=blank["id"])
 
     res = await session.get_element_by_id("logo", id=page["id"])
@@ -52,7 +52,7 @@ async def test_get_element_by_id(session):
 
 @pytest.mark.asyncio
 async def test_get_elements_by_class_name(session):
-    blank = await session.new_blank_tab()
+    blank = await session.new_blank_tab(max_tabs=10)
     page = await session.navigate(DATA_URL, id=blank["id"])
 
     res = await session.get_elements_by_class_name("item js-item", id=page["id"])
@@ -65,7 +65,7 @@ async def test_get_elements_by_class_name(session):
 
 @pytest.mark.asyncio
 async def test_query_selector_single_match(session):
-    blank = await session.new_blank_tab()
+    blank = await session.new_blank_tab(max_tabs=10)
     page = await session.navigate(DATA_URL, id=blank["id"])
 
     res = await session.query_selector("p.note", id=page["id"])
@@ -77,7 +77,7 @@ async def test_query_selector_single_match(session):
 
 @pytest.mark.asyncio
 async def test_query_selector_all_paginates(session):
-    blank = await session.new_blank_tab()
+    blank = await session.new_blank_tab(max_tabs=10)
     page = await session.navigate(DATA_URL, id=blank["id"])
 
     first = await session.query_selector_all("li.item", id=page["id"], limit=2, offset=0)
@@ -92,7 +92,7 @@ async def test_query_selector_all_paginates(session):
 
 @pytest.mark.asyncio
 async def test_query_selector_invalid_css_is_structured_error(session):
-    blank = await session.new_blank_tab()
+    blank = await session.new_blank_tab(max_tabs=10)
     page = await session.navigate(DATA_URL, id=blank["id"])
 
     res = await session.query_selector("div::::bad", id=page["id"])
@@ -103,7 +103,7 @@ async def test_query_selector_invalid_css_is_structured_error(session):
 
 @pytest.mark.asyncio
 async def test_force_reload_page(session):
-    blank = await session.new_blank_tab()
+    blank = await session.new_blank_tab(max_tabs=10)
     page = await session.navigate(DATA_URL, id=blank["id"])
     # Prime the cache, then force a reload and confirm the report.
     await session.get_element_by_id("logo", id=page["id"])
