@@ -21,7 +21,7 @@ from urllib.parse import urlparse
 from .validator import (
     ActionAllowlist,
     ValidationError,
-    is_click,
+    is_clickable_control,
     label_matches,
     validate_url,
 )
@@ -170,16 +170,21 @@ async def navigate(url: str, id: str) -> dict:
 @mcp.tool()
 @_tool
 async def click(css_selector: str, id: str) -> dict:
-    """Click an "Add to cart" control on a tab — the only write action.
+    """Click a control on a tab — the only write action.
 
-    Two server-side gates, both default-deny, must pass:
+    Three server-side gates, all default-deny, must pass:
       1. The tab's host must be listed under the ``click`` section of the
-         allowlist. The shipped default has no hosts enabled — the amazon.com
-         entry in allowlist.yaml is commented out until you opt in.
-      2. ``css_selector`` must resolve to exactly one element that is, by
-         trustworthy signals, a genuine add-to-cart button — not Buy Now,
-         checkout, subscribe, remove, or an agent-targeted decoy.
-    Either gate failing raises a ValidationError and nothing is clicked.
+         allowlist (and not on the denylist). The shipped default has no hosts
+         enabled — the amazon.com entry in allowlist.yaml is commented out until
+         you opt in.
+      2. ``css_selector`` must resolve to exactly one element that is a real,
+         visible, non-decoy clickable control (an agent-targeted decoy, a hidden
+         or disabled element, or a non-clickable tag is refused). This gate
+         judges element *integrity*, not intent.
+      3. If the host configures a ``label`` regex, the control's visible text
+         must match it in full. *What* a control may do is defined here, by the
+         operator — a host with no ``label`` permits any click on it.
+    Any gate failing raises a ValidationError and nothing is clicked.
     """
     logger.info(f"Tool called: click (css_selector={css_selector!r}, id={id!r})")
     session = _store.route(id)
@@ -196,7 +201,7 @@ async def click(css_selector: str, id: str) -> dict:
         raise ValidationError(f"URL on denylist: {parsed.hostname}{parsed.path}")
     validate_url(url, _ALLOWLIST.section("click"))  # raises if host not allowed
 
-    # Gate 2: the element must be a single, genuine add-to-cart control.
+    # Gate 2: the element must be a single, real, visible, non-decoy control.
     found = await session.query_selector_all(css_selector, id=id, limit=2)
     if "error" in found:
         return found
@@ -206,17 +211,17 @@ async def click(css_selector: str, id: str) -> dict:
     if total > 1:
         raise ValidationError(f"selector {css_selector!r} is ambiguous ({total} matches) — refusing to click")
     node = found["elements"][0]
-    if not is_click(node):
+    if not is_clickable_control(node):
         raise ValidationError(
-            "selected element is not a recognized add-to-cart control — refusing to click")
+            "selected element is not a clickable control (or is a hidden/disabled/decoy element) — refusing to click")
 
-    # Gate 3: the site-specific required button text from the allowlist (e.g.
-    # amazon.com must display "Add to cart").
+    # Gate 3: the site-specific required label from the allowlist, if the host
+    # configures one. No label => the operator permits any click on this host.
     host = urlparse(url).hostname or ""
     label_re = _ALLOWLIST.label_pattern("click", host)
     if label_re is not None and not label_matches(node, label_re):
         raise ValidationError(
-            f"control text does not match the required add-to-cart label for {host} — refusing to click")
+            f"control text does not match the required label for {host} — refusing to click")
 
     result = await session.click(css_selector, id=id)
     logger.info("Tool finished: click")

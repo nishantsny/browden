@@ -104,7 +104,7 @@ verbatim; it is globally unique and routes itself to the right profile.
 | `query_selector_all` | `document.querySelectorAll`, server-side (paginated) |
 | `screenshot` | PNG of the tab's current viewport |
 | `force_reload_tab` | Reload a tab and refresh its cached DOM |
-| `click` | **The only write action** — click an allowlisted "add to cart" button (disabled by default) |
+| `click` | **The only write action** — click a control on a host listed in the `click` allowlist, optionally narrowed to controls whose visible text matches a per-host `label` regex (no host is listed by default, so it is off until you opt one in) |
 
 The DOM-query tools read a **parsed snapshot** of the rendered (post-JavaScript)
 page and return compact JSON nodes (`tag`, `id`, `classes`, `attributes`,

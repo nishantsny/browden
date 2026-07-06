@@ -1,32 +1,18 @@
 """Element-level guard for the ``click`` write action.
 
-The per-action host allowlist (:class:`ActionAllowlist`) decides *where*
-``click`` may act. This module decides *what* it may activate once on an
-allowed host: a single, genuine "add to cart" control — never Buy Now, checkout,
-subscribe, save-for-later, remove, or an agent-targeted decoy.
+The per-action host allowlist (:class:`ActionAllowlist`) decides *where* ``click``
+may act and, via each host's optional ``label`` regex, *what* text a target may
+carry. This module enforces only what the allowlist can't: element *integrity*.
+It answers "is this a real, visible, non-decoy clickable control?" — never "is
+this the kind of action I approve of." Judging intent (add-to-cart vs. checkout
+vs. remove) is the operator's job through the allowlist; a host listed with no
+``label`` means every click on it is permitted by design.
 
 Pure: operates on a serialized element node (see
 ``dom.serialize.element_to_node``), never on Selenium. Real on-screen visibility
 and enabled-state are re-verified *live* by the backend at click time; the static
 checks here are best-effort defence in depth on the cached snapshot.
 """
-import re
-
-# Visible label of a genuine add-to-cart control. Anchored + whitespace-tolerant:
-# "Add to Cart", "ADD TO BAG", "Add to basket" match; "Add to cart and check out"
-# or "Add to wish list" do not (anchoring) — and the negative list below catches
-# anything button-ish that slips through.
-_ADD_TO_CART_TEXT = re.compile(r"(?i)^\s*add(ed)?\s+to\s+(cart|bag|basket|trolley)\s*$")
-
-# Contexts that look button-ish but must never be driven by click.
-_NEGATIVE = re.compile(
-    r"(?i)\b("
-    r"buy\s*now|buy\s*with|1[\s-]?click|one[\s-]?click|"
-    r"checkout|check\s*out|place\s+(your\s+)?order|proceed|"
-    r"subscribe|auto[\s-]?deliver|"
-    r"remove|delete|save\s+for\s+later|wish\s*list|registry"
-    r")\b"
-)
 
 # Attributes a tab uses to steer AI agents — untrustworthy by construction, so an
 # element carrying them is rejected rather than trusted. (See the Amazon tab's
@@ -57,8 +43,9 @@ def label_matches(node: dict, pattern: "re.Pattern[str]") -> bool:
     """True iff some human-visible label of ``node`` is matched *in full* by ``pattern``.
 
     Used to enforce the per-site required button text from the allowlist (e.g.
-    Amazon must display "Add to cart"), on top of the generic ``is_click``
-    check. Matches only trustworthy labels — never raw ``data-*`` attributes.
+    Amazon must display "Add to cart"), on top of the generic
+    ``is_clickable_control`` integrity check. Matches only trustworthy labels —
+    never raw ``data-*`` attributes.
 
     The pattern must match the **entire** label (``fullmatch``), not merely a
     substring of it: the operator's regex fully governs what counts, so a loose
@@ -72,8 +59,14 @@ def label_matches(node: dict, pattern: "re.Pattern[str]") -> bool:
     return any(pattern.fullmatch(label) for label in _candidate_labels(node))
 
 
-def is_click(node: dict) -> bool:
-    """True iff ``node`` is, by trustworthy signals, a genuine add-to-cart control.
+def is_clickable_control(node: dict) -> bool:
+    """True iff ``node`` is a real, visible, non-decoy clickable control.
+
+    Integrity + anti-injection only — this does **not** judge what the control
+    *does*. Whether a Buy Now, checkout, or remove button may be clicked is the
+    operator's decision, expressed per host in the allowlist ``label`` (an absent
+    label permits any). This guard exists to stop the *page* from tricking the
+    agent, not to second-guess the operator.
 
     Default-deny: every check must pass. ``node`` is a serialized element dict
     (``{"tag", "id", "classes", "attributes", "text", ...}``) or ``None``.
@@ -102,10 +95,4 @@ def is_click(node: dict) -> bool:
     if "display:none" in str(attrs.get("style", "")).replace(" ", "").lower():
         return False
 
-    # 4. Never an excluded action (Buy Now / checkout / subscribe / remove / ...).
-    haystack = " ".join(_candidate_labels(node) + [str(attrs.get("name", ""))])
-    if _NEGATIVE.search(haystack):
-        return False
-
-    # 5. Positive identity: at least one human-visible label is exactly "add to cart".
-    return any(_ADD_TO_CART_TEXT.search(label) for label in _candidate_labels(node))
+    return True

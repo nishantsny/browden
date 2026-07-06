@@ -97,15 +97,58 @@ async def test_host_not_allowed_is_rejected():
 
 
 @pytest.mark.asyncio
-async def test_buy_now_element_is_rejected():
+async def test_buy_now_rejected_by_site_label():
+    # "Buy Now" is a real control (the predicate no longer vetoes it on intent),
+    # but amazon.com requires the "add to cart" label — so Gate 3 refuses it.
     import browser_guard.mcp.server as server
     __import__("importlib").reload(server)
     session = _session(url="https://www.amazon.com/dp/X",
                        elements=[_atc_node(value="Buy Now")])
     with patch.object(server._store, "route", return_value=session), \
          patch.object(server, "_ALLOWLIST", _ENABLED_ALLOWLIST):
-        with pytest.raises(ValidationError, match="not a recognized add-to-cart"):
+        with pytest.raises(ValidationError, match="required label"):
             await server.click("#buy-now", "h1")
+    session.click.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_allow_all_host_clicks_any_real_control():
+    # A host listed with paths but NO label means "any click here is fine" — so a
+    # "Place your order" button (once vetoed by the hardcoded negative list) now
+    # clicks. Integrity still holds: it must be a real, non-decoy control.
+    import browser_guard.mcp.server as server
+    __import__("importlib").reload(server)
+    allow_all = ActionAllowlist({
+        "read": {"website_overrides": {"*": [".*"]}},
+        "click": {"amazon.com": {"paths": [".*"]}},  # no label
+    })
+    session = _session(url="https://www.amazon.com/cart",
+                       elements=[{"tag": "button", "id": None, "classes": [],
+                                  "attributes": {}, "text": "Place your order"}])
+    with patch.object(server._store, "route", return_value=session), \
+         patch.object(server, "_ALLOWLIST", allow_all):
+        result = await server.click("#place-order", "h1")
+    assert result["clicked"] is True
+    session.click.assert_awaited_once_with("#place-order", id="h1")
+
+
+@pytest.mark.asyncio
+async def test_allow_all_host_still_rejects_decoy():
+    # "Any click" does not extend to page-injected agent decoys — that guard is
+    # intent-independent and always applies.
+    import browser_guard.mcp.server as server
+    __import__("importlib").reload(server)
+    allow_all = ActionAllowlist({
+        "read": {"website_overrides": {"*": [".*"]}},
+        "click": {"amazon.com": {"paths": [".*"]}},
+    })
+    session = _session(url="https://www.amazon.com/cart",
+                       elements=[_atc_node(value="Place your order",
+                                           **{"data-target-audience": "ai-agent"})])
+    with patch.object(server._store, "route", return_value=session), \
+         patch.object(server, "_ALLOWLIST", allow_all):
+        with pytest.raises(ValidationError, match="decoy"):
+            await server.click("#decoy", "h1")
     session.click.assert_not_awaited()
 
 
@@ -131,7 +174,7 @@ async def test_label_mismatch_for_site_is_rejected():
                        elements=[_atc_node(value="Add to bag")])
     with patch.object(server._store, "route", return_value=session), \
          patch.object(server, "_ALLOWLIST", _ENABLED_ALLOWLIST):
-        with pytest.raises(ValidationError, match="required add-to-cart label"):
+        with pytest.raises(ValidationError, match="required label"):
             await server.click("#x", "h1")
     session.click.assert_not_awaited()
 
