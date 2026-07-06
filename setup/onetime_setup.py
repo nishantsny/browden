@@ -164,10 +164,7 @@ def main(argv: list[str] | None = None) -> None:
     }, indent=2)
     print(
         f"\nDone. Add this to your agent's settings by hand "
-        f"(e.g. ~/.claude.json or .gemini/settings.json):\n\n{agent_json}\n\n"
-        f"Edit {allowlist} to change what the agent may read or click "
-        f"(then: systemctl --user restart {args.service_name}).\n"
-        f"stdio setup remains manual — see the README."
+        f"(e.g. ~/.claude.json or .gemini/settings.json):\n\n{agent_json}"
     )
     print(guard_allowlist_note(allowlist))
 
