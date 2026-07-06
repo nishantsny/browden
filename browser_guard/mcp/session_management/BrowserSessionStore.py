@@ -59,8 +59,13 @@ class BrowserSessionStore:
             digest = self._digests[key] = full[:n]
         return digest
 
+<<<<<<< HEAD
     def get_or_create_session(self, backend: WebNavigatorBackend, *, max_sessions: int) -> BrowserSessionManager:
         """Cache (and return) the coordinator for ``backend``'s profile.
+=======
+    def get_or_create_session(self, profile_dir: str | None = None, *, max_sessions: int) -> BrowserSessionManager:
+        """Lazily build (and cache) the coordinator for ``profile_dir``.
+>>>>>>> 1522728 (refactor: make max_sessions required in get_or_create_session)
 
         The caller (the server) builds ``backend`` bound to a concrete, resolved
         profile path; the store keys sessions by a digest of that path and sees

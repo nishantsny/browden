@@ -43,7 +43,7 @@ def test_shutdown_registered_once_and_closes_every_session():
         store = store_mod.BrowserSessionStore()
         # Building three profiles' sessions registers the atexit hook exactly once.
         # (Constructing a backend launches no Chrome, so this stays cheap.)
-        sessions = [store.get_or_create_session(SeleniumChromeBackend(f"/p/{i}")) for i in range(3)]
+        sessions = [store.get_or_create_session(SeleniumChromeBackend(f"/p/{i}"), max_sessions=10) for i in range(3)]
         assert mock_atexit.register.call_count == 1
         hook = mock_atexit.register.call_args.args[0]
         assert hook == store._shutdown
@@ -70,8 +70,8 @@ def test_get_session_is_lazy_and_cached():
     # Two backends for the same (default) profile map to one cached session;
     # the store never launches Chrome — building a backend is side-effect-free.
     with patch("browser_guard.mcp.session_management.BrowserSessionStore.BrowserSessionManager") as mock_session_cls:
-        s1 = server._store.get_or_create_session(server._backend_for(None))
-        s2 = server._store.get_or_create_session(server._backend_for(None))
+        s1 = server._store.get_or_create_session(server._backend_for(None), max_sessions=10)
+        s2 = server._store.get_or_create_session(server._backend_for(None), max_sessions=10)
         assert s1 is s2
         assert mock_session_cls.call_count == 1
 
@@ -82,9 +82,9 @@ def test_distinct_profile_dirs_get_distinct_sessions(tmp_path):
     a, b = tmp_path / "a", tmp_path / "b"
     with patch("browser_guard.mcp.session_management.BrowserSessionStore.BrowserSessionManager",
                side_effect=lambda *a, **k: MagicMock()) as mock_mgr:
-        sa1 = server._store.get_or_create_session(server._backend_for(str(a)))
-        sa2 = server._store.get_or_create_session(server._backend_for(str(a)))
-        sb = server._store.get_or_create_session(server._backend_for(str(b)))
+        sa1 = server._store.get_or_create_session(server._backend_for(str(a)), max_sessions=10)
+        sa2 = server._store.get_or_create_session(server._backend_for(str(a)), max_sessions=10)
+        sb = server._store.get_or_create_session(server._backend_for(str(b)), max_sessions=10)
         # same profile -> same cached session; different profile -> different one
         assert sa1 is sa2
         assert sa1 is not sb
