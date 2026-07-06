@@ -205,5 +205,5 @@ def test_from_file_all_comments_is_deny_all(tmp_path):
     assert not al.section("click").is_allowed("amazon.com", "/")
 
 
-# The shipped sample (now at configs/samples/allowlist.yaml) is covered by
-# test/unit/configs/test_loader.py through the schema-validating loader.
+# The shipped sample (configs/samples/read_only_on_popular_websites.yaml) is
+# covered by test/unit/configs/test_loader.py through the schema-validating loader.

@@ -3,12 +3,15 @@ import gzip
 import pytest
 
 from browden.mcp.validator import TrancoList
-from browden.mcp.validator.tranco import BUNDLED_TOP_N, DEFAULT_TRANCO_PATH
+from browden.mcp.validator.tranco import DEFAULT_TOP_N, TRANCO_FILENAME
 
 
-def test_bundled_snapshot_exists_and_has_100k():
-    tl = TrancoList()  # bundled default
-    assert len(tl) == BUNDLED_TOP_N
+def test_default_snapshot_loads_the_fixture():
+    # conftest repoints the default path at the committed mini fixture, so the
+    # no-arg default construction reads a small but real top-sites list.
+    tl = TrancoList()
+    assert len(tl) > 0
+    assert tl.contains("google.com")
 
 
 def test_top_ranked_sites_are_listed():
@@ -61,6 +64,8 @@ def test_custom_snapshot_path(tmp_path):
     assert not tl.contains("google.com")
 
 
-def test_default_path_points_at_bundled_gz():
-    assert DEFAULT_TRANCO_PATH.name == "tranco-top-100k.txt.gz"
-    assert DEFAULT_TRANCO_PATH.exists()
+def test_snapshot_name_and_default_top_n():
+    # The name the fetcher writes and the read gate reads must agree; the
+    # snapshot is fetched into the config dir, so we do NOT assert it exists.
+    assert TRANCO_FILENAME == "tranco-top-400k.txt.gz"
+    assert DEFAULT_TOP_N == 400_000

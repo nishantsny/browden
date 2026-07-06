@@ -3,7 +3,7 @@ from pathlib import Path
 
 import yaml
 
-from .tranco import BUNDLED_TOP_N, TrancoList
+from .tranco import DEFAULT_TOP_N, TRANCO_FILENAME, TrancoList
 
 
 def _canonical_host(host: str) -> str:
@@ -66,7 +66,7 @@ class ReadPolicy:
        **and** path-scope (or effectively block) one that Tranco would otherwise
        wave through.
     4. **Tranco** — for hosts with no override, allowed if the host is in the
-       bundled top-sites snapshot.
+       fetched top-sites snapshot (kept next to the allowlist config).
 
     Otherwise it is denied (default-deny).
     """
@@ -101,7 +101,7 @@ class ActionAllowlist:
 
           read:
             enabled: true                 # master switch for the read allowlist
-            tranco: {enabled: true, top_n: 100000}
+            tranco: {enabled: true, top_n: 400000}
             website_overrides:
               "*": [".*"]                 # host -> path regexes; "*" = any host
 
@@ -123,13 +123,17 @@ class ActionAllowlist:
     gate write actions. An unlisted write action default-denies.
     """
 
-    def __init__(self, sections: dict[str, object]):
+    def __init__(self, sections: dict[str, object], tranco_path: Path | None = None):
+        # tranco_path is the Tranco snapshot that sits next to the allowlist
+        # file; the loader/from_file pass it in. A bare dict construction (tests,
+        # the import-time default) leaves it None -> the ~/.browden fallback.
         self._sections: dict[str, Allowlist] = {}
         self._labels: dict[str, dict[str, re.Pattern[str]]] = {}
         self.max_browser_sessions = 10
         self.max_tabs_per_session = 20
         self._denylist = Allowlist(_paths_map(sections.get("denylist")))
-        self._read_policy = self._build_read_policy(sections.get("read"), self._denylist)
+        self._read_policy = self._build_read_policy(
+            sections.get("read"), self._denylist, tranco_path)
         for action, rules in sections.items():
             if action in ("infra", "read", "denylist"):
                 if action == "infra" and isinstance(rules, dict):
@@ -151,25 +155,33 @@ class ActionAllowlist:
             self._labels[action] = labels
 
     @staticmethod
-    def _build_read_policy(read_cfg: object, denylist: Allowlist) -> ReadPolicy:
+    def _build_read_policy(read_cfg: object, denylist: Allowlist,
+                           tranco_path: Path | None) -> ReadPolicy:
         """Assemble the ReadPolicy from the ``read`` block (fail-closed if absent).
 
         With no ``read`` block the allowlist is enabled but empty, so only
         denylist + (nothing) applies — every read is denied until the operator
         opts sites in. The shipped sample enables Tranco so it works out of box.
+
+        ``tranco_path`` is the snapshot sitting next to the allowlist config; if
+        it is missing we fall back to the ~/.browden default (``path=None``), so
+        a snapshot that setup has not fetched yet degrades to "Tranco matches
+        nothing" rather than a crash.
         """
         cfg = read_cfg if isinstance(read_cfg, dict) else {}
         enabled = bool(cfg.get("enabled", True))
         tranco_cfg = cfg.get("tranco") or {}
         tranco = None
         if tranco_cfg.get("enabled"):
-            tranco = TrancoList(top_n=int(tranco_cfg.get("top_n", BUNDLED_TOP_N)))
+            snapshot = tranco_path if (tranco_path and tranco_path.exists()) else None
+            tranco = TrancoList(top_n=int(tranco_cfg.get("top_n", DEFAULT_TOP_N)), path=snapshot)
         overrides = Allowlist(_paths_map(cfg.get("website_overrides")))
         return ReadPolicy(enabled=enabled, tranco=tranco, overrides=overrides, denylist=denylist)
 
     @classmethod
     def from_file(cls, path: Path) -> "ActionAllowlist":
-        return cls(yaml.safe_load(path.read_text()) or {})
+        return cls(yaml.safe_load(path.read_text()) or {},
+                   tranco_path=path.parent / TRANCO_FILENAME)
 
     @property
     def read_policy(self) -> ReadPolicy:
