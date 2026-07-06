@@ -1,17 +1,15 @@
 #!/usr/bin/env python3
-"""Fetch (or refresh) the Tranco top-sites snapshot the read allowlist uses.
+"""Refresh the bundled Tranco top-sites snapshot the read allowlist uses.
 
-The read allowlist's Tranco option matches hosts against a snapshot that lives
-*next to your allowlist config* — ``<config-dir>/tranco-top-400k.txt.gz``, the
+The read allowlist's Tranco option (see configs/samples/allowlist-read-deny.yaml)
+matches hosts against ``browden/configs/data/tranco-top-100k.txt.gz`` — the
 top-N most-visited registrable domains, held offline so there is no network call
-at request time. The file is **not** committed to the repo; ``onetime_setup.py``
-fetches it on first run, and you re-run this script to refresh it.
+at request time. This script regenerates that file from the latest Tranco list.
 
 Usage (from the repo root, any Python):
 
-    python3 setup/fetch_tranco.py                        # top 400k -> ~/.browden
-    python3 setup/fetch_tranco.py --top-n 1000000        # the whole list
-    python3 setup/fetch_tranco.py --config-dir /etc/browden
+    python3 setup/fetch_tranco.py            # top 100k (the bundled default)
+    python3 setup/fetch_tranco.py --top-n 200000
 
 Tranco (https://tranco-list.eu) publishes a manipulation-resistant ranking; the
 daily "top-1m" download is a zip of ``rank,domain`` CSV rows. We keep the first
@@ -26,23 +24,11 @@ import urllib.request
 import zipfile
 from pathlib import Path
 
-# stdlib-only on purpose: this runs with any Python, before the venv exists.
-# These must match browden.mcp.validator.tranco (the read gate that consumes
-# the file) — keep them in sync if either changes.
-TRANCO_FILENAME = "tranco-top-400k.txt.gz"
-DEFAULT_TOP_N = 400_000
 TRANCO_ZIP_URL = "https://tranco-list.eu/top-1m.csv.zip"
-DEFAULT_CONFIG_DIR = Path("~/.browden")
+OUT_PATH = Path(__file__).resolve().parents[1] / "browden" / "configs" / "data" / "tranco-top-100k.txt.gz"
 
 
-def snapshot_path(config_dir: Path) -> Path:
-    """Where the snapshot lives for a given config dir (next to allowlist.yaml)."""
-    return config_dir.expanduser() / TRANCO_FILENAME
-
-
-def fetch(top_n: int, out_path: Path, url: str = TRANCO_ZIP_URL) -> int:
-    """Download the Tranco top-1m list and write the first ``top_n`` domains to
-    ``out_path`` (gzipped, one lower-cased registrable domain per line)."""
+def fetch(top_n: int, url: str, out_path: Path) -> int:
     print(f"Downloading {url} ...")
     with urllib.request.urlopen(url, timeout=120) as resp:
         blob = resp.read()
@@ -63,17 +49,12 @@ def fetch(top_n: int, out_path: Path, url: str = TRANCO_ZIP_URL) -> int:
 
 
 def main() -> None:
-    ap = argparse.ArgumentParser(description="Fetch/refresh the Tranco snapshot next to the allowlist")
-    ap.add_argument("--top-n", type=int, default=DEFAULT_TOP_N,
-                    help=f"how many top domains to keep (default: {DEFAULT_TOP_N})")
-    ap.add_argument("--config-dir", type=Path, default=DEFAULT_CONFIG_DIR,
-                    help=f"config dir the snapshot is written into (default: {DEFAULT_CONFIG_DIR})")
-    ap.add_argument("--out", type=Path, default=None,
-                    help="explicit output .txt.gz path (overrides --config-dir)")
+    ap = argparse.ArgumentParser(description="Refresh the bundled Tranco snapshot")
+    ap.add_argument("--top-n", type=int, default=100_000, help="how many top domains to keep (default: 100000)")
     ap.add_argument("--url", default=TRANCO_ZIP_URL, help="Tranco top-1m zip URL")
+    ap.add_argument("--out", type=Path, default=OUT_PATH, help="output .txt.gz path")
     args = ap.parse_args()
-    out = args.out if args.out is not None else snapshot_path(args.config_dir)
-    fetch(args.top_n, out, args.url)
+    fetch(args.top_n, args.url, args.out)
 
 
 if __name__ == "__main__":

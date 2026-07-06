@@ -29,3 +29,7 @@ browden = "browden.mcp.server:main"
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["browden*"]
+
+[tool.setuptools.package-data]
+# Bundle the offline Tranco top-sites snapshot the read allowlist reads.
+"browden.configs" = ["data/*.gz"]

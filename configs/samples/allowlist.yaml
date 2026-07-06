@@ -21,12 +21,11 @@ read:
                            # (every non-denied URL becomes readable)
 
   # Option 1 — Tranco: allow any of the most-visited registrable domains on the
-  # web, from an offline snapshot fetched next to this file by setup (no network
-  # at request time). A listed domain also covers its subdomains. Popularity ~
-  # "established", NOT "safe".
+  # web, from a bundled offline snapshot (no network at request time). A listed
+  # domain also covers its subdomains. Popularity ~ "established", NOT "safe".
   tranco:
     enabled: true
-    top_n: 400000          # 1..N, where N is the size of your fetched snapshot (400k default)
+    top_n: 100000          # 1..100000 (size of the bundled snapshot)
 
   # Option 2 — explicit overrides: host -> path regexes; "*" host = any host.
   # An override TRIUMPHS over Tranco: once a host is listed, its rule alone
