@@ -169,6 +169,24 @@ def main(argv: list[str] | None = None) -> None:
         f"(then: systemctl --user restart {args.service_name}).\n"
         f"stdio setup remains manual — see the README."
     )
+    print(guard_allowlist_note(allowlist))
+
+
+def guard_allowlist_note(allowlist: Path) -> str:
+    """Advisory text nudging the user to gate edits to the allowlist file.
+
+    The allowlist is the security boundary: an agent that can silently rewrite
+    it can widen its own read/click permissions. So — at the very least — the
+    agent's settings should require approval ("ask") before *every* edit to it.
+    Returned as a string (not printed) so it stays easy to test and reuse.
+    """
+    return (
+        f"\nSecurity tip (recommended): {allowlist} is what constrains the "
+        f"agent. Keep it from quietly widening its own access by marking edits "
+        f"to it as always-ask in your agent's settings — at the very least "
+        f'"ask" before every edit, never auto-approve. For Claude Code, add a '
+        f'permissions rule like:\n\n    "ask": ["Edit({allowlist})"]\n'
+    )
 
 
 if __name__ == "__main__":
