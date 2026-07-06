@@ -3,15 +3,23 @@
 **A safe, read-only MCP shell around a real Chrome browser.** It lets an LLM
 agent *look at* and *navigate* the web through your own browser — reading pages,
 querying the DOM, taking screenshots — without ever handing the agent the full,
-unguarded power of a CDP or Playwright client.
+unguarded power of a CDP or Playwright client. 
 
 By default the agent can read and navigate, and nothing else. The one write
 action that exists (`add_to_cart`) ships **disabled** and, even when enabled, can
 only click an allowlisted button on an allowlisted site. That's what makes it
 safe to point browser-guard at a Chrome profile you actually use.
 
+## Disclaimer
+
+browser-guard drives a **real, undetected** Chrome, so a site can't tell your
+agent's visits from your own. That puts the responsibility on you: only point it
+at sites whose Terms of Service permit automated access, and read those terms
+first.
+
 ## Table of contents
 
+- [Disclaimer](#disclaimer)
 - [Why browser-guard](#why-browser-guard)
 - [Quick start](#quick-start)
 - [Tools](#tools)
@@ -45,10 +53,10 @@ safe to point browser-guard at a Chrome profile you actually use.
 ```bash
 git clone https://github.com/nishantsny/browser-guard.git
 cd browser-guard
-uv venv && uv pip install -e .
 
-# One-time setup: installs a background (SSE) service and prints the agent config.
-python setup/onetime_setup.py
+# Creates a venv, installs browser-guard, starts the background (SSE) service,
+# and prints the agent config to paste below.
+python3 setup/onetime_setup.py
 ```
 
 Then paste the printed block into your agent's MCP config (e.g. `~/.claude.json`):
@@ -207,16 +215,17 @@ Keeps the Chrome session warm across agent restarts.
 ```bash
 git clone https://github.com/nishantsny/browser-guard.git
 cd browser-guard
-uv venv && uv pip install -e .
-python setup/onetime_setup.py   # run with the venv active
+python3 setup/onetime_setup.py
 ```
 
-The setup script copies the sample allowlist to `~/.browser_guard/allowlist.yaml`
-(never overwriting an existing one), writes a **systemd user service** serving
-SSE on port **22001**, enables it, and prints the JSON block to add to your
-agent. It's idempotent. Useful flags: `--port`, `--config-dir`,
-`--service-name` (stand up a second instance without touching the first), plus
-`--python` and `--display` overrides.
+The setup script creates a venv at `.venv` and installs browser-guard into it
+(via `uv`, falling back to stdlib `venv` + `pip`), copies the sample allowlist to
+`~/.browser_guard/allowlist.yaml` (never overwriting an existing one), writes a
+**systemd user service** serving SSE on port **22001** pinned to that venv,
+enables it, and prints the JSON block to add to your agent. It's idempotent.
+Useful flags: `--port`, `--config-dir`, `--service-name` (stand up a second
+instance without touching the first), `--venv` and `--python` (use your own
+interpreter and skip venv creation), and `--display`.
 
 ### On-demand over stdio
 

@@ -1,17 +1,21 @@
 #!/usr/bin/env python3
 """One-time setup for Browser Guard (SSE transport only; stdio stays manual).
 
-What it does, in order:
-  1. Copies configs/samples/allowlist.yaml to <config-dir>/allowlist.yaml
-     (default ~/.browser_guard) — skipped if a config is already there.
-  2. Writes a systemd *user* unit that serves SSE on <port> with the Python
-     interpreter running this script (activate your venv first).
-  3. Runs `systemctl --user daemon-reload` and `enable --now <service-name>`.
-  4. Prints the JSON block to add to your agent's settings by hand.
+Run it with any Python — `python3 setup/onetime_setup.py`; no venv needed first.
 
-Run it again anytime: the config copy is skipped when present and the systemd
-steps are idempotent. Use --service-name/--port to stand up a second instance
-without disturbing an existing one.
+What it does, in order:
+  1. Creates a venv at <repo>/.venv and installs browser-guard into it
+     (via `uv`, falling back to stdlib venv + pip). Pass --python to use an
+     existing interpreter instead and skip this step.
+  2. Copies configs/samples/allowlist.yaml to <config-dir>/allowlist.yaml
+     (default ~/.browser_guard) — skipped if a config is already there.
+  3. Writes a systemd *user* unit that serves SSE on <port>, pinned to that venv.
+  4. Runs `systemctl --user daemon-reload` and `enable --now <service-name>`.
+  5. Prints the JSON block to add to your agent's settings by hand.
+
+Run it again anytime: the venv/install and config copy are idempotent and the
+systemd steps re-apply cleanly. Use --service-name/--port to stand up a second
+instance without disturbing an existing one.
 """
 import argparse
 import json
@@ -26,6 +30,7 @@ SAMPLE_ALLOWLIST = REPO_ROOT / "configs" / "samples" / "allowlist.yaml"
 DEFAULT_PORT = 22001  # usually unused; well clear of dev servers on 8000/3000
 DEFAULT_CONFIG_DIR = "~/.browser_guard"
 DEFAULT_SERVICE_NAME = "browser-guard"
+DEFAULT_VENV = REPO_ROOT / ".venv"
 
 UNIT_TEMPLATE = """\
 [Unit]
@@ -45,6 +50,33 @@ RestartSec=5
 [Install]
 WantedBy=default.target
 """
+
+
+def _run(cmd: list[str]) -> None:
+    print(f"[run]  {' '.join(cmd)}")
+    subprocess.run(cmd, check=True)
+
+
+def ensure_venv(venv_dir: Path) -> Path:
+    """Create ``venv_dir`` (if absent) and install browser-guard into it editable.
+
+    Prefers ``uv``; falls back to the stdlib ``venv`` + ``pip``. Idempotent — an
+    existing venv is reused and the (fast) editable reinstall just refreshes it.
+    Returns the venv's Python interpreter, which the service will run.
+    """
+    python = venv_dir / "bin" / "python"
+    uv = shutil.which("uv")
+    if uv:
+        if not python.exists():
+            _run([uv, "venv", str(venv_dir)])
+        _run([uv, "pip", "install", "--python", str(python), "-e", str(REPO_ROOT)])
+    else:
+        print("[info] uv not found on PATH — using stdlib venv + pip")
+        if not python.exists():
+            _run([sys.executable, "-m", "venv", str(venv_dir)])
+        _run([str(python), "-m", "pip", "install", "-e", str(REPO_ROOT)])
+    print(f"[ok]   browser-guard installed in {venv_dir}")
+    return python
 
 
 def copy_config(config_dir: Path) -> Path:
@@ -94,8 +126,11 @@ def main(argv: list[str] | None = None) -> None:
                         help=f"where the allowlist config lives (default: {DEFAULT_CONFIG_DIR})")
     parser.add_argument("--service-name", default=DEFAULT_SERVICE_NAME,
                         help=f"systemd user service name (default: {DEFAULT_SERVICE_NAME})")
-    parser.add_argument("--python", default=sys.executable,
-                        help="Python the service runs (default: the one running this script)")
+    parser.add_argument("--venv", default=str(DEFAULT_VENV),
+                        help=f"venv to create/use for the service (default: {DEFAULT_VENV})")
+    parser.add_argument("--python", default=None,
+                        help="use an existing interpreter for the service and skip venv "
+                             "creation (default: create/use --venv)")
     parser.add_argument("--display", default=os.environ.get("DISPLAY", ":0"),
                         help="DISPLAY for headed Chrome (default: current, else :0)")
     args = parser.parse_args(argv)
@@ -109,7 +144,14 @@ def main(argv: list[str] | None = None) -> None:
 
     config_dir = Path(args.config_dir).expanduser().resolve()
     allowlist = copy_config(config_dir)
-    write_unit(args.service_name, args.port, allowlist, args.python, args.display)
+
+    if args.python:
+        service_python = args.python
+        print(f"[ok]   using existing interpreter {service_python} (skipping venv)")
+    else:
+        service_python = str(ensure_venv(Path(args.venv).expanduser().resolve()))
+
+    write_unit(args.service_name, args.port, allowlist, service_python, args.display)
     systemd_enable(args.service_name)
 
     agent_json = json.dumps({
