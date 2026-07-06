@@ -53,8 +53,9 @@ first.
   machine. No cloud, no proxy — nothing about your browsing leaves the host.
 - **One-click install.** A single setup script installs a background service and
   prints the exact config block to paste into your agent.
-- **Customizable allowlist.** Reads are gated — to the web's top sites (a bundled
-  Tranco snapshot) plus your own host rules, minus an always-wins denylist — and
+- **Customizable allowlist.** Reads are gated — to the web's top sites (an offline
+  Tranco snapshot setup fetches next to your config) plus your own host rules,
+  minus an always-wins denylist — and
   the lone write action only fires on allowlisted buttons on allowlisted sites.
   All under a YAML config you control.
 
@@ -161,8 +162,9 @@ open. The policy has **three layers**, evaluated in order (first match wins):
      its rule alone decides — so you can allow a host Tranco doesn't rank, *or*
      path-scope (or effectively block) one Tranco would otherwise wave through
      (`reddit.com: ["^/r/pics/"]`). Setting `"*": [".*"]` re-opens the whole web.
-   - **Tranco top-sites** — for any host *without* an override, a bundled, offline
-     snapshot of the ~100k most-visited domains. A listed domain covers its
+   - **Tranco top-sites** — for any host *without* an override, a local, offline
+     snapshot of the top ~400k most-visited domains (fetched next to your
+     allowlist by setup, not committed). A listed domain covers its
      subdomains (`google.com` ⇒ `mail.google.com`) but not lookalikes
      (`google.com.evil.co`). The cutoff (`top_n`) is configurable, and the whole
      read allowlist can be switched off (`read.enabled: false`) for a trusted
@@ -181,9 +183,13 @@ Bare domains are normalized to `https://`, `www.` is stripped, and query
 strings/fragments pass through untouched; anything not allowed is rejected with a
 structured error. The config lives at `~/.browden/allowlist.yaml` (installed
 by the setup script; falls back to the repo sample at
-`configs/samples/allowlist.yaml`). It's schema-checked on load — a malformed file
-fails startup with the offending field named. A fully-commented tour of the
-read/deny system lives at
+[`configs/samples/read_only_on_popular_websites.yaml`](configs/samples/read_only_on_popular_websites.yaml)).
+It's schema-checked on load — a malformed file fails startup with the offending
+field named. Two ready-to-use samples ship in `configs/samples/`: the read-only
+default above, and
+[`allow_grocery_cart_manipulation.yaml`](configs/samples/allow_grocery_cart_manipulation.yaml)
+— a shopping policy that enables `click` (add-to-cart) on a few grocery sites. A
+fully-commented tour of the read/deny system lives at
 [`configs/samples/allowlist-read-deny.yaml`](configs/samples/allowlist-read-deny.yaml);
 refresh the Tranco snapshot with `python3 setup/fetch_tranco.py`.
 
@@ -260,19 +266,20 @@ interpreter and skip venv creation), and `--display`.
 
 ### Refreshing the allowlisted domains
 
-The Tranco top-sites list the read allowlist uses is a bundled, offline snapshot,
-so it doesn't update on its own. Refresh it, then restart the service to load the
-new list:
+The Tranco top-sites list the read allowlist uses is an offline snapshot fetched
+into your config dir next to `allowlist.yaml` (not committed), so it doesn't
+update on its own. Refresh it, then restart the service to load the new list:
 
 ```bash
-python3 setup/fetch_tranco.py                    # re-download the top-100k snapshot
+python3 setup/fetch_tranco.py                    # re-download the top-400k snapshot
 systemctl --user restart browden.service   # reload it into the running server
 ```
 
-The setup script installs browden *editable*, so the file `fetch_tranco.py`
-rewrites is the same one the server reads — the restart is all it takes to load
-the new list. Pass `--top-n N` to keep a different number of domains, and use your
-own `--service-name` in the restart if you installed under one. (If you instead
+`fetch_tranco.py` writes the snapshot into your config dir (`~/.browden` by
+default) — the very file the server reads — so the restart is all it takes to load
+the new list. Pass `--top-n N` to keep a different number of domains, `--config-dir`
+if you installed elsewhere, and use your own `--service-name` in the restart if you
+installed under one. (If you instead
 did a non-editable install, point `--out` at that copy, or reinstall.)
 
 ### On-demand over stdio
