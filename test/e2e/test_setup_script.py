@@ -39,7 +39,10 @@ def test_onetime_setup_installs_config_and_service(tmp_path):
     service = f"browser-guard-e2e-{port}"
     config_dir = tmp_path / "cfg"
     unit_path = Path.home() / ".config" / "systemd" / "user" / f"{service}.service"
-    args = ["--port", str(port), "--config-dir", str(config_dir), "--service-name", service]
+    # Pin the service to this interpreter so setup skips venv creation/install
+    # (this test already runs in an env with browser-guard installed).
+    args = ["--port", str(port), "--config-dir", str(config_dir),
+            "--service-name", service, "--python", sys.executable]
 
     try:
         res = _run_setup(args)
