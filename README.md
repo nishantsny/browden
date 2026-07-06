@@ -255,6 +255,17 @@ Useful flags: `--port`, `--config-dir`, `--service-name` (stand up a second
 instance without touching the first), `--venv` and `--python` (use your own
 interpreter and skip venv creation), and `--display`.
 
+### Using your own Chrome profile
+
+To reuse your existing logins, point a request's `profile_dir` at your real
+Chrome `--user-data-dir` (Linux: `~/.config/google-chrome`, macOS:
+`~/Library/Application Support/Google/Chrome`).
+
+browser-guard then *becomes* that profile's one Chrome window, so quit your
+everyday Chrome on that profile first (a `--user-data-dir` allows only one live
+process). Reads stay allowlist-gated and `click` stays default-deny, which is
+what makes this safe to do on a profile you actually use.
+
 ### Refreshing the allowlisted domains
 
 The Tranco top-sites list the read allowlist uses is a bundled, offline snapshot,
