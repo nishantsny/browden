@@ -37,11 +37,14 @@ read:
 
 # ---- write actions --------------------------------------------------------
 # The one write action, `click`, ships disabled (default-deny). Uncomment to
-# allow it on a host whose button text matches the label regex — nothing else.
+# allow it on a host. Each host REQUIRES a `label` regex; the control's visible
+# text must fully match it — nothing else is clickable. To allow ANY control on
+# a host, say so explicitly with label: '.*' (an omitted label is a config
+# error, so "clicks everything" is always visible here, never implicit).
 # click:
 #   amazon.com:
-#     paths: [".*"]
-#     label: '(?i)\badd to cart\b'
+#     label: '(?i)add to cart'   # required; use '.*' to allow any control
+#     paths: [".*"]              # optional, defaults to [".*"]
 
 infra:
   max_browser_sessions: 10

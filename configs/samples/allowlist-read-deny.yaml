@@ -78,12 +78,14 @@ read:
 
 # ---- 5. write actions (for context; gated separately) ---------------------
 # Reads let the agent *look*; writes let it *act*. The one write action, click,
-# is default-deny and additionally vetoed by the denylist above. It needs both
-# the host listed here AND the button's visible text to match `label`.
+# is default-deny and additionally vetoed by the denylist above. It needs the
+# host listed here AND the control's visible text to fully match the REQUIRED
+# `label` regex. Allowing any control is explicit: label: '.*' (omitting the
+# label is a config error, so "clicks everything" always shows in the config).
 # click:
 #   amazon.com:
-#     paths: [".*"]
-#     label: '(?i)\badd to cart\b'
+#     label: '(?i)add to cart'   # required; '.*' would allow any control
+#     paths: [".*"]              # optional, defaults to [".*"]
 
 infra:
   max_browser_sessions: 10

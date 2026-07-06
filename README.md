@@ -104,7 +104,7 @@ verbatim; it is globally unique and routes itself to the right profile.
 | `query_selector_all` | `document.querySelectorAll`, server-side (paginated) |
 | `screenshot` | PNG of the tab's current viewport |
 | `force_reload_tab` | Reload a tab and refresh its cached DOM |
-| `click` | **The only write action** — click an allowlisted "add to cart" button (disabled by default) |
+| `click` | **The only write action** — click a control on a host listed in the `click` allowlist; each host declares a **required** `label` regex the control's visible text must fully match (`.*` to allow any). Off by default: no host is listed. |
 
 The DOM-query tools read a **parsed snapshot** of the rendered (post-JavaScript)
 page and return compact JSON nodes (`tag`, `id`, `classes`, `attributes`,
@@ -170,9 +170,12 @@ open. The policy has **three layers**, evaluated in order (first match wins):
      guarantee of _safe_** — reputable sites host untrusted content too, so this
      shrinks attack surface rather than removing it.
 3. **write actions** — `click` is default-deny. Enabling it for a host requires
-   both listing the host *and* the exact visible button label it may click — so it
-   can never be steered into "Buy now", checkout, or an agent-targeted decoy — and
-   the denylist vetoes it too.
+   listing the host *and* a **required** `label` regex the control's visible text
+   must fully match — so *what* the agent may click is defined entirely by you.
+   Allowing any control is explicit (`label: '.*'`), never an accident of omission;
+   a listed host with no label fails config parsing. The denylist vetoes clicks
+   too, and page-injected agent-targeted decoys are always refused regardless of
+   the label.
 
 Bare domains are normalized to `https://`, `www.` is stripped, and query
 strings/fragments pass through untouched; anything not allowed is rejected with a

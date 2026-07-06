@@ -2,7 +2,7 @@ import re
 
 import pytest
 
-from browser_guard.mcp.validator import is_click, label_matches
+from browser_guard.mcp.validator import is_clickable_control, label_matches
 
 
 def node(tag="input", *, text="", **attrs):
@@ -12,7 +12,7 @@ def node(tag="input", *, text="", **attrs):
     return {"tag": tag, "id": el_id, "classes": classes, "attributes": attrs, "text": text}
 
 
-# -- the real Amazon add-to-cart button (from the live tab) -----------------
+# -- accepted: real, visible, non-decoy clickable controls -------------------
 
 AMAZON_ATC = node(
     "input",
@@ -24,68 +24,68 @@ AMAZON_ATC = node(
 
 
 def test_amazon_real_button_accepted():
-    assert is_click(AMAZON_ATC)
+    assert is_clickable_control(AMAZON_ATC)
 
 
 def test_button_tag_with_text_accepted():
-    assert is_click(node("button", text="Add to Cart"))
+    assert is_clickable_control(node("button", text="Add to Cart"))
 
 
 def test_aria_label_accepted():
-    assert is_click(node("button", text="", **{"aria-label": "Add to bag"}))
+    assert is_clickable_control(node("button", text="", **{"aria-label": "Add to bag"}))
 
 
 def test_role_button_accepted():
-    assert is_click(node("a", text="Add to basket", role="button"))
+    assert is_clickable_control(node("a", text="Add to basket", role="button"))
 
 
-# -- negatives: must never be clickable --------------------------------------
-
-def test_buy_now_rejected():
-    assert not is_click(node("input", type="submit", value="Buy Now"))
-
-
-def test_one_click_rejected():
-    assert not is_click(node("input", type="submit", value="Buy with 1-Click"))
+def test_quantity_option_button_accepted():
+    # A quantity picker option is a real button — is_clickable_control no longer
+    # cares that its text isn't "add to cart"; the operator's label gates that.
+    assert is_clickable_control(node("button", text="8 est. 3.44 lb", role="option"))
 
 
-def test_subscribe_rejected():
-    assert not is_click(node("button", text="Subscribe & Save"))
+# -- intent is NOT judged here: what a control DOES is the operator's call ----
+
+@pytest.mark.parametrize("label", [
+    "Buy Now", "Buy with 1-Click", "Subscribe & Save", "Remove from cart",
+    "Add to Wish List", "Proceed to checkout", "Place your order", "Add to comparison",
+])
+def test_real_controls_pass_regardless_of_action(label):
+    # These were once rejected by a hardcoded negative list. Intent is now the
+    # operator's decision (per-host label), so the integrity check lets them
+    # through — whether they may be clicked is decided by the allowlist label.
+    assert is_clickable_control(node("button", text=label))
 
 
-def test_remove_and_wishlist_rejected():
-    assert not is_click(node("button", text="Remove from cart"))
-    assert not is_click(node("button", text="Add to Wish List"))
+# -- still rejected: integrity failures (not intent) -------------------------
 
-
-def test_checkout_rejected():
-    assert not is_click(node("button", text="Proceed to checkout"))
-
-
-def test_unrelated_text_rejected():
-    assert not is_click(node("button", text="Add to comparison"))
-    assert not is_click(node("input", type="text", value="Add to cart"))  # not a button
+def test_non_clickable_element_rejected():
+    assert not is_clickable_control(node("input", type="text", value="Add to cart"))
+    assert not is_clickable_control(node("div", text="Add to cart"))
+    assert not is_clickable_control(node("span", text="Add to cart"))
 
 
 def test_hidden_or_disabled_rejected():
-    assert not is_click(node("button", text="Add to cart", **{"aria-hidden": "true"}))
-    assert not is_click(node("button", text="Add to cart", disabled=""))
-    assert not is_click(node("input", type="hidden", value="Add to cart"))
+    assert not is_clickable_control(node("button", text="Add to cart", **{"aria-hidden": "true"}))
+    assert not is_clickable_control(node("button", text="Add to cart", disabled=""))
+    assert not is_clickable_control(node("input", type="hidden", value="Add to cart"))
 
 
 def test_agent_decoy_rejected():
     # A tab-supplied control marked "for AI agents" must never be trusted, even
-    # if its text says "Add to cart".
-    assert not is_click(
+    # if its text says "Add to cart" — this defends against the page, and is the
+    # one intent-independent guard that stays.
+    assert not is_clickable_control(
         node("input", type="submit", value="Add to cart",
              **{"data-target-audience": "ai-agent", "data-agent-recommended": "true"}))
-    assert not is_click(
+    assert not is_clickable_control(
         node("button", text="Add to cart", **{"data-agent-action": "primary-search"}))
 
 
 def test_none_rejected():
-    assert not is_click(None)
-    assert not is_click({})
+    assert not is_clickable_control(None)
+    assert not is_clickable_control({})
 
 
 # -- per-site label enforcement ----------------------------------------------
