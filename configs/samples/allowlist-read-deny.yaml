@@ -47,18 +47,18 @@ read:
   enabled: true
 
   # Option 1 — TRANCO top-sites (popularity gate).
-  #   Allows the most-visited registrable domains on the web from a bundled,
-  #   offline snapshot (github.com, amazon.com, ...). A listed domain also
-  #   covers its subdomains, so allowing "google.com" allows "mail.google.com"
-  #   — but never a lookalike like "google.com.evil.co".
+  #   Allows the most-visited registrable domains on the web from an offline
+  #   snapshot fetched next to this file by setup (github.com, amazon.com, ...).
+  #   A listed domain also covers its subdomains, so allowing "google.com"
+  #   allows "mail.google.com" — but never a lookalike like "google.com.evil.co".
   #   No network at request time; ~sub-microsecond local lookup.
   tranco:
     enabled: true
     # How far down the ranking to trust. Lower = stricter (fewer, more-
-    # established sites). 1..100000 — the size of the bundled snapshot.
+    # established sites). 1..N, where N is the size of your fetched snapshot.
     #   10000  -> only the ~10k most popular domains
-    #   100000 -> the full bundled list (default)
-    top_n: 100000
+    #   400000 -> the full default snapshot (setup fetches top 400k)
+    top_n: 400000
 
   # Option 2 — WEBSITE OVERRIDES (explicit allow; TRIUMPHS over Tranco).
   #   host -> [path regex]. Once a host is listed here, this rule ALONE decides
