@@ -64,14 +64,13 @@ click:
 # — its placeholder, aria-label, resolved aria-labelledby / <label>, or title —
 # so you authorize which boxes may be typed into by the name a human reads next to
 # them, never a hidden name/id. A host not listed here can't be typed into.
-# (Commented out — opt in deliberately, like `click`.)
-# write-text:
-#   amazon.com:
-#     paths: [".*"]
-#     # Only fields whose visible label reads like "Grocery Tip …". NOTE: a bare
-#     # <input> with no placeholder/aria-label/<label> has no visible label to
-#     # match — such a field can't be gated by text and stays un-fillable.
-#     label: '(?i)grocery tip.*'
+write-text:
+  amazon.com:
+    paths: [".*"]
+    # Only fields whose visible label reads like "Grocery Tip …". NOTE: a bare
+    # <input> with no placeholder/aria-label/<label> has no visible label to
+    # match — such a field can't be gated by text and stays un-fillable.
+    label: '(?i)grocery tip.*'
 
 # Resource caps: distinct Chrome profiles alive at once / tabs within a profile.
 infra:
