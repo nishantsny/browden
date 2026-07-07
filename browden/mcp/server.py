@@ -17,18 +17,13 @@ from ..configs.loader import (
 from ..dependencies.mcp import FastMCP, Image
 from ..web_navigator.selenium_chrome import SeleniumChromeBackend
 from .session_management.BrowserSessionStore import BrowserSessionStore, UnknownTabError
-from urllib.parse import urlparse
 
 from .validator import (
     ActionAllowlist,
-    ValidationError,
-    classify_anchor_target,
-    field_id_matches,
-    field_label_matches,
-    is_clickable_control,
-    is_fillable_control,
-    label_matches,
+    check_action_host,
+    validate_click_target,
     validate_url,
+    validate_write_text_target,
 )
 
 DEFAULT_HOST = "127.0.0.1"
@@ -221,56 +216,20 @@ async def click(css_selector: str, id: str) -> dict:
     logger.info(f"Tool called: click (css_selector={css_selector!r}, id={id!r})")
     session = _store.route(id)
 
-    # Gate 1: per-action host allowlist, checked against the tab's live URL.
-    # The denylist vetoes first (a denied host is never clickable, even if the
-    # human opened it), then the click section's own host allowlist must pass.
+    # Gate 1: per-action host allowlist (denylist veto + the click section),
+    # checked against the tab's live URL before the element is ever queried.
     url = await session.current_url(id=id)
     if url is None:
         return {"error": f"tab {id} is no longer open — call list_tabs for current tabs",
                 "id": id}
-    parsed = urlparse(url)
-    if _ALLOWLIST.is_denied(parsed.hostname or "", parsed.path):
-        raise ValidationError(f"URL on denylist: {parsed.hostname}{parsed.path}")
-    validate_url(url, _ALLOWLIST.section("click"))  # raises if host not allowed
+    check_action_host(_ALLOWLIST, "click", url)  # raises if denied / host not allowed
 
-    # Gate 2: the element must be a single, real, visible, non-decoy control.
+    # Gates 2-3: fetch the element (limit=2 so ambiguity is detectable), then let
+    # the validator judge integrity, anchor target, and the host's required label.
     found = await session.query_selector_all(css_selector, id=id, limit=2)
     if "error" in found:
         return found
-    total = found["total_count"]
-    if total == 0:
-        raise ValidationError(f"no element matches selector {css_selector!r}")
-    if total > 1:
-        raise ValidationError(f"selector {css_selector!r} is ambiguous ({total} matches) — refusing to click")
-    node = found["elements"][0]
-    if not is_clickable_control(node):
-        raise ValidationError(
-            "selected element is not a clickable control (or is a hidden/disabled/decoy element) — refusing to click")
-
-    # Gate 2b: an <a> anchor may navigate, so gate *where it goes* through the
-    # same read allowlist that governs `navigate` — a click that leaves for
-    # another site is only as safe as navigating there directly. In-page and
-    # javascript: hrefs stay put (no check); an http(s) target must be on the read
-    # allowlist (cross-domain is fine if allow-listed); other schemes are refused.
-    # No-op for buttons/inputs, which have no href.
-    kind, target = classify_anchor_target(node, url)
-    if kind == "blocked":
-        raise ValidationError(
-            "anchor uses a non-navigational scheme (mailto:/tel:/data:/…) — refusing to click")
-    if kind == "nav":
-        t = urlparse(target)
-        if not _ALLOWLIST.read_policy.is_allowed(t.hostname or "", t.path):
-            raise ValidationError(
-                f"anchor target {t.hostname or target!r} is not on the read allowlist — refusing to click")
-
-    # Gate 3: the host's required label. Every listed host has one (config
-    # parsing enforces it); '.*' is how a host opts into any control. Fail
-    # closed if it is somehow absent rather than waving the click through.
-    host = urlparse(url).hostname or ""
-    label_re = _ALLOWLIST.label_pattern("click", host)
-    if label_re is None or not label_matches(node, label_re):
-        raise ValidationError(
-            f"control text does not match the required label for {host} — refusing to click")
+    validate_click_target(_ALLOWLIST, url, css_selector, found)  # raises on any failed gate
 
     result = await session.click(css_selector, id=id)
     logger.info("Tool finished: click")
@@ -304,42 +263,20 @@ async def insert_text(css_selector: str, value: str, id: str) -> dict:
     logger.info(f"Tool called: insert_text (css_selector={css_selector!r}, id={id!r})")
     session = _store.route(id)
 
-    # Gate 1: per-action host allowlist ('write-text'); denylist vetoes first.
+    # Gate 1: per-action host allowlist ('write-text'; denylist vetoes first),
+    # checked against the tab's live URL before the element is ever queried.
     url = await session.current_url(id=id)
     if url is None:
         return {"error": f"tab {id} is no longer open — call list_tabs for current tabs",
                 "id": id}
-    parsed = urlparse(url)
-    if _ALLOWLIST.is_denied(parsed.hostname or "", parsed.path):
-        raise ValidationError(f"URL on denylist: {parsed.hostname}{parsed.path}")
-    validate_url(url, _ALLOWLIST.section("write-text"))  # raises if host not allowed
+    check_action_host(_ALLOWLIST, "write-text", url)  # raises if denied / host not allowed
 
-    # Gate 2: the element must be a single, real, visible, non-decoy text box.
+    # Gates 2-3: fetch the element (limit=2 so ambiguity is detectable), then let
+    # the validator judge integrity and the host's required label / field-id.
     found = await session.query_selector_all(css_selector, id=id, limit=2)
     if "error" in found:
         return found
-    total = found["total_count"]
-    if total == 0:
-        raise ValidationError(f"no element matches selector {css_selector!r}")
-    if total > 1:
-        raise ValidationError(f"selector {css_selector!r} is ambiguous ({total} matches) — refusing to insert text")
-    node = found["elements"][0]
-    if not is_fillable_control(node):
-        raise ValidationError(
-            "selected element is not a fillable text control (or is a "
-            "hidden/disabled/readonly/decoy element) — refusing to insert text")
-
-    # Gate 3: authorize the field either by its visible label (the host's
-    # required write-text label regex) OR — for a label-less box the operator has
-    # named explicitly — by its exact id/name in the host's field_ids. Fail
-    # closed: with no label configured and no id match, nothing is typed.
-    host = parsed.hostname or ""
-    label_re = _ALLOWLIST.label_pattern("write-text", host)
-    label_ok = label_re is not None and field_label_matches(node, label_re)
-    id_ok = field_id_matches(node, _ALLOWLIST.field_ids("write-text", host))
-    if not (label_ok or id_ok):
-        raise ValidationError(
-            f"field label does not match the required write-text label for {host} — refusing to insert text")
+    validate_write_text_target(_ALLOWLIST, url, css_selector, found)  # raises on any failed gate
 
     result = await session.insert_text(css_selector, value, id=id)
     logger.info("Tool finished: insert_text")
