@@ -15,6 +15,8 @@ and enabled-state are re-verified *live* by the backend at click time; the stati
 checks here are best-effort defence in depth on the cached snapshot.
 """
 
+from urllib.parse import urljoin, urlparse
+
 # Attributes a tab uses to steer AI agents — untrustworthy by construction, so an
 # element carrying them is rejected rather than trusted. (See the Amazon tab's
 # decoy controls: data-target-audience="ai-agent", data-agent-recommended, ...)
@@ -101,6 +103,13 @@ def is_clickable_control(node: dict) -> bool:
     label permits any). This guard exists to stop the *page* from tricking the
     agent, not to second-guess the operator.
 
+    Accepts ``<button>``, ``role="button"``, ``<input type=submit|button>``, and
+    ``<a>`` anchors. Anchors *navigate*, so they carry one extra obligation the
+    others don't: their href must resolve to a site the read allowlist permits —
+    that is decided separately via :func:`classify_anchor_target` (which needs the
+    current URL and the read policy, neither available here), never by this pure
+    integrity check.
+
     Default-deny: every check must pass. ``node`` is a serialized element dict
     (``{"tag", "id", "classes", "attributes", "text", ...}``) or ``None``.
     """
@@ -116,7 +125,49 @@ def is_clickable_control(node: dict) -> bool:
     tag = node.get("tag")
     is_button = tag == "button" or attrs.get("role") == "button"
     is_submit = tag == "input" and attrs.get("type", "submit") in _CLICKABLE_INPUT_TYPES
-    return is_button or is_submit
+    is_anchor = tag == "a"
+    return is_button or is_submit or is_anchor
+
+
+def classify_anchor_target(node: dict, current_url: str) -> "tuple[str, str | None]":
+    """Classify what clicking anchor ``node`` would navigate to, for the click gate.
+
+    An anchor is the one clickable control that can whisk the agent to another
+    site, so — rather than trusting it stays on the current domain — the caller
+    gates *where it goes* through the same read allowlist that governs
+    ``navigate``. This returns ``(kind, target)`` telling the caller how:
+
+    * ``("inpage", None)`` — no navigation to a fetchable page: ``node`` isn't an
+      ``<a>``, has no href, or the href is empty / a ``javascript:`` handler that
+      runs in place (e.g. Amazon's tip "Edit"). No allowlist check needed; the
+      page you are already on was already allowed.
+    * ``("nav", url)`` — an ``http(s)`` navigation to absolute ``url`` (the href
+      resolved against ``current_url``; a relative or ``#fragment`` href resolves
+      back onto the current site). The caller MUST gate ``url`` through the read
+      allowlist before allowing the click — it is only as safe as ``navigate`` to
+      that same URL. Note this is a *target-in-allowlist* test, not a same-domain
+      one: a cross-domain link to an allow-listed site is fine, and a same-site
+      link to a path the read policy denies is not.
+    * ``("blocked", None)`` — a scheme that leaves or repurposes the browsing
+      context (``mailto:``, ``tel:``, ``data:``, ``file:``, …), which the read
+      allowlist doesn't reason about; the caller should refuse.
+
+    Best-effort: it governs the *declarative* href only. A page's JS can still
+    navigate anywhere after any click (button or anchor alike); that is out of
+    scope here just as it is for buttons.
+    """
+    if not node or node.get("tag") != "a":
+        return ("inpage", None)
+    href = (node.get("attributes", {}).get("href") or "").strip()
+    if not href:
+        return ("inpage", None)
+    resolved = urljoin(current_url, href)
+    scheme = urlparse(resolved).scheme.lower()
+    if scheme in ("", "javascript"):
+        return ("inpage", None)  # in-page fragment or a JS onclick handler
+    if scheme in ("http", "https"):
+        return ("nav", resolved)
+    return ("blocked", None)  # mailto:, tel:, data:, file:, …
 
 
 # -- insert_text (write-text) side --------------------------------------------------
@@ -185,3 +236,26 @@ def field_label_matches(node: dict, pattern: "re.Pattern[str]") -> bool:
     if not node:
         return False
     return any(pattern.fullmatch(label) for label in _field_labels(node))
+
+
+def field_id_matches(node: dict, allowed_ids: "set[str]") -> bool:
+    """True iff the field's own ``id`` or ``name`` attribute is in ``allowed_ids``.
+
+    The deliberate escape hatch for text boxes that carry **no visible label** at
+    all — e.g. Amazon Fresh's grocery-tip ``<input>``, which has no placeholder,
+    ``aria-label``, ``aria-labelledby``, or associated ``<label>``, so
+    :func:`field_label_matches` can never authorize it. Here the operator instead
+    names the field by its stable ``id``/``name`` in the write-text ``field_ids``
+    list.
+
+    Unlike the label path this trusts a **non-visible** identifier, so it is
+    strictly opt-in per field and never a default: ``allowed_ids`` is empty for
+    every host that doesn't list ``field_ids``, and an empty set matches nothing.
+    A page could in principle put a listed ``id`` on a different field, but only a
+    field on a host the operator already allow-listed for write-text — the
+    identifier is a name the operator chose, not one the page volunteered.
+    """
+    if not node or not allowed_ids:
+        return False
+    attrs = node.get("attributes", {})
+    return node.get("id") in allowed_ids or attrs.get("name") in allowed_ids

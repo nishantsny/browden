@@ -2,6 +2,8 @@
 from .allowlist import ActionAllowlist, Allowlist, ReadPolicy
 from .errors import ValidationError
 from .intent import (
+    classify_anchor_target,
+    field_id_matches,
     field_label_matches,
     is_clickable_control,
     is_fillable_control,
@@ -16,6 +18,8 @@ __all__ = [
     "ReadPolicy",
     "TrancoList",
     "ValidationError",
+    "classify_anchor_target",
+    "field_id_matches",
     "field_label_matches",
     "is_clickable_control",
     "is_fillable_control",

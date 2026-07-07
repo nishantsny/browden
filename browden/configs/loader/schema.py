@@ -125,11 +125,19 @@ def validate_allowlist_data(data, *, source: str = "allowlist") -> dict:
                 raise ConfigError(
                     f"{where}: rule must be a mapping with a required 'label' "
                     f"(and optional 'paths'), got {type(rule).__name__}")
-            unknown = set(rule) - {"paths", "label"}
+            # `field_ids` (exact id/name allowlist for label-less text boxes) is
+            # only meaningful for the write-text action; other actions may not use it.
+            allowed = ["paths", "label"] + (["field_ids"] if action == "write-text" else [])
+            unknown = set(rule) - set(allowed)
             if unknown:
-                raise ConfigError(f"{where}: unknown keys {sorted(unknown)} (allowed: paths, label)")
+                raise ConfigError(f"{where}: unknown keys {sorted(unknown)} (allowed: {', '.join(allowed)})")
             if "paths" in rule:
                 _check_patterns(rule["paths"], f"{where}.paths")
+            if "field_ids" in rule:
+                fids = rule["field_ids"]
+                if not isinstance(fids, list) or not all(isinstance(x, str) and x for x in fids):
+                    raise ConfigError(
+                        f"{where}.field_ids: must be a list of non-empty id/name strings")
             # label is REQUIRED for write actions: what a control may do must be
             # stated explicitly, so "allow any click" reads as label: '.*' in the
             # config rather than being the silent default of an omitted field.

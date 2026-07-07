@@ -3,6 +3,7 @@ import re
 import pytest
 
 from browden.mcp.validator import (
+    classify_anchor_target,
     field_label_matches,
     is_clickable_control,
     is_fillable_control,
@@ -193,3 +194,52 @@ def test_label_matches_requires_full_match_not_substring():
     # An operator who *wants* a trailing item name must say so explicitly.
     wfm = re.compile(r"(?i)add to cart\b.*")
     assert label_matches(node("button", **{"aria-label": "Add to Cart, gala apple"}), wfm)
+
+
+# -- anchors: accepted as controls, classified for the read-allowlist gate ----
+
+def test_anchor_accepted_as_clickable_control():
+    # A plain <a> is a real clickable control now (its *target* is gated
+    # elsewhere, not here); decoy/hidden anchors are still rejected.
+    assert is_clickable_control(node("a", text="Edit", href="javascript:void(0)"))
+    assert is_clickable_control(node("a", text="Delivery", href="/checkout/next"))
+    assert not is_clickable_control(node("a", text="Edit", href="/x", **{"aria-hidden": "true"}))
+    assert not is_clickable_control(node("a", text="Edit", href="/x", **{"data-agent-action": "go"}))
+
+
+CUR = "https://www.amazon.com/checkout/p/x/spc"
+
+
+def test_classify_non_anchor_is_inpage():
+    # Buttons/inputs have no href to leave by — always in-page (no target check).
+    assert classify_anchor_target(node("button", text="Apply"), CUR) == ("inpage", None)
+    assert classify_anchor_target(None, CUR) == ("inpage", None)
+
+
+@pytest.mark.parametrize("href", ["javascript:void(0)", "", None])
+def test_classify_inpage_hrefs(href):
+    # javascript: handlers and empty/absent hrefs run in place — no navigation.
+    attrs = {} if href is None else {"href": href}
+    assert classify_anchor_target(node("a", text="Edit", **attrs), CUR) == ("inpage", None)
+
+
+def test_classify_relative_and_fragment_resolve_to_current_site():
+    kind, target = classify_anchor_target(node("a", text="Next", href="/checkout/next"), CUR)
+    assert kind == "nav" and target == "https://www.amazon.com/checkout/next"
+    kind, target = classify_anchor_target(node("a", text="Jump", href="#tips"), CUR)
+    assert kind == "nav" and target.startswith("https://www.amazon.com/checkout/p/x/spc#tips")
+
+
+def test_classify_cross_domain_is_nav_not_blocked():
+    # Cross-domain is NOT rejected here — it returns ("nav", url); whether it is
+    # allowed is the caller's read-allowlist decision (not a same-domain test).
+    kind, target = classify_anchor_target(node("a", text="Go", href="https://evil.example/x"), CUR)
+    assert kind == "nav" and target == "https://evil.example/x"
+    # Protocol-relative resolves to the current scheme + the other host.
+    kind, target = classify_anchor_target(node("a", text="Go", href="//other.example/y"), CUR)
+    assert kind == "nav" and target == "https://other.example/y"
+
+
+@pytest.mark.parametrize("href", ["mailto:a@b.com", "tel:+15551234", "data:text/html,hi", "file:///etc/passwd"])
+def test_classify_non_navigational_schemes_blocked(href):
+    assert classify_anchor_target(node("a", text="x", href=href), CUR) == ("blocked", None)

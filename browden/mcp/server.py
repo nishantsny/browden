@@ -22,6 +22,8 @@ from urllib.parse import urlparse
 from .validator import (
     ActionAllowlist,
     ValidationError,
+    classify_anchor_target,
+    field_id_matches,
     field_label_matches,
     is_clickable_control,
     is_fillable_control,
@@ -201,9 +203,15 @@ async def click(css_selector: str, id: str) -> dict:
          enabled — the amazon.com entry in allowlist.yaml is commented out until
          you opt in.
       2. ``css_selector`` must resolve to exactly one element that is a real,
-         visible, non-decoy clickable control (an agent-targeted decoy, a hidden
-         or disabled element, or a non-clickable tag is refused). This gate
-         judges element *integrity*, not intent.
+         visible, non-decoy clickable control — a ``<button>``, ``role="button"``,
+         ``<input type=submit|button>``, or an ``<a>`` anchor (an agent-targeted
+         decoy, or a hidden/disabled element, is refused). This gate judges
+         element *integrity*, not intent. For an anchor there is one extra check:
+         where its href would navigate must itself be on the read allowlist (the
+         same gate as ``navigate``) — relative and ``javascript:`` hrefs stay in
+         place, a cross-domain href is allowed only if that site is allow-listed,
+         and other schemes (``mailto:``/``tel:``/…) are refused — so a "click"
+         can't be a disguised jump to a site you couldn't navigate to.
       3. The control's visible text must fully match the host's required
          ``label`` regex. *What* a control may do is defined here, by the
          operator — a host that wants to permit any control states it
@@ -239,6 +247,22 @@ async def click(css_selector: str, id: str) -> dict:
         raise ValidationError(
             "selected element is not a clickable control (or is a hidden/disabled/decoy element) — refusing to click")
 
+    # Gate 2b: an <a> anchor may navigate, so gate *where it goes* through the
+    # same read allowlist that governs `navigate` — a click that leaves for
+    # another site is only as safe as navigating there directly. In-page and
+    # javascript: hrefs stay put (no check); an http(s) target must be on the read
+    # allowlist (cross-domain is fine if allow-listed); other schemes are refused.
+    # No-op for buttons/inputs, which have no href.
+    kind, target = classify_anchor_target(node, url)
+    if kind == "blocked":
+        raise ValidationError(
+            "anchor uses a non-navigational scheme (mailto:/tel:/data:/…) — refusing to click")
+    if kind == "nav":
+        t = urlparse(target)
+        if not _ALLOWLIST.read_policy.is_allowed(t.hostname or "", t.path):
+            raise ValidationError(
+                f"anchor target {t.hostname or target!r} is not on the read allowlist — refusing to click")
+
     # Gate 3: the host's required label. Every listed host has one (config
     # parsing enforces it); '.*' is how a host opts into any control. Fail
     # closed if it is somehow absent rather than waving the click through.
@@ -272,7 +296,9 @@ async def insert_text(css_selector: str, value: str, id: str) -> dict:
          aria-labelledby / associated ``<label>`` / title — must fully match the
          host's required ``write-text`` ``label`` regex, so the operator
          authorizes *which* boxes may be typed into by the name a human reads next
-         to them (never a hidden ``name``/``id``). ``label: '.*'`` opts into any.
+         to them. ``label: '.*'`` opts into any. As an explicit escape hatch for a
+         box with *no* visible label, the host's ``field_ids`` may instead name it
+         by exact ``id``/``name``; the field passes if the label OR an id matches.
     Any gate failing raises a ValidationError and nothing is typed.
     """
     logger.info(f"Tool called: insert_text (css_selector={css_selector!r}, id={id!r})")
@@ -303,11 +329,15 @@ async def insert_text(css_selector: str, value: str, id: str) -> dict:
             "selected element is not a fillable text control (or is a "
             "hidden/disabled/readonly/decoy element) — refusing to insert text")
 
-    # Gate 3: the host's required write-text label, matched against the field's
-    # visible label. Fail closed if it is somehow absent.
+    # Gate 3: authorize the field either by its visible label (the host's
+    # required write-text label regex) OR — for a label-less box the operator has
+    # named explicitly — by its exact id/name in the host's field_ids. Fail
+    # closed: with no label configured and no id match, nothing is typed.
     host = parsed.hostname or ""
     label_re = _ALLOWLIST.label_pattern("write-text", host)
-    if label_re is None or not field_label_matches(node, label_re):
+    label_ok = label_re is not None and field_label_matches(node, label_re)
+    id_ok = field_id_matches(node, _ALLOWLIST.field_ids("write-text", host))
+    if not (label_ok or id_ok):
         raise ValidationError(
             f"field label does not match the required write-text label for {host} — refusing to insert text")
 
