@@ -7,7 +7,7 @@ name = "browden"
 version = "0.1.0"
 description = "A protective shell around browser-automation MCPs"
 authors = [{ name = "Nishant", email = "nishantsny@gmail.com" }]
-license = "GPL-3.0-or-later"
+license = "Apache-2.0"
 license-files = ["LICENSE"]
 requires-python = ">=3.11"
 dependencies = [
