@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Security vulnerability
+    url: https://github.com/nishantsny/browden/security/advisories/new
+    about: Report allowlist/write-gate bypasses and other security issues privately — please do not open a public issue.
+  - name: Questions & ideas
+    url: https://github.com/nishantsny/browden/issues
+    about: For open-ended questions, start a regular issue.

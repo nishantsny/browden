@@ -1,0 +1,71 @@
+name: Bug report
+description: Something in browden misbehaves (a tool, the allowlist, setup, a crash)
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for filing a bug! **If this is a security issue (e.g. an allowlist
+        or write-gate bypass), do not file it here** — see the
+        [Security Policy](../blob/main/SECURITY.md) for private reporting.
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: What did you expect, and what happened instead?
+      placeholder: I navigated to X and expected Y, but got Z.
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      description: The sequence of tool calls (or setup steps) that triggers it. A minimal repro helps a lot.
+      placeholder: |
+        1. new_blank_tab
+        2. navigate to ...
+        3. ...
+    validations:
+      required: true
+  - type: textarea
+    id: config
+    attributes:
+      label: Relevant allowlist config
+      description: The allowlist rules in play (redact anything sensitive). Say "default sample" if unchanged.
+      render: yaml
+    validations:
+      required: false
+  - type: input
+    id: version
+    attributes:
+      label: browden version / commit
+      placeholder: v0.1.0 or a commit SHA
+    validations:
+      required: true
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating system
+      options:
+        - Linux
+        - macOS
+        - Windows
+    validations:
+      required: true
+  - type: dropdown
+    id: transport
+    attributes:
+      label: Transport / mode
+      options:
+        - stdio
+        - service (SSE)
+    validations:
+      required: false
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs / traceback
+      description: Any server logs or Python traceback. This will be rendered as code.
+      render: shell
+    validations:
+      required: false
