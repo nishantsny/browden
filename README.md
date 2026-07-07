@@ -1,7 +1,7 @@
 # browden
 
 [![CI](https://github.com/nishantsny/browser-guard/actions/workflows/e2e.yml/badge.svg)](https://github.com/nishantsny/browser-guard/actions/workflows/e2e.yml)
-[![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](./LICENSE)
+[![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](./LICENSE)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue.svg)](https://www.python.org/downloads/)
 [![MCP server](https://img.shields.io/badge/MCP-server-1f6feb.svg)](https://modelcontextprotocol.io)
 
@@ -405,7 +405,8 @@ allowlist reproducible. This is attribution guidance, not legal advice.
 
 ## License
 
-[GNU General Public License v3.0 or later](./LICENSE). Copyleft: if you
-distribute a modified version, you must release your source under the GPL too.
-This governs browden's code; the Tranco data carries its own terms (see
+[Apache License 2.0](./LICENSE) — a permissive license with an explicit patent
+grant. You can use, modify, and redistribute browden, including in proprietary
+products, provided you preserve the license and attribution notices. This
+governs browden's code; the Tranco data carries its own terms (see
 [Attribution](#attribution)).
