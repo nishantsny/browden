@@ -1,12 +1,13 @@
-"""Element-level guard for the ``click`` write action.
+"""Element-level guard for the write actions (``click`` and ``insert_text``).
 
-The per-action host allowlist (:class:`ActionAllowlist`) decides *where* ``click``
-may act and, via each host's optional ``label`` regex, *what* text a target may
-carry. This module enforces only what the allowlist can't: element *integrity*.
-It answers "is this a real, visible, non-decoy clickable control?" — never "is
-this the kind of action I approve of." Judging intent (add-to-cart vs. checkout
-vs. remove) is the operator's job through the allowlist; a host listed with no
-``label`` means every click on it is permitted by design.
+The per-action host allowlist (:class:`ActionAllowlist`) decides *where* an action
+may act and, via each host's optional ``label`` regex, *what* target may carry.
+This module enforces only what the allowlist can't: element *integrity*. It
+answers "is this a real, visible, non-decoy control (a clickable one for
+``click``, a text box for ``insert_text``)?" — never "is this the kind of action I
+approve of." Judging intent (add-to-cart vs. checkout vs. remove; which fields may
+be typed into) is the operator's job through the allowlist; a host listed with no
+``label`` means every action on it is permitted by design.
 
 Pure: operates on a serialized element node (see
 ``dom.serialize.element_to_node``), never on Selenium. Real on-screen visibility
@@ -26,6 +27,31 @@ _AGENT_BAIT_KEYS = (
 )
 
 _CLICKABLE_INPUT_TYPES = ("submit", "button")
+
+# <input> types that hold free text the user types into (the `insert_text` action). A
+# bare <input> with no type defaults to "text", so it counts too. Deliberately
+# excludes non-text inputs (checkbox/radio/file/range/color/date-pickers/etc.) —
+# those are manipulated by clicking, not typing.
+_TEXT_INPUT_TYPES = ("text", "search", "email", "tel", "url", "number", "password")
+
+
+def _fails_integrity(attrs: dict) -> bool:
+    """Shared anti-injection + statically-hidden/disabled rejection for any write target.
+
+    Rejects (a) agent-targeted decoys — never let tab-supplied "for AI" markup
+    vouch for an element — and (b) elements the snapshot shows as hidden or
+    disabled. The backend re-verifies visibility/enabled live at action time; this
+    is best-effort defence in depth on the cached node.
+    """
+    if any(k in attrs for k in _AGENT_BAIT_KEYS):
+        return True
+    if attrs.get("type") == "hidden" or "hidden" in attrs or attrs.get("aria-hidden") == "true":
+        return True
+    if "disabled" in attrs or attrs.get("aria-disabled") == "true":
+        return True
+    if "display:none" in str(attrs.get("style", "")).replace(" ", "").lower():
+        return True
+    return False
 
 
 def _candidate_labels(node: dict) -> list[str]:
@@ -82,24 +108,80 @@ def is_clickable_control(node: dict) -> bool:
         return False
     attrs = node.get("attributes", {})
 
-    # 1. Reject agent-targeted decoys outright — never let tab-supplied "for AI"
-    #    markup vouch for an element.
-    if any(k in attrs for k in _AGENT_BAIT_KEYS):
+    # 1. Reject agent decoys + statically hidden/disabled elements.
+    if _fails_integrity(attrs):
         return False
 
     # 2. Must be a real, statically-plausible clickable control.
     tag = node.get("tag")
     is_button = tag == "button" or attrs.get("role") == "button"
     is_submit = tag == "input" and attrs.get("type", "submit") in _CLICKABLE_INPUT_TYPES
-    if not (is_button or is_submit):
+    return is_button or is_submit
+
+
+# -- insert_text (write-text) side --------------------------------------------------
+
+def is_fillable_control(node: dict) -> bool:
+    """True iff ``node`` is a real, visible, non-decoy **text-entry** control.
+
+    The ``insert_text`` analogue of :func:`is_clickable_control`: integrity + anti-decoy
+    only, for the *write-text* action. It says "is this a text box a human could
+    type into" — a ``<textarea>``, a text-like ``<input>`` (see
+    ``_TEXT_INPUT_TYPES``), or a ``contenteditable`` element — and rejects decoys,
+    hidden/disabled elements, and read-only fields. *Which* fields may be typed
+    into, and *what* value they may receive, is the operator's decision via the
+    ``write-text`` allowlist label (see :func:`field_label_matches`).
+
+    Default-deny: every check must pass. ``node`` is a serialized element dict.
+    """
+    if not node:
+        return False
+    attrs = node.get("attributes", {})
+    if _fails_integrity(attrs):
+        return False
+    # A field the user could not type into is not fillable.
+    if "readonly" in attrs or attrs.get("aria-readonly") == "true":
         return False
 
-    # 3. Reject anything statically hidden / disabled (live check re-verifies).
-    if attrs.get("type") == "hidden" or "hidden" in attrs or attrs.get("aria-hidden") == "true":
-        return False
-    if "disabled" in attrs or attrs.get("aria-disabled") == "true":
-        return False
-    if "display:none" in str(attrs.get("style", "")).replace(" ", "").lower():
-        return False
+    tag = node.get("tag")
+    if tag == "textarea":
+        return True
+    if tag == "input" and attrs.get("type", "text") in _TEXT_INPUT_TYPES:
+        return True
+    # contenteditable="" / "true" / "plaintext-only" makes any element editable;
+    # "false" (or absent) does not.
+    ce = attrs.get("contenteditable")
+    return ce is not None and ce.lower() in ("", "true", "plaintext-only")
 
-    return True
+
+def _field_labels(node: dict) -> list[str]:
+    """The human-visible names of a text field, for the write-text gate.
+
+    A text box usually carries no visible text of its own, so we match the
+    operator's ``write-text`` regex against what a human reads as the field's
+    name: its ``placeholder``, ``aria-label``, the ``aria-labelledby`` /
+    ``<label>`` text the serializer resolved (``labelledby_text`` / ``field_label``,
+    see ``dom.serialize``), and ``title``. Never raw ``name``/``id``/``data-*`` —
+    those aren't visible to the user.
+    """
+    attrs = node.get("attributes", {})
+    return [
+        attrs.get("placeholder", ""),
+        attrs.get("aria-label", ""),
+        node.get("labelledby_text") or "",
+        node.get("field_label") or "",
+        attrs.get("title", ""),
+    ]
+
+
+def field_label_matches(node: dict, pattern: "re.Pattern[str]") -> bool:
+    """True iff some visible label of the text field is matched *in full* by ``pattern``.
+
+    The write-text counterpart of :func:`label_matches`: the operator's
+    ``write-text`` label regex must ``fullmatch`` the field's visible name (from
+    :func:`_field_labels`), so an operator authorizes *which* boxes may be typed
+    into by the label a human sees next to them — never by hidden identifiers.
+    """
+    if not node:
+        return False
+    return any(pattern.fullmatch(label) for label in _field_labels(node))

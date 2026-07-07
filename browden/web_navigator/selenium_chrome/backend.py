@@ -12,6 +12,8 @@ from ...common.tab import TabInfo
 from ...dependencies.selenium import (
     By,
     ChromeOptions,
+    InvalidElementStateException,
+    Keys,
     NoSuchElementException,
     NoSuchWindowException,
     WebDriverWait,
@@ -438,6 +440,38 @@ class SeleniumChromeBackend(WebNavigatorBackend):
             "clicked": True,
             "tab_id": drv.current_window_handle,
             "url_before": url_before,
+            "url": drv.current_url,
+            "title": drv.title,
+        }
+
+    def insert_text_element(self, css_selector: str, value: str) -> dict:
+        drv = self._drv()
+        try:
+            matches = drv.find_elements(By.CSS_SELECTOR, css_selector)
+        except NoSuchWindowException:
+            raise TabNotFoundError("there is no active tab to insert text into") from None
+        # Ambiguity is a deny: the policy layer validated exactly one element on the
+        # snapshot, so more (or fewer) live matches means the DOM moved under us.
+        if len(matches) == 0:
+            raise NoSuchElementException(f"no element matches {css_selector!r}")
+        if len(matches) > 1:
+            raise ValueError(f"selector {css_selector!r} matched {len(matches)} live elements")
+        el = matches[0]
+        if not el.is_displayed():
+            raise ValueError("target element is not visible")
+        if not el.is_enabled():
+            raise ValueError("target element is disabled")
+        try:
+            el.clear()
+        except InvalidElementStateException:
+            # contenteditable / rich fields don't support clear(); select-all + delete.
+            el.send_keys(Keys.CONTROL, "a")
+            el.send_keys(Keys.DELETE)
+        el.send_keys(value)
+        return {
+            "inserted": True,
+            "value": value,
+            "tab_id": drv.current_window_handle,
             "url": drv.current_url,
             "title": drv.title,
         }

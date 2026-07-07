@@ -2,7 +2,12 @@ import re
 
 import pytest
 
-from browden.mcp.validator import is_clickable_control, label_matches
+from browden.mcp.validator import (
+    field_label_matches,
+    is_clickable_control,
+    is_fillable_control,
+    label_matches,
+)
 
 
 def node(tag="input", *, text="", **attrs):
@@ -109,6 +114,71 @@ def test_label_matches_uses_aria_labelledby_text():
     # And it still fully governs: a substring-only regex must not pass.
     btn["labelledby_text"] = "Continue to payment"
     assert not label_matches(btn, re.compile(r"(?i)continue"))
+
+
+# -- insert_text (write-text): integrity of a text control --------------------------
+
+def test_text_inputs_and_textarea_and_contenteditable_are_fillable():
+    assert is_fillable_control(node("input", type="text"))
+    assert is_fillable_control(node("input", type="number"))
+    assert is_fillable_control(node("input"))          # default type is text
+    assert is_fillable_control(node("textarea"))
+    assert is_fillable_control(node("div", **{"contenteditable": ""}))
+    assert is_fillable_control(node("div", **{"contenteditable": "true"}))
+
+
+def test_non_text_controls_are_not_fillable():
+    for t in ("checkbox", "radio", "file", "range", "color", "submit", "button"):
+        assert not is_fillable_control(node("input", type=t)), t
+    assert not is_fillable_control(node("button", text="Add to cart"))
+    assert not is_fillable_control(node("div", text="hi"))
+    assert not is_fillable_control(node("div", **{"contenteditable": "false"}))
+    assert not is_fillable_control(None)
+    assert not is_fillable_control({})
+
+
+def test_hidden_disabled_readonly_decoy_not_fillable():
+    assert not is_fillable_control(node("input", type="text", disabled=""))
+    assert not is_fillable_control(node("input", type="text", readonly=""))
+    assert not is_fillable_control(node("input", type="text", **{"aria-readonly": "true"}))
+    assert not is_fillable_control(node("input", type="text", **{"aria-hidden": "true"}))
+    assert not is_fillable_control(node("input", type="hidden"))
+    # page-injected agent decoy is never a trustworthy target, even as a text box
+    assert not is_fillable_control(
+        node("input", type="text", **{"data-target-audience": "ai-agent"}))
+
+
+# -- insert_text (write-text): the field's visible label is what gets matched --------
+
+def test_field_label_matches_visible_field_names():
+    pat = re.compile(r"(?i)grocery tip.*")
+    assert field_label_matches(node("input", type="number", placeholder="Grocery Tip (optional)"), pat)
+    assert field_label_matches(node("input", type="number", **{"aria-label": "Grocery tip amount"}), pat)
+    assert field_label_matches(node("input", type="number", title="Grocery tip"), pat)
+    # resolved by the serializer from aria-labelledby / <label>:
+    from_lblby = node("input", type="number"); from_lblby["labelledby_text"] = "Grocery Tip"
+    assert field_label_matches(from_lblby, pat)
+    from_label = node("input", type="number"); from_label["field_label"] = "Grocery Tip (optional):"
+    assert field_label_matches(from_label, pat)
+
+
+def test_field_label_no_visible_name_does_not_match():
+    # The Amazon tip <input> has no placeholder/aria-label/aria-labelledby/<label>,
+    # so there is nothing for the write-text regex to match — the guard refuses.
+    assert not field_label_matches(node("input", type="number"), re.compile(r"(?i)grocery tip.*"))
+    # value/name/id are NOT candidates (not user-visible)
+    assert not field_label_matches(
+        node("input", type="number", value="5.00", name="updateAmountInput"),
+        re.compile(r"(?i)updateAmountInput"))
+
+
+def test_field_label_requires_full_match_not_substring():
+    assert not field_label_matches(
+        node("input", placeholder="Monthly grocery tip for the driver"),
+        re.compile(r"(?i)grocery tip"))
+    assert field_label_matches(
+        node("input", placeholder="Monthly grocery tip for the driver"),
+        re.compile(r"(?i).*grocery tip.*"))
 
 
 def test_label_matches_requires_full_match_not_substring():
