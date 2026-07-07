@@ -21,7 +21,6 @@ from urllib.parse import urlparse
 from .validator import (
     ActionAllowlist,
     ValidationError,
-    field_identity_matches,
     field_label_matches,
     is_clickable_control,
     is_fillable_control,
@@ -252,9 +251,7 @@ async def fill(css_selector: str, value: str, id: str) -> dict:
          aria-labelledby / associated ``<label>`` / title — must fully match the
          host's required ``write-text`` ``label`` regex, so the operator
          authorizes *which* boxes may be typed into by the name a human reads next
-         to them. ``label: '.*'`` opts into any. As an explicit escape hatch for
-         boxes with *no* visible label, the host's optional ``field_ids`` list may
-         name specific ``id``/``name`` values that are allowed instead.
+         to them (never a hidden ``name``/``id``). ``label: '.*'`` opts into any.
     Any gate failing raises a ValidationError and nothing is typed.
     """
     logger.info(f"Tool called: fill (css_selector={css_selector!r}, id={id!r})")
@@ -285,17 +282,13 @@ async def fill(css_selector: str, value: str, id: str) -> dict:
             "selected element is not a fillable text control (or is a "
             "hidden/disabled/readonly/decoy element) — refusing to fill")
 
-    # Gate 3: the field's VISIBLE label must match the host's write-text label —
-    # OR its id/name must be an operator-listed `field_ids` exception (for boxes
-    # with no visible label at all). Fail closed if neither holds.
+    # Gate 3: the host's required write-text label, matched against the field's
+    # visible label. Fail closed if it is somehow absent.
     host = parsed.hostname or ""
     label_re = _ALLOWLIST.label_pattern("write-text", host)
-    label_ok = label_re is not None and field_label_matches(node, label_re)
-    id_ok = field_identity_matches(node, _ALLOWLIST.field_ids("write-text", host))
-    if not (label_ok or id_ok):
+    if label_re is None or not field_label_matches(node, label_re):
         raise ValidationError(
-            f"field label does not match the required write-text label for {host} "
-            "(and its id/name is not an allowed field_ids exception) — refusing to fill")
+            f"field label does not match the required write-text label for {host} — refusing to fill")
 
     result = await session.fill(css_selector, value, id=id)
     logger.info("Tool finished: fill")

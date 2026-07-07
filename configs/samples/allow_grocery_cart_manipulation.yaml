@@ -68,12 +68,10 @@ click:
 # write-text:
 #   amazon.com:
 #     paths: [".*"]
-#     # Only fields whose visible label reads like "Grocery Tip …".
+#     # Only fields whose visible label reads like "Grocery Tip …". NOTE: a bare
+#     # <input> with no placeholder/aria-label/<label> has no visible label to
+#     # match — such a field can't be gated by text and stays un-fillable.
 #     label: '(?i)grocery tip.*'
-#     # Escape hatch: a bare <input> with no placeholder/aria-label/<label> has no
-#     # visible label to match (e.g. Amazon Fresh's tip amount box). List its
-#     # id/name here to allow it explicitly — reserve for named, vetted fields.
-#     field_ids: ['tip-widget--edit-form--amount-input']
 
 # Resource caps: distinct Chrome profiles alive at once / tabs within a profile.
 infra:

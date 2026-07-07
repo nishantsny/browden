@@ -128,9 +128,6 @@ class ActionAllowlist:
             amazon.com:
               label: '(?i)grocery tip.*'  # only fields labelled "Grocery Tip …"
               paths: [".*"]
-              # Optional escape hatch: id/name of label-less fields to allow even
-              # though no visible label matches (reserve for named, vetted fields).
-              field_ids: ['tip-widget--edit-form--amount-input']
     * ``infra`` — session/tab caps.
 
     ``read_policy`` gates reads; ``denylist`` is the always-deny list (also
@@ -144,7 +141,6 @@ class ActionAllowlist:
         # the import-time default) leaves it None -> the ~/.browden fallback.
         self._sections: dict[str, Allowlist] = {}
         self._labels: dict[str, dict[str, re.Pattern[str]]] = {}
-        self._field_ids: dict[str, dict[str, frozenset[str]]] = {}
         self.max_browser_sessions = 10
         self.max_tabs_per_session = 20
         self._denylist = Allowlist(_paths_map(sections.get("denylist")))
@@ -158,7 +154,6 @@ class ActionAllowlist:
                 continue
             paths: dict[str, list[str]] = {}
             labels: dict[str, re.Pattern[str]] = {}
-            field_ids: dict[str, frozenset[str]] = {}
             for host, spec in rules.items():
                 # A write-action host must declare a label — what a control may
                 # do is never implicit. "Allow any control" is spelled '.*'.
@@ -168,13 +163,8 @@ class ActionAllowlist:
                         f"(use '.*' to allow any control on this host)")
                 paths[host] = spec.get("paths", [".*"])
                 labels[_canonical_host(host)] = re.compile(spec["label"])
-                # Optional `field_ids`: an opt-in escape hatch for the write-text
-                # action — explicit id/name exceptions for text boxes that carry no
-                # visible label to match (see the fill tool / field_identity_matches).
-                field_ids[_canonical_host(host)] = frozenset(spec.get("field_ids") or [])
             self._sections[action] = Allowlist(paths)
             self._labels[action] = labels
-            self._field_ids[action] = field_ids
 
     @staticmethod
     def _build_read_policy(read_cfg: object, denylist: Allowlist,
@@ -226,12 +216,3 @@ class ActionAllowlist:
     def label_pattern(self, action: str, host: str) -> "re.Pattern[str] | None":
         """Return the required visible-label regex for ``action`` on ``host``, or None if none configured."""
         return (self._labels.get(action) or {}).get(_canonical_host(host))
-
-    def field_ids(self, action: str, host: str) -> frozenset[str]:
-        """Explicit id/name exceptions permitted for ``action`` on ``host``.
-
-        The write-text ``field_ids`` opt-in: text boxes with no visible label to
-        match may still be filled if their ``id``/``name`` is listed here. Empty
-        (deny) for hosts/actions that don't configure it.
-        """
-        return (self._field_ids.get(action) or {}).get(_canonical_host(host), frozenset())

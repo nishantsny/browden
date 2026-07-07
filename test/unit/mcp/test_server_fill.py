@@ -18,22 +18,6 @@ _ENABLED = ActionAllowlist({
     },
 })
 
-# Same, plus an explicit id exception for a label-less field.
-_ENABLED_WITH_IDS = ActionAllowlist({
-    "read": {"website_overrides": {"*": [".*"]}},
-    "write-text": {
-        "amazon.com": {"paths": [".*"], "label": r"(?i)grocery tip.*",
-                       "field_ids": ["tip-widget--edit-form--amount-input"]},
-    },
-})
-
-
-def _labelless_field(fid="tip-widget--edit-form--amount-input"):
-    # No placeholder/aria-label/label — the real Amazon tip input.
-    return {"tag": "input", "id": fid, "classes": [],
-            "attributes": {"type": "number"}, "text": ""}
-
-
 def _field(placeholder="Grocery Tip (optional)", tag="input", **attrs):
     return {"tag": tag, "id": None, "classes": [],
             "attributes": {"type": "number", "placeholder": placeholder, **attrs},
@@ -116,48 +100,6 @@ async def test_field_label_mismatch_is_rejected():
          patch.object(server, "_ALLOWLIST", _ENABLED):
         with pytest.raises(ValidationError, match="write-text label"):
             await server.fill("#card", "0", "h1")
-    session.fill.assert_not_awaited()
-
-
-@pytest.mark.asyncio
-async def test_labelless_field_allowed_by_field_ids_exception():
-    # The Amazon tip input has no visible label, but its id is an explicit
-    # field_ids exception, so the fill is permitted.
-    import browden.mcp.server as server
-    __import__("importlib").reload(server)
-    session = _session(url="https://www.amazon.com/checkout", elements=[_labelless_field()])
-    with patch.object(server._store, "route", return_value=session), \
-         patch.object(server, "_ALLOWLIST", _ENABLED_WITH_IDS):
-        result = await server.fill("#tip-widget--edit-form--amount-input", "0", "h1")
-    assert result["filled"] is True
-    session.fill.assert_awaited_once()
-
-
-@pytest.mark.asyncio
-async def test_labelless_field_rejected_without_field_ids_exception():
-    # Same label-less field, but the host only gates by label -> no match -> refused.
-    import browden.mcp.server as server
-    __import__("importlib").reload(server)
-    session = _session(url="https://www.amazon.com/checkout", elements=[_labelless_field()])
-    with patch.object(server._store, "route", return_value=session), \
-         patch.object(server, "_ALLOWLIST", _ENABLED):
-        with pytest.raises(ValidationError, match="field_ids exception"):
-            await server.fill("#tip-widget--edit-form--amount-input", "0", "h1")
-    session.fill.assert_not_awaited()
-
-
-@pytest.mark.asyncio
-async def test_field_ids_exception_does_not_bypass_integrity():
-    # A non-text control is refused even if its id is in field_ids (Gate 2 first).
-    import browden.mcp.server as server
-    __import__("importlib").reload(server)
-    button = {"tag": "button", "id": "tip-widget--edit-form--amount-input",
-              "classes": [], "attributes": {}, "text": ""}
-    session = _session(url="https://www.amazon.com/checkout", elements=[button])
-    with patch.object(server._store, "route", return_value=session), \
-         patch.object(server, "_ALLOWLIST", _ENABLED_WITH_IDS):
-        with pytest.raises(ValidationError, match="fillable"):
-            await server.fill("#tip-widget--edit-form--amount-input", "0", "h1")
     session.fill.assert_not_awaited()
 
 

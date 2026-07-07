@@ -185,21 +185,3 @@ def field_label_matches(node: dict, pattern: "re.Pattern[str]") -> bool:
     if not node:
         return False
     return any(pattern.fullmatch(label) for label in _field_labels(node))
-
-
-def field_identity_matches(node: dict, allowed_ids: "frozenset[str] | set[str]") -> bool:
-    """True iff the field's ``id`` or ``name`` is an operator-listed exception.
-
-    An explicit, opt-in escape hatch (the write-text ``field_ids`` list) for text
-    boxes that carry **no visible label at all** — e.g. Amazon's Fresh grocery-tip
-    ``<input>``. Matched on the stable ``id``/``name`` the operator vetted, not on
-    user-visible text, so it deliberately departs from :func:`field_label_matches`
-    and should be reserved for named fields. The host/section gate and the
-    :func:`is_fillable_control` integrity checks still apply; this only substitutes
-    for the visible-label match.
-    """
-    if not node or not allowed_ids:
-        return False
-    identities = {node.get("id"), node.get("attributes", {}).get("name")}
-    identities.discard(None)
-    return bool(identities & set(allowed_ids))
