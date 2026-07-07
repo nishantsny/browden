@@ -11,6 +11,11 @@ from .intent import (
 )
 from .tranco import TrancoList
 from .url import validate_url
+from .write_gates import (
+    check_action_host,
+    validate_click_target,
+    validate_write_text_target,
+)
 
 __all__ = [
     "ActionAllowlist",
@@ -18,11 +23,14 @@ __all__ = [
     "ReadPolicy",
     "TrancoList",
     "ValidationError",
+    "check_action_host",
     "classify_anchor_target",
     "field_id_matches",
     "field_label_matches",
     "is_clickable_control",
     "is_fillable_control",
     "label_matches",
+    "validate_click_target",
+    "validate_write_text_target",
     "validate_url",
 ]
