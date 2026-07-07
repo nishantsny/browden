@@ -183,7 +183,7 @@ The "allowlist" policy has **three layers**, evaluated in order (first match win
      path-scope (or effectively block) one Tranco would otherwise wave through
      (`reddit.com: ["^/r/pics/"]`). Setting `"*": [".*"]` re-opens the whole web.
    - **Tranco top-sites** — for any host *without* an override, a local, offline
-     snapshot of the top ~400k most-visited domains (fetched next to your
+     snapshot of the top ~500k most-visited domains (fetched next to your
      allowlist by setup, not committed). A listed domain covers its
      subdomains (`google.com` ⇒ `mail.google.com`) but not lookalikes
      (`google.com.evil.co`). The cutoff (`top_n`) is configurable, and the whole
@@ -318,7 +318,7 @@ into your config dir next to `allowlist.yaml` (not committed), so it doesn't
 update on its own. Refresh it, then restart the service to load the new list:
 
 ```bash
-python3 setup/fetch_tranco.py                    # re-download the top-400k snapshot
+python3 setup/fetch_tranco.py                    # re-download the top-500k snapshot
 systemctl --user restart browden.service   # reload it into the running server
 ```
 

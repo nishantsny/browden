@@ -68,4 +68,4 @@ def test_snapshot_name_and_default_top_n():
     # The name the fetcher writes and the read gate reads must agree; the
     # snapshot is fetched into the config dir, so we do NOT assert it exists.
     assert TRANCO_FILENAME == "tranco-top-400k.txt.gz"
-    assert DEFAULT_TOP_N == 400_000
+    assert DEFAULT_TOP_N == 500_000

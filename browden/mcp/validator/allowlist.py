@@ -101,7 +101,7 @@ class ActionAllowlist:
 
           read:
             enabled: true                 # master switch for the read allowlist
-            tranco: {enabled: true, top_n: 400000}
+            tranco: {enabled: true, top_n: 500000}
             website_overrides:
               "*": [".*"]                 # host -> path regexes; "*" = any host
 
