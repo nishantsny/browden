@@ -179,6 +179,86 @@ async def test_label_mismatch_for_site_is_rejected():
     session.click.assert_not_awaited()
 
 
+# Anchor clicks are gated by *where the href goes* against the READ allowlist.
+# Here amazon.com and wholefoodsmarket.com are readable; nothing else is.
+_ANCHOR_ALLOWLIST = ActionAllowlist({
+    "read": {"enabled": True, "tranco": {"enabled": False},
+             "website_overrides": {"amazon.com": [".*"], "wholefoodsmarket.com": [".*"]}},
+    "click": {"amazon.com": {"paths": [".*"], "label": ".*"}},  # allow any control text
+})
+
+
+def _anchor_node(href, text="link", **attrs):
+    return {"tag": "a", "id": None, "classes": [],
+            "attributes": {"href": href, **attrs}, "text": text}
+
+
+@pytest.mark.asyncio
+async def test_anchor_same_site_relative_clicks():
+    import browden.mcp.server as server
+    __import__("importlib").reload(server)
+    session = _session(url="https://www.amazon.com/checkout/p/x/spc",
+                       elements=[_anchor_node("/checkout/next")])
+    with patch.object(server._store, "route", return_value=session), \
+         patch.object(server, "_ALLOWLIST", _ANCHOR_ALLOWLIST):
+        result = await server.click("a.next", "h1")
+    assert result["clicked"] is True
+
+
+@pytest.mark.asyncio
+async def test_anchor_cross_domain_but_allowlisted_clicks():
+    # The whole point of the read-allowlist rule (vs same-domain): an anchor that
+    # leaves amazon.com for another ALLOW-LISTED site is fine.
+    import browden.mcp.server as server
+    __import__("importlib").reload(server)
+    session = _session(url="https://www.amazon.com/checkout/p/x/spc",
+                       elements=[_anchor_node("https://www.wholefoodsmarket.com/cart")])
+    with patch.object(server._store, "route", return_value=session), \
+         patch.object(server, "_ALLOWLIST", _ANCHOR_ALLOWLIST):
+        result = await server.click("a.wf", "h1")
+    assert result["clicked"] is True
+
+
+@pytest.mark.asyncio
+async def test_anchor_target_off_read_allowlist_rejected():
+    import browden.mcp.server as server
+    __import__("importlib").reload(server)
+    session = _session(url="https://www.amazon.com/checkout/p/x/spc",
+                       elements=[_anchor_node("https://evil.example/x")])
+    with patch.object(server._store, "route", return_value=session), \
+         patch.object(server, "_ALLOWLIST", _ANCHOR_ALLOWLIST):
+        with pytest.raises(ValidationError, match="not on the read allowlist"):
+            await server.click("a.evil", "h1")
+    session.click.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_anchor_javascript_href_clicks_without_target_check():
+    # javascript:void(0) runs in place (the tip "Edit" pattern) — no navigation,
+    # so no read-allowlist check; it clicks even with no target host.
+    import browden.mcp.server as server
+    __import__("importlib").reload(server)
+    session = _session(url="https://www.amazon.com/checkout/p/x/spc",
+                       elements=[_anchor_node("javascript:void(0)", text="Edit")])
+    with patch.object(server._store, "route", return_value=session), \
+         patch.object(server, "_ALLOWLIST", _ANCHOR_ALLOWLIST):
+        result = await server.click("a.edit", "h1")
+    assert result["clicked"] is True
+
+
+@pytest.mark.asyncio
+async def test_anchor_mailto_scheme_rejected():
+    import browden.mcp.server as server
+    __import__("importlib").reload(server)
+    session = _session(url="https://www.amazon.com/checkout/p/x/spc",
+                       elements=[_anchor_node("mailto:help@amazon.com", text="Contact")])
+    with patch.object(server._store, "route", return_value=session), \
+         patch.object(server, "_ALLOWLIST", _ANCHOR_ALLOWLIST):
+        with pytest.raises(ValidationError, match="non-navigational scheme"):
+            await server.click("a.mail", "h1")
+    session.click.assert_not_awaited()
+
+
 @pytest.mark.asyncio
 async def test_page_gone_returns_error():
     import browden.mcp.server as server

@@ -32,18 +32,30 @@ read:
   website_overrides: {}
 
 # ---- write actions --------------------------------------------------------
-# The one write action, `click`. Each host lists the paths it may act on and a
-# REQUIRED `label` regex the control's visible text must fully match. A host not
-# listed here is inert. Labels below are the button text observed on live
-# storefront pages:
-#   amazon.com            <input> value "Add to cart"
+# Two write actions, gated independently: `click` (below) and `write-text`
+# (further down). Each host lists the paths it may act on and a REQUIRED `label`
+# regex the control's visible text must fully match. A host not listed is inert.
+#
+# `click` matches real controls — <button>, role="button", <input type=submit>,
+# and <a> anchors. An anchor can navigate, so it carries one extra gate: where
+# its href would go must itself be on the read allowlist (the same gate as a
+# `navigate`). In-page and `javascript:` hrefs run in place (no check); a
+# cross-domain href is allowed only if that site is allow-listed (NOT a
+# same-domain rule); `mailto:`/`tel:`/… are refused. Labels below are the control
+# text observed on live storefront pages:
+#   amazon.com            <input> value "Add to cart"; plus the Grocery-Tip
+#                         "Edit" anchor and "Apply" button (see the tip note)
 #   wholefoodsmarket.com  quick-add aria-label "Add to Cart, <item>"  AND
 #                         the quantity picker options "<n> est. <weight> lb"
 #   target.com            <button> text "Add to cart"
 click:
   amazon.com:
     paths: [".*"]
-    label: '(?i)add to cart'
+    # "add to cart" plus the two controls needed to set the grocery tip below:
+    # "edit" — the tip's reveal control, an <a> anchor with href="javascript:
+    # void(0)" (an in-page handler, so it passes the anchor target gate) that
+    # un-hides the tip <input>; "apply" — the button that commits the edited tip.
+    label: '(?i)(add to cart|edit|apply)'
   wholefoodsmarket.com:
     paths: [".*"]
     # add-to-cart (aria-label carries a trailing item name) OR the cart's "+"
@@ -64,13 +76,24 @@ click:
 # — its placeholder, aria-label, resolved aria-labelledby / <label>, or title —
 # so you authorize which boxes may be typed into by the name a human reads next to
 # them, never a hidden name/id. A host not listed here can't be typed into.
+#
+# `field_ids` is the escape hatch for a box with NO visible label: a list of exact
+# id/name values that authorize it directly. A field passes if its visible label
+# matches `label` OR its id/name is in `field_ids`. This trusts a non-visible
+# identifier, so it is opt-in per field and never a default — omit it and only
+# visibly-labelled fields are typable.
 write-text:
   amazon.com:
     paths: [".*"]
-    # Only fields whose visible label reads like "Grocery Tip …". NOTE: a bare
-    # <input> with no placeholder/aria-label/<label> has no visible label to
-    # match — such a field can't be gated by text and stays un-fillable.
+    # Fields whose visible label reads like "Grocery Tip …" — OR, via field_ids,
+    # the Amazon Fresh tip <input> itself, which has NO visible label (no
+    # placeholder/aria-label/<label>) and so can't be gated by text. Naming it by
+    # id/name here is what lets the tip be zeroed; pair it with "edit"/"apply" in
+    # the click label above to reveal and commit the change.
     label: '(?i)grocery tip.*'
+    field_ids:
+      - tip-widget--edit-form--amount-input   # the tip <input> id
+      - updateAmountInput                      # ...and its name attribute
 
 # Resource caps: distinct Chrome profiles alive at once / tabs within a profile.
 infra:
