@@ -2,7 +2,7 @@
 
 Tranco (https://tranco-list.eu) is a research-grade ranking of the most-visited
 domains, hardened against the day-to-day churn and manipulation that skew raw
-popularity lists. We keep an offline snapshot of the top 400 000 registrable
+popularity lists. We keep an offline snapshot of the top 500 000 registrable
 domains as ``tranco-top-400k.txt.gz`` *next to the allowlist config* — fetched
 there by ``setup`` on first run (``setup/fetch_tranco.py``), never committed —
 and treat membership as a coarse "this is an established site" signal for the
@@ -22,7 +22,7 @@ from pathlib import Path
 from ...common.logger import logger
 
 TRANCO_FILENAME = "tranco-top-400k.txt.gz"
-DEFAULT_TOP_N = 400_000
+DEFAULT_TOP_N = 500_000
 # The snapshot lives next to the allowlist config; the loader passes that
 # sibling path in. This is only the fallback for constructions that don't know
 # a config dir (e.g. a bare ActionAllowlist(dict)) — the standard ~/.browden.

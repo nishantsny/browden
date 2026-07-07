@@ -24,11 +24,11 @@ read:
   # Popularity is a proxy for "established", NOT "safe".
   tranco:
     enabled: true
-    top_n: 400000
+    top_n: 500000
   # Explicit overrides (host -> path regexes; "*" = any host). An override
   # TRIUMPHS over Tranco. Empty here: every storefront the agent reads
   # (amazon.com, wholefoodsmarket.com, qfc.com [rank ~171k], rei.com) is within
-  # the Tranco top-400k above, so no override is needed.
+  # the Tranco top-500k above, so no override is needed.
   website_overrides: {}
 
 # ---- write actions --------------------------------------------------------

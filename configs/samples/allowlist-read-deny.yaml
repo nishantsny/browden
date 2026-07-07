@@ -57,8 +57,8 @@ read:
     # How far down the ranking to trust. Lower = stricter (fewer, more-
     # established sites). 1..N, where N is the size of your fetched snapshot.
     #   10000  -> only the ~10k most popular domains
-    #   400000 -> the full default snapshot (setup fetches top 400k)
-    top_n: 400000
+    #   500000 -> the full default snapshot (setup fetches top 500k)
+    top_n: 500000
 
   # Option 2 — WEBSITE OVERRIDES (explicit allow; TRIUMPHS over Tranco).
   #   host -> [path regex]. Once a host is listed here, this rule ALONE decides
