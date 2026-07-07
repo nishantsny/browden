@@ -58,7 +58,7 @@ click:
     paths: [".*"]
     label: '(?i)add to cart'
 
-# The text-entry write action, `fill` — a section SEPARATE from `click`, so
+# The text-entry write action, `insert_text` — a section SEPARATE from `click`, so
 # allowing typing never implies allowing clicks. Same shape (per-host `label` +
 # optional `paths`), but the `label` is matched against the field's VISIBLE label
 # — its placeholder, aria-label, resolved aria-labelledby / <label>, or title —

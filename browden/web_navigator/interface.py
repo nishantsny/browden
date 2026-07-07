@@ -124,11 +124,11 @@ class WebNavigatorBackend(ABC):
         """
 
     @abstractmethod
-    def fill_element(self, css_selector: str, value: str) -> dict:
+    def insert_text_element(self, css_selector: str, value: str) -> dict:
         """Find one text field by CSS selector on the active tab and set its value.
 
         The write-text primitive. Like :meth:`click_element`, re-finds the element
         *live* and refuses unless it is the sole match and is displayed + enabled;
         then clears it and types ``value``. Policy — which hosts, which fields,
-        what value — is enforced by the caller (the ``fill`` tool), never here.
+        what value — is enforced by the caller (the ``insert_text`` tool), never here.
         """

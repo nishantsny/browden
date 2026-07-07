@@ -116,7 +116,7 @@ class ActionAllowlist:
 
       The label is mandatory so that allowing every control reads explicitly as
       ``label: '.*'`` in the config, never as the silent default of an omission.
-    * ``write-text`` — the text-entry write action (the ``fill`` tool), a section
+    * ``write-text`` — the text-entry write action (the ``insert_text`` tool), a section
       *separate* from ``click`` so permitting typing never implies permitting
       clicks. Same shape (per-host ``label`` regex + optional ``paths``), but the
       label is matched against the **field's visible label** — its placeholder,

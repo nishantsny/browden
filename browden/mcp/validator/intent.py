@@ -1,10 +1,10 @@
-"""Element-level guard for the write actions (``click`` and ``fill``).
+"""Element-level guard for the write actions (``click`` and ``insert_text``).
 
 The per-action host allowlist (:class:`ActionAllowlist`) decides *where* an action
 may act and, via each host's optional ``label`` regex, *what* target may carry.
 This module enforces only what the allowlist can't: element *integrity*. It
 answers "is this a real, visible, non-decoy control (a clickable one for
-``click``, a text box for ``fill``)?" — never "is this the kind of action I
+``click``, a text box for ``insert_text``)?" — never "is this the kind of action I
 approve of." Judging intent (add-to-cart vs. checkout vs. remove; which fields may
 be typed into) is the operator's job through the allowlist; a host listed with no
 ``label`` means every action on it is permitted by design.
@@ -28,7 +28,7 @@ _AGENT_BAIT_KEYS = (
 
 _CLICKABLE_INPUT_TYPES = ("submit", "button")
 
-# <input> types that hold free text the user types into (the `fill` action). A
+# <input> types that hold free text the user types into (the `insert_text` action). A
 # bare <input> with no type defaults to "text", so it counts too. Deliberately
 # excludes non-text inputs (checkbox/radio/file/range/color/date-pickers/etc.) —
 # those are manipulated by clicking, not typing.
@@ -119,12 +119,12 @@ def is_clickable_control(node: dict) -> bool:
     return is_button or is_submit
 
 
-# -- fill (write-text) side --------------------------------------------------
+# -- insert_text (write-text) side --------------------------------------------------
 
 def is_fillable_control(node: dict) -> bool:
     """True iff ``node`` is a real, visible, non-decoy **text-entry** control.
 
-    The ``fill`` analogue of :func:`is_clickable_control`: integrity + anti-decoy
+    The ``insert_text`` analogue of :func:`is_clickable_control`: integrity + anti-decoy
     only, for the *write-text* action. It says "is this a text box a human could
     type into" — a ``<textarea>``, a text-like ``<input>`` (see
     ``_TEXT_INPUT_TYPES``), or a ``contenteditable`` element — and rejects decoys,

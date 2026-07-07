@@ -234,7 +234,7 @@ async def click(css_selector: str, id: str) -> dict:
 
 @mcp.tool()
 @_tool
-async def fill(css_selector: str, value: str, id: str) -> dict:
+async def insert_text(css_selector: str, value: str, id: str) -> dict:
     """Type text into a field on a tab — the write-text action.
 
     The text-entry counterpart of ``click``. Three server-side gates, all
@@ -254,7 +254,7 @@ async def fill(css_selector: str, value: str, id: str) -> dict:
          to them (never a hidden ``name``/``id``). ``label: '.*'`` opts into any.
     Any gate failing raises a ValidationError and nothing is typed.
     """
-    logger.info(f"Tool called: fill (css_selector={css_selector!r}, id={id!r})")
+    logger.info(f"Tool called: insert_text (css_selector={css_selector!r}, id={id!r})")
     session = _store.route(id)
 
     # Gate 1: per-action host allowlist ('write-text'); denylist vetoes first.
@@ -275,12 +275,12 @@ async def fill(css_selector: str, value: str, id: str) -> dict:
     if total == 0:
         raise ValidationError(f"no element matches selector {css_selector!r}")
     if total > 1:
-        raise ValidationError(f"selector {css_selector!r} is ambiguous ({total} matches) — refusing to fill")
+        raise ValidationError(f"selector {css_selector!r} is ambiguous ({total} matches) — refusing to insert text")
     node = found["elements"][0]
     if not is_fillable_control(node):
         raise ValidationError(
             "selected element is not a fillable text control (or is a "
-            "hidden/disabled/readonly/decoy element) — refusing to fill")
+            "hidden/disabled/readonly/decoy element) — refusing to insert text")
 
     # Gate 3: the host's required write-text label, matched against the field's
     # visible label. Fail closed if it is somehow absent.
@@ -288,10 +288,10 @@ async def fill(css_selector: str, value: str, id: str) -> dict:
     label_re = _ALLOWLIST.label_pattern("write-text", host)
     if label_re is None or not field_label_matches(node, label_re):
         raise ValidationError(
-            f"field label does not match the required write-text label for {host} — refusing to fill")
+            f"field label does not match the required write-text label for {host} — refusing to insert text")
 
-    result = await session.fill(css_selector, value, id=id)
-    logger.info("Tool finished: fill")
+    result = await session.insert_text(css_selector, value, id=id)
+    logger.info("Tool finished: insert_text")
     return result
 
 

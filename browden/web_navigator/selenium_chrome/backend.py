@@ -444,12 +444,12 @@ class SeleniumChromeBackend(WebNavigatorBackend):
             "title": drv.title,
         }
 
-    def fill_element(self, css_selector: str, value: str) -> dict:
+    def insert_text_element(self, css_selector: str, value: str) -> dict:
         drv = self._drv()
         try:
             matches = drv.find_elements(By.CSS_SELECTOR, css_selector)
         except NoSuchWindowException:
-            raise TabNotFoundError("there is no active tab to fill in") from None
+            raise TabNotFoundError("there is no active tab to insert text into") from None
         # Ambiguity is a deny: the policy layer validated exactly one element on the
         # snapshot, so more (or fewer) live matches means the DOM moved under us.
         if len(matches) == 0:
@@ -469,7 +469,7 @@ class SeleniumChromeBackend(WebNavigatorBackend):
             el.send_keys(Keys.DELETE)
         el.send_keys(value)
         return {
-            "filled": True,
+            "inserted": True,
             "value": value,
             "tab_id": drv.current_window_handle,
             "url": drv.current_url,

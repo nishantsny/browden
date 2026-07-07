@@ -1,4 +1,4 @@
-"""Tool-level tests for the fill (write-text) action.
+"""Tool-level tests for the insert_text (write-text) action.
 
 The session is mocked, but the three gates (write-text host allowlist, fillable
 integrity, per-field visible-label) run for real. write-text is a section
@@ -29,8 +29,8 @@ def _session(*, url, elements):
     s.current_url = AsyncMock(return_value=url)
     s.query_selector_all = AsyncMock(
         return_value={"total_count": len(elements), "elements": elements})
-    s.fill = AsyncMock(
-        return_value={"filled": True, "value": "0", "url": url, "title": "Checkout"})
+    s.insert_text = AsyncMock(
+        return_value={"inserted": True, "value": "0", "url": url, "title": "Checkout"})
     return s
 
 
@@ -41,8 +41,8 @@ async def test_shipped_default_denies_fill_everywhere():
     session = _session(url="https://www.amazon.com/checkout", elements=[_field()])
     with patch.object(server._store, "route", return_value=session):
         with pytest.raises(ValidationError, match="not on allowlist"):
-            await server.fill("#tip", "0", "h1")
-    session.fill.assert_not_awaited()
+            await server.insert_text("#tip", "0", "h1")
+    session.insert_text.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -52,14 +52,14 @@ async def test_happy_path_fills():
     session = _session(url="https://www.amazon.com/checkout", elements=[_field()])
     with patch.object(server._store, "route", return_value=session), \
          patch.object(server, "_ALLOWLIST", _ENABLED):
-        result = await server.fill("#tip", "0", "h1")
-    assert result["filled"] is True
-    session.fill.assert_awaited_once_with("#tip", "0", id="h1")
+        result = await server.insert_text("#tip", "0", "h1")
+    assert result["inserted"] is True
+    session.insert_text.assert_awaited_once_with("#tip", "0", id="h1")
 
 
 @pytest.mark.asyncio
 async def test_write_text_is_a_separate_section_from_click():
-    # A host enabled for `click` is NOT thereby enabled for `fill`.
+    # A host enabled for `click` is NOT thereby enabled for `insert_text`.
     import browden.mcp.server as server
     __import__("importlib").reload(server)
     click_only = ActionAllowlist({
@@ -70,8 +70,8 @@ async def test_write_text_is_a_separate_section_from_click():
     with patch.object(server._store, "route", return_value=session), \
          patch.object(server, "_ALLOWLIST", click_only):
         with pytest.raises(ValidationError, match="not on allowlist"):
-            await server.fill("#tip", "0", "h1")
-    session.fill.assert_not_awaited()
+            await server.insert_text("#tip", "0", "h1")
+    session.insert_text.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -84,8 +84,8 @@ async def test_non_text_control_is_rejected():
     with patch.object(server._store, "route", return_value=session), \
          patch.object(server, "_ALLOWLIST", _ENABLED):
         with pytest.raises(ValidationError, match="fillable"):
-            await server.fill("#b", "0", "h1")
-    session.fill.assert_not_awaited()
+            await server.insert_text("#b", "0", "h1")
+    session.insert_text.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -99,8 +99,8 @@ async def test_field_label_mismatch_is_rejected():
     with patch.object(server._store, "route", return_value=session), \
          patch.object(server, "_ALLOWLIST", _ENABLED):
         with pytest.raises(ValidationError, match="write-text label"):
-            await server.fill("#card", "0", "h1")
-    session.fill.assert_not_awaited()
+            await server.insert_text("#card", "0", "h1")
+    session.insert_text.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -111,8 +111,8 @@ async def test_ambiguous_selector_is_rejected():
     with patch.object(server._store, "route", return_value=session), \
          patch.object(server, "_ALLOWLIST", _ENABLED):
         with pytest.raises(ValidationError, match="ambiguous"):
-            await server.fill(".a-input-text", "0", "h1")
-    session.fill.assert_not_awaited()
+            await server.insert_text(".a-input-text", "0", "h1")
+    session.insert_text.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -121,6 +121,6 @@ async def test_page_gone_returns_error():
     __import__("importlib").reload(server)
     session = _session(url=None, elements=[])
     with patch.object(server._store, "route", return_value=session):
-        result = await server.fill("#x", "0", "h1")
+        result = await server.insert_text("#x", "0", "h1")
     assert "error" in result and result["id"] == "h1"
-    session.fill.assert_not_awaited()
+    session.insert_text.assert_not_awaited()

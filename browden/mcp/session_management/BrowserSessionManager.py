@@ -236,10 +236,10 @@ class BrowserSessionManager:
         result["id"] = id
         return result
 
-    async def fill(self, css_selector: str, value: str, *, id: str) -> dict:
+    async def insert_text(self, css_selector: str, value: str, *, id: str) -> dict:
         """Type ``value`` into the (already policy-validated) text field on ``id``.
 
-        The caller (the ``fill`` MCP tool) has gated the host, verified the element
+        The caller (the ``insert_text`` MCP tool) has gated the host, verified the element
         is a fillable text control, and matched the field's visible label on the
         cached snapshot. Here we re-find it live and set its value; the soup cache
         is then invalidated because the DOM has changed.
@@ -249,7 +249,7 @@ class BrowserSessionManager:
 
         def work():
             self._backend.select_tab(handle)
-            return self._backend.fill_element(css_selector, value)
+            return self._backend.insert_text_element(css_selector, value)
         try:
             result = await self._run_driver(work)
         except TabNotFoundError:
@@ -257,7 +257,7 @@ class BrowserSessionManager:
             return self._tab_gone(id)
         self._cache.invalidate(handle)
         self._registry.touch(handle)
-        logger.info(f"fill: set {css_selector!r} on tab {id}")
+        logger.info(f"insert_text: set {css_selector!r} on tab {id}")
         result.pop("tab_id", None)
         result["id"] = id
         return result

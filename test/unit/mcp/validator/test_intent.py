@@ -116,7 +116,7 @@ def test_label_matches_uses_aria_labelledby_text():
     assert not label_matches(btn, re.compile(r"(?i)continue"))
 
 
-# -- fill (write-text): integrity of a text control --------------------------
+# -- insert_text (write-text): integrity of a text control --------------------------
 
 def test_text_inputs_and_textarea_and_contenteditable_are_fillable():
     assert is_fillable_control(node("input", type="text"))
@@ -148,7 +148,7 @@ def test_hidden_disabled_readonly_decoy_not_fillable():
         node("input", type="text", **{"data-target-audience": "ai-agent"}))
 
 
-# -- fill (write-text): the field's visible label is what gets matched --------
+# -- insert_text (write-text): the field's visible label is what gets matched --------
 
 def test_field_label_matches_visible_field_names():
     pat = re.compile(r"(?i)grocery tip.*")

@@ -1,7 +1,7 @@
-"""End-to-end: the fill (write-text) primitive against a real (headless) Chrome.
+"""End-to-end: the insert_text (write-text) primitive against a real (headless) Chrome.
 
-Goes through ``BrowserSessionManager.fill`` -> ``backend.fill_element`` — the same
-path the ``fill`` MCP tool takes after gating — so it exercises the live chain:
+Goes through ``BrowserSessionManager.insert_text`` -> ``backend.insert_text_element`` — the same
+path the ``insert_text`` MCP tool takes after gating — so it exercises the live chain:
 find one element -> visible/enabled -> ``clear()`` + ``send_keys``. Each field
 echoes its live value on ``input`` into an ``<output>``; re-querying that echo
 (the cache is invalidated by the write) proves the value actually landed and input
@@ -41,8 +41,8 @@ async def test_fill_clears_and_replaces_number_input(session):
     blank = await session.new_blank_tab(max_tabs=10)
     page = await session.navigate(DATA_URL, id=blank["id"])
 
-    res = await session.fill("#tip", "0", id=page["id"])
-    assert res["filled"] is True
+    res = await session.insert_text("#tip", "0", id=page["id"])
+    assert res["inserted"] is True
     assert res["value"] == "0"
     assert res["id"] == page["id"]
 
@@ -58,7 +58,7 @@ async def test_fill_replaces_textarea_content(session):
     blank = await session.new_blank_tab(max_tabs=10)
     page = await session.navigate(DATA_URL, id=blank["id"])
 
-    await session.fill("#note", "leave at door", id=page["id"])
+    await session.insert_text("#note", "leave at door", id=page["id"])
 
     echo = await session.query_selector("#noteecho", id=page["id"])
     assert echo["found"] is True
@@ -73,4 +73,4 @@ async def test_fill_refuses_ambiguous_selector(session):
     # Two <output> elements match — the backend refuses rather than type into an
     # arbitrary one (the DOM moved under a snapshot that had validated one match).
     with pytest.raises(ValueError, match="matched 2 live elements"):
-        await session.fill("output", "x", id=page["id"])
+        await session.insert_text("output", "x", id=page["id"])
