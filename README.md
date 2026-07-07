@@ -10,12 +10,7 @@ agent *look at* and *navigate* the web through your own browser. The agent can r
 querying the DOM, take screenshots, but can never execute any write action. The MCP
 is configurable to allow button-clicks and text-fill, allowlisted per website and visible element. 
 
-<!--
-  Demo asset goes here. Record a ~15s clip of an agent opening a tab,
-  navigating, and returning a screenshot, then drop it in and uncomment:
-  ![browden in action](docs/demo.gif)
--->
-
+_Short demo video: https://youtu.be/q-W3Z9nlj58_
 
 ## Disclaimer
 
