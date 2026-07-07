@@ -10,6 +10,36 @@ in use" clash with a warm background session.
 import pytest
 
 
+@pytest.fixture
+def new_backend():
+    """Factory for e2e Chrome backends with guaranteed, centralized teardown.
+
+    Returns a callable ``make(profile_dir) -> SeleniumChromeBackend``. Every
+    backend it hands out is registered and torn down via ``backend.shutdown()``
+    after the test — on pass, on failure, and even if a later setup step raises
+    once the backend has been made. ``shutdown()`` (not ``driver.quit()``) is
+    what actually terminates the Chrome the backend launched; routing all
+    fixtures through here means no test has to write — or can forget — that
+    cleanup, and one backend's failed shutdown never strands the others.
+    """
+    from browden.web_navigator.selenium_chrome import SeleniumChromeBackend
+
+    made = []
+
+    def make(profile_dir):
+        backend = SeleniumChromeBackend(profile_dir=str(profile_dir))
+        made.append(backend)
+        return backend
+
+    yield make
+
+    for backend in made:
+        try:
+            backend.shutdown()
+        except Exception:
+            pass
+
+
 @pytest.fixture(autouse=True)
 def _headless_isolated_chrome(tmp_path, monkeypatch):
     monkeypatch.setenv("BROWDEN_HEADLESS", "1")

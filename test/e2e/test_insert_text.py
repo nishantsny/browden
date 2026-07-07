@@ -11,7 +11,6 @@ import urllib.parse
 
 import pytest
 
-from browden.web_navigator.selenium_chrome import SeleniumChromeBackend
 from browden.mcp.session_management.BrowserSessionManager import BrowserSessionManager
 
 HTML = """<html><body>
@@ -29,11 +28,9 @@ DATA_URL = "data:text/html," + urllib.parse.quote(HTML)
 
 
 @pytest.fixture
-def session(tmp_path):
-    backend = SeleniumChromeBackend(profile_dir=str(tmp_path / "profile"))
-    s = BrowserSessionManager(backend, namespace="e2e", start_reaper=False)
-    yield s
-    backend.shutdown()
+def session(new_backend, tmp_path):
+    backend = new_backend(tmp_path / "profile")
+    return BrowserSessionManager(backend, namespace="e2e", start_reaper=False)
 
 
 @pytest.mark.asyncio

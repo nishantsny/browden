@@ -9,8 +9,6 @@ import urllib.parse
 
 import pytest
 
-from browden.web_navigator.selenium_chrome import SeleniumChromeBackend
-
 
 def _data_url(token: str) -> str:
     # The token is unreserved (letters/underscore), so it survives percent-
@@ -24,10 +22,8 @@ URL_B = _data_url("PAGE_BETA")
 
 
 @pytest.fixture
-def backend(tmp_path):
-    b = SeleniumChromeBackend(profile_dir=str(tmp_path / "profile"))
-    yield b
-    b.shutdown()
+def backend(new_backend, tmp_path):
+    return new_backend(tmp_path / "profile")
 
 
 def test_navigate_changes_active_tab_url(backend):

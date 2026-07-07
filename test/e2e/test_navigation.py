@@ -1,17 +1,13 @@
 import pytest
 
-from browden.web_navigator.selenium_chrome import SeleniumChromeBackend
-
 # A self-contained page so the test is deterministic and offline: a real network
 # host can redirect (amazon.com -> www.amazon.com) and break an exact-URL assert.
 DATA_URL = "data:text/html,<html><head><title>hi</title></head><body>ok</body></html>"
 
 
 @pytest.fixture
-def backend(tmp_path):
-    b = SeleniumChromeBackend(profile_dir=str(tmp_path / "profile"))
-    yield b
-    b.shutdown()
+def backend(new_backend, tmp_path):
+    return new_backend(tmp_path / "profile")
 
 
 def test_new_blank_tab_and_list(backend):
