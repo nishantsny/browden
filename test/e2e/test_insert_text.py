@@ -33,7 +33,7 @@ def session(tmp_path):
     backend = SeleniumChromeBackend(profile_dir=str(tmp_path / "profile"))
     s = BrowserSessionManager(backend, namespace="e2e", start_reaper=False)
     yield s
-    backend._drv().quit()
+    backend.shutdown()
 
 
 @pytest.mark.asyncio

@@ -27,7 +27,7 @@ URL_B = _data_url("PAGE_BETA")
 def backend(tmp_path):
     b = SeleniumChromeBackend(profile_dir=str(tmp_path / "profile"))
     yield b
-    b._drv().quit()
+    b.shutdown()
 
 
 def test_navigate_changes_active_tab_url(backend):

@@ -25,7 +25,7 @@ DATA_URL = (
 def backend(tmp_path):
     b = SeleniumChromeBackend(profile_dir=str(tmp_path / "profile"))
     yield b
-    b._drv().quit()
+    b.shutdown()
 
 
 def test_screenshot_returns_png_bytes(backend):

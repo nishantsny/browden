@@ -11,7 +11,7 @@ DATA_URL = "data:text/html,<html><head><title>hi</title></head><body>ok</body></
 def backend(tmp_path):
     b = SeleniumChromeBackend(profile_dir=str(tmp_path / "profile"))
     yield b
-    b._drv().quit()
+    b.shutdown()
 
 
 def test_new_blank_tab_and_list(backend):

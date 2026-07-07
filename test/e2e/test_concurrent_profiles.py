@@ -36,7 +36,7 @@ def sessions(tmp_path):
     yield sess
     for b in backends:
         try:
-            b._drv().quit()
+            b.shutdown()
         except Exception:
             pass
 
