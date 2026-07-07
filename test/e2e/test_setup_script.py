@@ -42,7 +42,7 @@ def test_onetime_setup_installs_config_and_service(tmp_path):
     unit_path = Path.home() / ".config" / "systemd" / "user" / f"{service}.service"
     # Pin the service to this interpreter so setup skips venv creation/install
     # (this test already runs in an env with browden installed).
-    args = ["--port", str(port), "--config-dir", str(config_dir),
+    args = ["--mode", "service", "--port", str(port), "--config-dir", str(config_dir),
             "--service-name", service, "--python", sys.executable]
 
     # Pre-seed the Tranco snapshot so setup's fetch step is skipped — keeps this
@@ -97,3 +97,31 @@ def test_onetime_setup_installs_config_and_service(tmp_path):
                        capture_output=True)
         unit_path.unlink(missing_ok=True)
         subprocess.run(["systemctl", "--user", "daemon-reload"], capture_output=True)
+
+
+def test_onetime_setup_stdio_mode_prints_config_and_writes_no_service(tmp_path):
+    """The default (stdio) mode does the venv/config/Tranco work and prints an
+    stdio config block — no systemd unit, no SSE port. Needs no systemd session."""
+    service = "browden-stdio-test"
+    config_dir = tmp_path / "cfg"
+    unit_path = Path.home() / ".config" / "systemd" / "user" / f"{service}.service"
+    assert not unit_path.exists(), "unexpected leftover unit from a prior run"
+
+    # Pre-seed Tranco (offline/fast) and pin --python so no venv is built.
+    config_dir.mkdir(parents=True, exist_ok=True)
+    with gzip.open(config_dir / "tranco-top-400k.txt.gz", "wt", encoding="utf-8") as fh:
+        fh.write("google.com\n")
+
+    # --mode stdio is the default, but pass it explicitly to pin the contract.
+    res = _run_setup(["--mode", "stdio", "--config-dir", str(config_dir),
+                      "--service-name", service, "--python", sys.executable])
+    assert res.returncode == 0, f"setup failed:\n{res.stdout}\n{res.stderr}"
+
+    # Config copied, but no service written and no SSE URL advertised.
+    assert (config_dir / "allowlist.yaml").exists()
+    assert not unit_path.exists()
+    assert "/sse" not in res.stdout
+    # The printed block is a stdio launcher for this interpreter.
+    assert '"command"' in res.stdout
+    assert "browden.mcp.server" in res.stdout
+    assert str(config_dir / "allowlist.yaml") in res.stdout

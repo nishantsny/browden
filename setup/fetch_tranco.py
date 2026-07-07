@@ -17,6 +17,14 @@ Tranco (https://tranco-list.eu) publishes a manipulation-resistant ranking; the
 daily "top-1m" download is a zip of ``rank,domain`` CSV rows. We keep the first
 --top-n domains, lower-cased, one per line, gzipped. Popularity is a proxy for
 "established", never a guarantee of "safe" — see the README.
+
+Licensing / reproducibility: the default ``--url`` is Tranco's daily combined
+list, which may aggregate CC BY-NC (non-commercial) and CC BY-SA sources. For
+commercial use — or just a stable, reproducible list — build one restricted to
+permissively-licensed sources at https://tranco-list.eu/configure and pass its
+permanent permalink, e.g.
+``--url https://tranco-list.eu/download/<LIST_ID>/1000000``. See the README's
+Attribution section.
 """
 import argparse
 import csv
@@ -70,7 +78,10 @@ def main() -> None:
                     help=f"config dir the snapshot is written into (default: {DEFAULT_CONFIG_DIR})")
     ap.add_argument("--out", type=Path, default=None,
                     help="explicit output .txt.gz path (overrides --config-dir)")
-    ap.add_argument("--url", default=TRANCO_ZIP_URL, help="Tranco top-1m zip URL")
+    ap.add_argument("--url", default=TRANCO_ZIP_URL,
+                    help="Tranco list zip URL (default: the daily top-1m). Point "
+                         "at a permanent list permalink to pin a specific, "
+                         "permissively-licensed list — see the module docstring.")
     args = ap.parse_args()
     out = args.out if args.out is not None else snapshot_path(args.config_dir)
     fetch(args.top_n, out, args.url)

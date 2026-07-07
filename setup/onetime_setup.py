@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""One-time setup for Browden (SSE transport only; stdio stays manual).
+"""One-time setup for Browden.
 
 Run it with any Python — `python3 setup/onetime_setup.py`; no venv needed first.
 
@@ -13,13 +13,17 @@ What it does, in order:
   3. Fetches the Tranco top-sites snapshot (top 400k) to
      <config-dir>/tranco-top-400k.txt.gz — skipped if it is already there. The
      snapshot is not committed; refresh it later with setup/fetch_tranco.py.
-  4. Writes a systemd *user* unit that serves SSE on <port>, pinned to that venv.
-  5. Runs `systemctl --user daemon-reload` and `enable --now <service-name>`.
-  6. Prints the JSON block to add to your agent's settings by hand.
+  4. Prints the JSON block to add to your agent's settings by hand.
+
+Transport (--mode):
+  * stdio (default) — the agent launches the server on demand; no background
+    service and no port. Does steps 1-3, then prints the stdio config block.
+  * service — additionally writes a systemd *user* unit that serves SSE on
+    <port>, pinned to that venv, and enables it (Linux/systemd only).
 
 Run it again anytime: the venv/install and config copy are idempotent and the
 systemd steps re-apply cleanly. Use --service-name/--port to stand up a second
-instance without disturbing an existing one.
+SSE instance without disturbing an existing one.
 """
 import argparse
 import json
@@ -117,14 +121,14 @@ def ensure_tranco(config_dir: Path, top_n: int) -> Path:
     return dest
 
 
-def write_unit(service_name: str, port: int, allowlist: Path,
+def write_unit(service_name: str, port: int, allowlist_path: Path,
                python: str, display: str) -> Path:
     unit_dir = Path.home() / ".config" / "systemd" / "user"
     unit_dir.mkdir(parents=True, exist_ok=True)
     unit_path = unit_dir / f"{service_name}.service"
     unit_path.write_text(UNIT_TEMPLATE.format(
         service_name=service_name, port=port, repo_root=REPO_ROOT,
-        python=python, allowlist=allowlist, display=display))
+        python=python, allowlist=allowlist_path, display=display))
     print(f"[ok]   wrote systemd user unit {unit_path}")
     return unit_path
 
@@ -147,6 +151,10 @@ def systemd_enable(service_name: str) -> None:
 def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument("--mode", choices=("stdio", "service"), default="stdio",
+                        help="transport to set up: stdio (default) prints the "
+                             "on-demand stdio config; service also installs a "
+                             "systemd user service serving SSE")
     parser.add_argument("--port", type=int, default=DEFAULT_PORT,
                         help=f"SSE port (default: {DEFAULT_PORT})")
     parser.add_argument("--config-dir", default=DEFAULT_CONFIG_DIR,
@@ -166,32 +174,43 @@ def main(argv: list[str] | None = None) -> None:
 
     if not SAMPLE_ALLOWLIST.exists():
         raise SystemExit(f"sample config missing: {SAMPLE_ALLOWLIST} — is the repo intact?")
-    if shutil.which("systemctl") is None:
+    if args.mode == "service" and shutil.which("systemctl") is None:
         raise SystemExit(
-            "systemctl not found — this script only automates the systemd (Linux) "
-            "SSE setup; see the README for manual and stdio instructions.")
+            "systemctl not found — --mode service automates only the systemd "
+            "(Linux) SSE setup; use the default --mode stdio, or see the README.")
 
     config_dir = Path(args.config_dir).expanduser().resolve()
-    allowlist = copy_config(config_dir)
+    allowlist_path = copy_config(config_dir)
     ensure_tranco(config_dir, args.tranco_top_n)
 
     if args.python:
-        service_python = args.python
-        print(f"[ok]   using existing interpreter {service_python} (skipping venv)")
+        python_exe = args.python
+        print(f"[ok]   using existing interpreter {python_exe} (skipping venv)")
     else:
-        service_python = str(ensure_venv(Path(args.venv).expanduser().resolve()))
+        python_exe = str(ensure_venv(Path(args.venv).expanduser().resolve()))
 
-    write_unit(args.service_name, args.port, allowlist, service_python, args.display)
-    systemd_enable(args.service_name)
-
-    agent_json = json.dumps({
-        "mcpServers": {
-            args.service_name: {
-                "type": "sse",
-                "url": f"http://127.0.0.1:{args.port}/sse",
+    if args.mode == "service":
+        write_unit(args.service_name, args.port, allowlist_path, python_exe, args.display)
+        systemd_enable(args.service_name)
+        agent_json = json.dumps({
+            "mcpServers": {
+                args.service_name: {
+                    "type": "sse",
+                    "url": f"http://127.0.0.1:{args.port}/sse",
+                }
             }
-        }
-    }, indent=2)
+        }, indent=2)
+    else:  # stdio — the agent launches the server itself; nothing to run now.
+        agent_json = json.dumps({
+            "mcpServers": {
+                args.service_name: {
+                    "command": python_exe,
+                    "args": ["-m", "browden.mcp.server",
+                             "--allowlist", str(allowlist_path)],
+                    "env": {"DISPLAY": args.display},
+                }
+            }
+        }, indent=2)
     print(
         f"\nDone. Add this to your agent's settings by hand "
         f"(e.g. ~/.claude.json or .gemini/settings.json):\n\n{agent_json}"
@@ -201,7 +220,7 @@ def main(argv: list[str] | None = None) -> None:
         f"{snapshot_path(config_dir)} (not committed). Refresh it anytime with:\n\n"
         f"    python3 setup/fetch_tranco.py --config-dir {config_dir}\n"
     )
-    print(guard_allowlist_note(allowlist))
+    print(guard_allowlist_note(allowlist_path))
 
 
 def guard_allowlist_note(allowlist: Path) -> str:
