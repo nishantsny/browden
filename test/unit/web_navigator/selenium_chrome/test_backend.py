@@ -4,6 +4,7 @@ import pytest
 
 from browden.dependencies.selenium import NoSuchWindowException
 from browden.web_navigator.interface import TabNotFoundError
+import browden.web_navigator.selenium_chrome.backend as backend
 from browden.web_navigator.selenium_chrome.backend import (
     SINGLETON_FILES,
     SeleniumChromeBackend,
@@ -11,6 +12,7 @@ from browden.web_navigator.selenium_chrome.backend import (
     _clear_stale_singletons,
     _find_chrome_binary,
     _launch_chrome,
+    _wellknown_chrome_paths,
 )
 
 
@@ -180,8 +182,38 @@ def test_find_chrome_binary_raises_when_missing(monkeypatch):
         "browden.web_navigator.selenium_chrome.backend.shutil.which",
         lambda name: None,
     )
+    # No well-known install either — must raise, not silently return nothing.
+    monkeypatch.setattr(backend, "_wellknown_chrome_paths", list)
     with pytest.raises(RuntimeError):
         _find_chrome_binary()
+
+
+def test_find_chrome_binary_uses_wellknown_when_not_on_path(monkeypatch, tmp_path):
+    # macOS/Windows: Chrome isn't on PATH but sits at a canonical install path.
+    monkeypatch.delenv("BROWDEN_CHROME_BINARY", raising=False)
+    monkeypatch.delenv("CHROME_BIN", raising=False)
+    monkeypatch.setattr(backend.shutil, "which", lambda name: None)
+    chrome = tmp_path / "Google Chrome"
+    chrome.write_text("#!/bin/sh\n")
+    monkeypatch.setattr(
+        backend, "_wellknown_chrome_paths",
+        lambda: [str(tmp_path / "does-not-exist"), str(chrome)],
+    )
+    assert _find_chrome_binary() == str(chrome)
+
+
+def test_wellknown_chrome_paths_macos():
+    paths = _wellknown_chrome_paths("darwin", "posix")
+    assert any(p.endswith("Contents/MacOS/Google Chrome") for p in paths)
+
+
+def test_wellknown_chrome_paths_windows():
+    paths = _wellknown_chrome_paths("win32", "nt")
+    assert paths and all(p.endswith("chrome.exe") for p in paths)
+
+
+def test_wellknown_chrome_paths_linux_is_empty():
+    assert _wellknown_chrome_paths("linux", "posix") == []
 
 
 @patch("browden.web_navigator.selenium_chrome.backend._wait_for_devtools")

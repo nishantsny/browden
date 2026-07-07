@@ -2,6 +2,7 @@ import argparse
 import asyncio
 import functools
 import os
+import sys
 from collections.abc import Awaitable, Callable
 from pathlib import Path
 
@@ -53,15 +54,35 @@ logger.info("Browden MCP module initialized")
 _store = BrowserSessionStore()
 
 
+def _default_cache_root(platform: str = sys.platform, os_name: str = os.name) -> Path:
+    """Per-OS cache root for browden's shared state.
+
+    An explicit ``XDG_CACHE_HOME`` wins on every platform (tests and power users
+    rely on it); otherwise use each OS's idiomatic cache location — macOS
+    ``~/Library/Caches``, Windows ``%LOCALAPPDATA%``, Linux ``~/.cache``.
+
+    ``platform``/``os_name`` are injectable so the per-OS branches are testable
+    from any host without perturbing ``os.name`` (which flips pathlib's flavour).
+    """
+    xdg = os.environ.get("XDG_CACHE_HOME")
+    if xdg:
+        return Path(xdg)
+    if platform == "darwin":
+        return Path.home() / "Library" / "Caches"
+    if os_name == "nt":
+        local = os.environ.get("LOCALAPPDATA")
+        return Path(local) if local else Path.home() / "AppData" / "Local"
+    return Path.home() / ".cache"
+
+
 def _default_profile_dir() -> Path:
-    """The shared default Chrome profile path (honours ``XDG_CACHE_HOME``).
+    """The shared default Chrome profile path (see ``_default_cache_root``).
 
     Lives here, not in the backend: the backend never falls back to a default —
     the server is the caller that decides which profile, and hands the backend a
     concrete path.
     """
-    root = os.environ.get("XDG_CACHE_HOME") or str(Path.home() / ".cache")
-    return Path(root) / "browden" / "chrome-profile"
+    return _default_cache_root() / "browden" / "chrome-profile"
 
 
 def _resolve_profile_dir(profile_dir: str | None) -> Path:
