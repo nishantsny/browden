@@ -1,6 +1,6 @@
 # browden
 
-[![CI](https://github.com/nishantsny/browser-guard/actions/workflows/e2e.yml/badge.svg)](https://github.com/nishantsny/browser-guard/actions/workflows/e2e.yml)
+[![CI](https://github.com/nishantsny/browden/actions/workflows/e2e.yml/badge.svg)](https://github.com/nishantsny/browden/actions/workflows/e2e.yml)
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](./LICENSE)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue.svg)](https://www.python.org/downloads/)
 [![MCP server](https://img.shields.io/badge/MCP-server-1f6feb.svg)](https://modelcontextprotocol.io)
@@ -383,7 +383,7 @@ on an ephemeral port. The same suites run on every push/PR via the
   and `insert_text` (e.g. select/checkbox, file upload), each held to the same
   allowlist-and-label policy.
 
-All feedback is welcome — please [open an issue](https://github.com/nishantsny/browser-guard/issues).
+All feedback is welcome — please [open an issue](https://github.com/nishantsny/browden/issues).
 
 ## Attribution
 
