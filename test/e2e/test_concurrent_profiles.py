@@ -15,7 +15,6 @@ import urllib.parse
 
 import pytest
 
-from browden.web_navigator.selenium_chrome import SeleniumChromeBackend
 from browden.mcp.session_management.BrowserSessionManager import BrowserSessionManager
 
 N = 5
@@ -27,18 +26,10 @@ def _data_url(token: str) -> str:
 
 
 @pytest.fixture
-def sessions(tmp_path):
-    backends = [
-        SeleniumChromeBackend(profile_dir=str(tmp_path / f"profile-{i}"))
-        for i in range(N)
-    ]
-    sess = [BrowserSessionManager(b, namespace=f"p{i}", start_reaper=False) for i, b in enumerate(backends)]
-    yield sess
-    for b in backends:
-        try:
-            b._drv().quit()
-        except Exception:
-            pass
+def sessions(new_backend, tmp_path):
+    backends = [new_backend(tmp_path / f"profile-{i}") for i in range(N)]
+    return [BrowserSessionManager(b, namespace=f"p{i}", start_reaper=False)
+            for i, b in enumerate(backends)]
 
 
 @pytest.mark.asyncio

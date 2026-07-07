@@ -7,8 +7,6 @@ works on a CI runner or any machine without a display.
 """
 import pytest
 
-from browden.web_navigator.selenium_chrome import SeleniumChromeBackend
-
 PNG_MAGIC = b"\x89PNG\r\n\x1a\n"
 
 # A trivially-rendered page: a full-viewport coloured box so there are real
@@ -22,10 +20,8 @@ DATA_URL = (
 
 
 @pytest.fixture
-def backend(tmp_path):
-    b = SeleniumChromeBackend(profile_dir=str(tmp_path / "profile"))
-    yield b
-    b._drv().quit()
+def backend(new_backend, tmp_path):
+    return new_backend(tmp_path / "profile")
 
 
 def test_screenshot_returns_png_bytes(backend):
