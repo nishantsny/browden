@@ -3,6 +3,7 @@ import re
 import pytest
 
 from browden.mcp.validator import (
+    field_identity_matches,
     field_label_matches,
     is_clickable_control,
     is_fillable_control,
@@ -179,6 +180,19 @@ def test_field_label_requires_full_match_not_substring():
     assert field_label_matches(
         node("input", placeholder="Monthly grocery tip for the driver"),
         re.compile(r"(?i).*grocery tip.*"))
+
+
+def test_field_identity_matches_id_or_name_exceptions():
+    allowed = {"tip-widget--edit-form--amount-input", "someName"}
+    # matched by id
+    assert field_identity_matches(node("input", id="tip-widget--edit-form--amount-input"), allowed)
+    # matched by name attribute
+    assert field_identity_matches(node("input", name="someName"), allowed)
+    # not listed
+    assert not field_identity_matches(node("input", id="other", name="nope"), allowed)
+    # empty exception set never matches (default deny)
+    assert not field_identity_matches(node("input", id="tip-widget--edit-form--amount-input"), set())
+    assert not field_identity_matches(None, allowed)
 
 
 def test_label_matches_requires_full_match_not_substring():

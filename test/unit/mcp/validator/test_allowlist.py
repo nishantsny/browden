@@ -207,3 +207,24 @@ def test_from_file_all_comments_is_deny_all(tmp_path):
 
 # The shipped sample (configs/samples/read_only_on_popular_websites.yaml) is
 # covered by test/unit/configs/test_loader.py through the schema-validating loader.
+
+
+# -- write-text field_ids ----------------------------------------------------
+
+def test_field_ids_parsed_for_write_text():
+    al = ActionAllowlist({
+        "write-text": {
+            "amazon.com": {"paths": [".*"], "label": "(?i)grocery tip.*",
+                           "field_ids": ["tip-widget--edit-form--amount-input", "x"]},
+            "example.com": {"paths": [".*"], "label": ".*"},  # no field_ids
+        },
+    })
+    assert al.field_ids("write-text", "amazon.com") == frozenset(
+        {"tip-widget--edit-form--amount-input", "x"})
+    # www. is canonicalized to the bare host
+    assert al.field_ids("write-text", "www.amazon.com") == frozenset(
+        {"tip-widget--edit-form--amount-input", "x"})
+    # a host without field_ids, an unknown host, and an unknown action all deny
+    assert al.field_ids("write-text", "example.com") == frozenset()
+    assert al.field_ids("write-text", "nope.com") == frozenset()
+    assert al.field_ids("click", "amazon.com") == frozenset()
