@@ -62,8 +62,14 @@ class Allowlist:
     """Per-host path-regex allowlist. Use host key '*' for a wildcard fallback."""
 
     def __init__(self, rules: dict[str, list[str]]):
+        # Canonicalize rule host keys the same way lookups do (lowercase + strip a
+        # leading "www."). Lookups always canonicalize the queried host, so a rule
+        # keyed "www.tracker.com" would otherwise be dead weight — never matched,
+        # never warned about (a denylist entry silently doing nothing). Folding
+        # "www." off the key makes "www.tracker.com" and "tracker.com" the one
+        # rule they visibly read as. "*" canonicalizes to itself.
         self._rules: dict[str, list[re.Pattern[str]]] = {
-            host.lower(): [re.compile(p) for p in patterns]
+            _canonical_host(host): [re.compile(p) for p in patterns]
             for host, patterns in rules.items()
         }
 

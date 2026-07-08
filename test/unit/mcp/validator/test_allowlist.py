@@ -136,6 +136,22 @@ def test_denylist_can_path_scope_and_is_queryable():
     assert not al.is_denied("other.com", "/checkout")
 
 
+def test_www_prefixed_rule_keys_are_canonicalized():
+    # A "www."-prefixed rule key must not be silently inert: lookups strip www.,
+    # so the key is canonicalized to match. A denylist {www.tracker.com} blocks
+    # both www.tracker.com and the bare apex, and matches however you query it.
+    al = ActionAllowlist({"denylist": {"www.tracker.com": [".*"]}})
+    assert al.is_denied("www.tracker.com", "/")
+    assert al.is_denied("tracker.com", "/")
+    # Same for a www.-keyed read override and write-action host.
+    al2 = ActionAllowlist({
+        "read": {"website_overrides": {"www.intranet.corp": [".*"]}},
+        "click": {"www.shop.test": {"paths": [".*"], "label": ".*"}},
+    })
+    assert al2.read_policy.is_allowed("intranet.corp", "/wiki")
+    assert al2.section("click").is_allowed("shop.test", "/cart")
+
+
 def test_empty_denylist_denies_nothing():
     assert not ActionAllowlist({"denylist": {}}).is_denied("anywhere.test", "/x")
 
