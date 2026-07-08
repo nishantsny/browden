@@ -77,6 +77,14 @@ issues:
 - **You point it at your real Chrome profile.** Reusing your logged-in profile
   means the agent can read your logged-in pages — that's the documented
   trade-off, not a leak.
+- **The SSE transport has no authentication.** browden's HTTP/SSE server binds
+  to loopback (`127.0.0.1`) and carries no auth token, so it relies on the host
+  being trusted: *any* local process can drive it. On a single-user desktop —
+  the intended deployment — that is by design. On a **shared or multi-user
+  host** (or if you deliberately bind it to a non-loopback interface) that
+  becomes a real exposure: put it behind your own authenticating reverse proxy
+  or network controls. Running it there without such controls is a deployment
+  choice, not a browden vulnerability.
 - **Anti-bot / ToS enforcement.** browden drives a real, undetected Chrome. Using
   it against sites whose Terms of Service forbid automated access is on the
   operator (see the README disclaimer).
