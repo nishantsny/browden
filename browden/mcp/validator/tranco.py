@@ -96,21 +96,21 @@ def _psl(psl_path_str: str) -> "publicsuffix2.PublicSuffixList":
 
 
 @lru_cache(maxsize=8)
-def _load(path_str: str, top_n: int) -> frozenset[str]:
-    """Read the first ``top_n`` domains from the gzipped snapshot (memoized).
+def _load(path_str: str, tranco_top_n: int) -> frozenset[str]:
+    """Read the first ``tranco_top_n`` domains from the gzipped snapshot (memoized).
 
     Degrades to an empty set (with a warning) if the snapshot is missing, so an
     uninstalled/mispathed data file means "Tranco matches nothing" rather than a
     crash — the denylist and website_overrides still apply.
     """
-    if top_n <= 0:
+    if tranco_top_n <= 0:
         return frozenset()
     path = Path(path_str)
     try:
         with gzip.open(path, "rt", encoding="utf-8") as fh:
             domains = []
             for i, line in enumerate(fh):
-                if i >= top_n:
+                if i >= tranco_top_n:
                     break
                 domain = line.strip()
                 if domain:
@@ -122,22 +122,52 @@ def _load(path_str: str, top_n: int) -> frozenset[str]:
 
 
 class TrancoList:
-    """Membership test against the top-N Tranco registrable domains."""
+    """The Tranco top-N registrable domains as a fast membership set (data only).
 
-    def __init__(self, top_n: int = DEFAULT_TOP_N, path: Path | None = None):
-        # path=None resolves the module-level defaults at call time (not at def
-        # time), so tests can repoint DEFAULT_TRANCO_PATH at a fixture. The PSL
-        # snapshot sits next to the Tranco snapshot (same config dir).
-        self._top_n = top_n
-        self._domains = _load(str(path if path is not None else DEFAULT_TRANCO_PATH), top_n)
-        psl_path = (path.parent / PSL_FILENAME) if path is not None else DEFAULT_PSL_PATH
-        self._psl = _psl(str(psl_path))
+    Pure data: it loads the snapshot and answers *exact* set membership over
+    registrable domains (``google.com``, ``bbc.co.uk``). It deliberately does NOT
+    reduce a host to its registrable domain — that PSL-aware step lives in
+    :class:`PopularityAllowlist`, which owns a ``TrancoList`` and does the
+    reduction before consulting it.
+    """
+
+    def __init__(self, tranco_top_n: int = DEFAULT_TOP_N, path: Path | None = None):
+        # path=None resolves the module-level default at call time (not at def
+        # time), so tests can repoint DEFAULT_TRANCO_PATH at a fixture.
+        self._top_n = tranco_top_n
+        self._domains = _load(str(path if path is not None else DEFAULT_TRANCO_PATH), tranco_top_n)
 
     def __len__(self) -> int:
         return len(self._domains)
 
+    def __contains__(self, registrable_domain: str) -> bool:
+        """Exact membership: is ``registrable_domain`` one of the top-N entries?"""
+        return registrable_domain in self._domains
+
+
+class PopularityAllowlist:
+    """Read-allowlist membership by popularity, PSL-aware — the Tranco read gate.
+
+    Owns the two data sources the popularity gate needs: the :class:`TrancoList`
+    (which registrable domains are established) and the Public Suffix List (where
+    a host's registrable domain begins). It exposes the single decision the read
+    policy asks of it — :meth:`contains` — reducing a host to its registrable
+    domain (eTLD+1) via the PSL and testing that against the Tranco top-N.
+    """
+
+    def __init__(self, tranco_top_n: int = DEFAULT_TOP_N, path: Path | None = None):
+        # `path` is the Tranco snapshot; the PSL snapshot sits beside it (same
+        # config dir). path=None falls back to the module defaults (tests repoint
+        # them); a missing PSL degrades to publicsuffix2's bundled list.
+        self._tranco = TrancoList(tranco_top_n=tranco_top_n, path=path)
+        psl_path = (path.parent / PSL_FILENAME) if path is not None else DEFAULT_PSL_PATH
+        self._psl = _psl(str(psl_path))
+
+    def __len__(self) -> int:
+        return len(self._tranco)
+
     def contains(self, host: str) -> bool:
-        """True iff the host's registrable domain (eTLD+1) is in the top-N.
+        """True iff the host's registrable domain (eTLD+1) is in the Tranco top-N.
 
         The host is reduced to its registrable domain via the Public Suffix List
         (private section + our supplement), so ``mail.google.com`` -> ``google.com``
@@ -150,4 +180,4 @@ class TrancoList:
         if not host:
             return False
         registrable = self._psl.get_sld(host)
-        return registrable is not None and registrable in self._domains
+        return registrable is not None and registrable in self._tranco

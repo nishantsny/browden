@@ -27,11 +27,21 @@ from .url import validate_url
 
 
 def is_url_allowed(allowlist: ActionAllowlist, url: str) -> bool:
-    """Whether the read policy admits ``url`` (host + path).
+    """Whether the read policy admits ``url``.
+
+    The read allowlist governs **web** (http/https) hosts, so that is all this
+    gates. A not-yet-navigated or browser-internal tab — ``about:blank``, the
+    new-tab page, a ``data:`` URL — has no web host to allowlist and is treated as
+    readable; the agent cannot *navigate* to a non-http(s) URL anyway
+    (``validate_url`` refuses one), so such a tab exists only by the human's own
+    action. (Gating non-web schemes like ``file:`` is scheme-allowlisting, tracked
+    separately.)
 
     The shared read predicate: ``list_tabs`` uses it to decide which tabs to keep,
     and :func:`ensure_url_is_in_allowlist` builds the raising gate on it (H2)."""
     p = urlparse(url)
+    if p.scheme not in ("http", "https"):
+        return True
     return allowlist.read_policy.is_allowed(p.hostname or "", p.path)
 
 

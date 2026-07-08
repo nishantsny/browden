@@ -3,7 +3,7 @@ from pathlib import Path
 
 import yaml
 
-from .tranco import DEFAULT_TOP_N, TRANCO_FILENAME, TrancoList, canonical_host
+from .tranco import DEFAULT_TOP_N, TRANCO_FILENAME, PopularityAllowlist, canonical_host
 
 # canonical_host is imported (not redefined) so the denylist/overrides normalize
 # hosts identically to the Tranco check — a trailing dot or leading www. must not
@@ -108,7 +108,7 @@ class ReadPolicy:
     Otherwise it is denied (default-deny).
     """
 
-    def __init__(self, *, enabled: bool, tranco: TrancoList | None,
+    def __init__(self, *, enabled: bool, tranco: PopularityAllowlist | None,
                  overrides: Allowlist, denylist: Allowlist):
         self._enabled = enabled
         self._tranco = tranco
@@ -241,7 +241,7 @@ class ActionAllowlist:
         tranco = None
         if tranco_cfg.get("enabled"):
             snapshot = tranco_path if (tranco_path and tranco_path.exists()) else None
-            tranco = TrancoList(top_n=int(tranco_cfg.get("top_n", DEFAULT_TOP_N)), path=snapshot)
+            tranco = PopularityAllowlist(tranco_top_n=int(tranco_cfg.get("top_n", DEFAULT_TOP_N)), path=snapshot)
         overrides = Allowlist(_paths_map(cfg.get("website_overrides")))
         return ReadPolicy(enabled=enabled, tranco=tranco, overrides=overrides, denylist=denylist)
 
