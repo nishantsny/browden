@@ -56,7 +56,12 @@ def mcp_server(tmp_path_factory):
     sys.path.insert(0, os.path.dirname(__file__))
     from mcp_harness import McpServerHarness
     cache_dir = tmp_path_factory.mktemp("harness_cache")
-    harness = McpServerHarness(cache_dir)
+    # H2: reads of a tab whose live URL isn't allowlisted are now refused. This
+    # offline suite drives host-less about:blank / new-tab pages, so pin a
+    # permissive read policy ("*"); the gate's refusal path is unit-tested.
+    cfg = tmp_path_factory.mktemp("harness_cfg") / "allowlist.yaml"
+    cfg.write_text('read:\n  enabled: true\n  website_overrides:\n    "*": [".*"]\n')
+    harness = McpServerHarness(cache_dir, allowlist_path=cfg)
     harness.start()
     yield harness
     harness.stop()

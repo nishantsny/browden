@@ -20,7 +20,10 @@ from .session_management.BrowserSessionStore import BrowserSessionStore, Unknown
 
 from .validator import (
     ActionAllowlist,
+    ValidationError,
     check_action_host,
+    ensure_url_allowed,
+    tab_gone_envelope,
     validate_click_target,
     validate_url,
     validate_write_text_target,
@@ -124,7 +127,23 @@ async def list_tabs() -> list[dict]:
         if not await session.is_live():
             logger.info(f"list_tabs: skipping dead session (profile={session.profile_dir})")
             return []
-        return await session.list_tabs()  # already wire dicts with composite ids
+        # H2: a tab on a non-allowlisted host is closed, not just hidden — the
+        # agent can neither read it nor learn it exists. The same read gate the
+        # DOM tools use decides: if it raises, close the tab (best-effort — the
+        # last tab can't be closed) and drop it from the listing.
+        kept: list[dict] = []
+        for tab in await session.list_tabs():
+            try:
+                ensure_url_allowed(_ALLOWLIST, tab.get("url") or "")
+            except ValidationError:
+                logger.warning(f"list_tabs: closing non-allowlisted tab {tab.get('url')!r} (id={tab.get('id')})")
+                try:
+                    await session.close_tab(tab["id"])
+                except Exception as e:
+                    logger.warning(f"list_tabs: could not close tab {tab.get('id')}: {e}")
+                continue
+            kept.append(tab)
+        return kept
 
     listings = await asyncio.gather(*(_fetch(s) for s in _store.sessions()))
     logger.info("Tool finished: list_tabs")
@@ -220,8 +239,7 @@ async def click(css_selector: str, id: str) -> dict:
     # checked against the tab's live URL before the element is ever queried.
     url = await session.current_url(id=id)
     if url is None:
-        return {"error": f"tab {id} is no longer open — call list_tabs for current tabs",
-                "id": id}
+        return tab_gone_envelope(id)
     check_action_host(_ALLOWLIST, "click", url)  # raises if denied / host not allowed
 
     # Gates 2-3: fetch the element (limit=2 so ambiguity is detectable), then let
@@ -267,8 +285,7 @@ async def insert_text(css_selector: str, value: str, id: str) -> dict:
     # checked against the tab's live URL before the element is ever queried.
     url = await session.current_url(id=id)
     if url is None:
-        return {"error": f"tab {id} is no longer open — call list_tabs for current tabs",
-                "id": id}
+        return tab_gone_envelope(id)
     check_action_host(_ALLOWLIST, "write-text", url)  # raises if denied / host not allowed
 
     # Gates 2-3: fetch the element (limit=2 so ambiguity is detectable), then let
@@ -299,6 +316,10 @@ async def get_element_by_id(element_id: str, id: str,
     """document.getElementById on a tab — one element node, or found=false (not an error) if absent."""
     logger.info(f"Tool called: get_element_by_id (element_id={element_id!r}, id={id!r})")
     session = _store.route(id)
+    url = await session.current_url(id=id)
+    if url is None:
+        return tab_gone_envelope(id)
+    ensure_url_allowed(_ALLOWLIST, url)  # H2: gate the tab's live url before reading
     result = await session.get_element_by_id(
         element_id, id=id, include_html=include_html, max_html_bytes=max_html_bytes)
     logger.info("Tool finished: get_element_by_id")
@@ -313,6 +334,10 @@ async def get_elements_by_class_name(class_names: str, id: str,
     """document.getElementsByClassName on a tab — space-separated names, element must have ALL. Paginated."""
     logger.info(f"Tool called: get_elements_by_class_name (class_names={class_names!r}, id={id!r})")
     session = _store.route(id)
+    url = await session.current_url(id=id)
+    if url is None:
+        return tab_gone_envelope(id)
+    ensure_url_allowed(_ALLOWLIST, url)  # H2: gate the tab's live url before reading
     result = await session.get_elements_by_class_name(
         class_names, id=id, limit=limit, offset=offset,
         include_html=include_html, max_html_bytes=max_html_bytes)
@@ -327,6 +352,10 @@ async def query_selector(css_selector: str, id: str,
     """document.querySelector on a tab — one element node, or found=false if no match. Invalid CSS → error."""
     logger.info(f"Tool called: query_selector (css_selector={css_selector!r}, id={id!r})")
     session = _store.route(id)
+    url = await session.current_url(id=id)
+    if url is None:
+        return tab_gone_envelope(id)
+    ensure_url_allowed(_ALLOWLIST, url)  # H2: gate the tab's live url before reading
     result = await session.query_selector(
         css_selector, id=id, include_html=include_html, max_html_bytes=max_html_bytes)
     logger.info("Tool finished: query_selector")
@@ -341,6 +370,10 @@ async def query_selector_all(css_selector: str, id: str,
     """document.querySelectorAll on a tab — paginated list of element nodes. Invalid CSS → error."""
     logger.info(f"Tool called: query_selector_all (css_selector={css_selector!r}, id={id!r})")
     session = _store.route(id)
+    url = await session.current_url(id=id)
+    if url is None:
+        return tab_gone_envelope(id)
+    ensure_url_allowed(_ALLOWLIST, url)  # H2: gate the tab's live url before reading
     result = await session.query_selector_all(
         css_selector, id=id, limit=limit, offset=offset,
         include_html=include_html, max_html_bytes=max_html_bytes)
@@ -359,6 +392,10 @@ async def screenshot(id: str):  # -> dict | Image; unannotated: FastMCP can't sc
     """
     logger.info(f"Tool called: screenshot (id={id!r})")
     session = _store.route(id)
+    url = await session.current_url(id=id)
+    if url is None:
+        return tab_gone_envelope(id)
+    ensure_url_allowed(_ALLOWLIST, url)  # H2: gate the tab's live url before reading
     result = await session.screenshot(id=id)
     if isinstance(result, dict):  # tab gone — structured error, not an image
         return result
@@ -372,6 +409,10 @@ async def force_reload_tab(id: str) -> dict:
     """Reload the named tab and refresh its cached DOM."""
     logger.info(f"Tool called: force_reload_page (id={id!r})")
     session = _store.route(id)
+    url = await session.current_url(id=id)
+    if url is None:
+        return tab_gone_envelope(id)
+    ensure_url_allowed(_ALLOWLIST, url)  # H2: gate the tab's live url before reading
     result = await session.force_reload_tab(id=id)
     logger.info("Tool finished: force_reload_page")
     return result
