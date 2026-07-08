@@ -85,6 +85,12 @@ def test_empty_string_rejected(amazon_only):
         validate_url("", allowlist=amazon_only)
 
 
+def test_about_blank_allowed_explicitly(amazon_only):
+    # about:blank is the inert empty page (fresh tab / redirect-guard reset target);
+    # it's allowed directly, without a host rule, on any gate.
+    assert validate_url("about:blank", allowlist=amazon_only) == "about:blank"
+
+
 def test_wildcard_host_allows_unknown(wildcard):
     url = "https://anything.example.com/whatever/path"
     assert validate_url(url, allowlist=wildcard) == url

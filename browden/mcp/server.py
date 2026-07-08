@@ -21,6 +21,7 @@ from .session_management.BrowserSessionStore import BrowserSessionStore, Unknown
 
 from .validator import (
     ActionAllowlist,
+    ValidationError,
     check_action_host,
     validate_click_target,
     validate_url,
@@ -180,24 +181,29 @@ async def _guard_landing(session, id: str, result: dict) -> dict:
     ``validate_url`` only gates the *input* URL, but ``drv.get``/``refresh``
     follow 3xx / meta / JS redirects to any final URL — an open redirect on an
     allowlisted site, or a server-side 302, can land the tab on an unchecked
-    host. Re-validate ``result["url"]`` (the landing) against the read policy;
-    if it is off-allowlist, bounce the tab to ``about:blank`` and return an error
-    envelope rather than leave the browser silently parked off-list.
+    host. Re-gate the landing (``result["url"]``) with the *same* ``validate_url``
+    the navigate input passed through, so it is judged by exactly the same policy
+    on the way out as on the way in. A landing that fails — an off-allowlist host
+    or a scheme the policy doesn't admit (``chrome://`` / ``data:`` / ``blob:`` /
+    …) — bounces the tab to ``about:blank`` and returns an error envelope rather
+    than leaving it silently parked off-list.
+
+    ``about:blank`` needs no special-case here: ``validate_url`` allows it
+    explicitly (it is the inert empty state and our own bounce target), so a tab
+    that legitimately rests there re-gates clean.
     """
     landed = result.get("url")
     if not landed:
         return result  # a tab-gone envelope or similar — nothing navigated
-    p = urlparse(landed)
-    # about:blank, chrome://, data:, ... aren't web landings the read gate governs.
-    if not p.netloc or p.scheme in ("about", "chrome", "data", "blob"):
-        return result
-    if _ALLOWLIST.read_policy.is_allowed(p.hostname or "", p.path):
-        return result
-    logger.warning(f"navigation landed off-allowlist at {landed!r}; bouncing to about:blank")
-    await session.navigate("about:blank", id=id)
-    return {"error": f"navigation left the allowlist (landed on {p.hostname}{p.path}) — "
-                     f"tab reset to about:blank",
-            "id": id, "url": landed}
+    try:
+        validate_url(landed, _ALLOWLIST.read_policy)
+    except ValidationError:
+        logger.warning(f"navigation landed off-allowlist at {landed!r}; bouncing to about:blank")
+        await session.navigate("about:blank", id=id)
+        return {"error": f"navigation left the allowlist (landed on {landed}) — "
+                         f"tab reset to about:blank",
+                "id": id, "url": landed}
+    return result
 
 
 @mcp.tool()
