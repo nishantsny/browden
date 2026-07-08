@@ -1,0 +1,49 @@
+# =============================================================================
+# browden — allowing the agent to read LOCAL FILES (file://).
+#
+# By default browden accepts only https:// URLs: file://, ftp://, data:, etc.
+# are refused no matter what the host allowlist says, so a prompt-injected agent
+# can't be steered into reading /etc/passwd or your SSH keys off disk.
+#
+# A NON-https scheme is re-enabled only for a host you name EXPLICITLY in
+# read.website_overrides. file:// URLs are the special case here: a local path
+# like file:///home/me/report.html carries an *empty* host ("") — there is no
+# domain — so the override key you add is the empty string "".
+#
+# Copy this to ~/.browden/allowlist.yaml (or point --allowlist at it) and edit
+# the path regexes to the exact files/dirs you want readable.
+#
+# SECURITY: file access lets the agent read anything the path regex matches, and
+# the agent reads pages that can carry prompt injection. Scope the paths as
+# tightly as you can. NEVER write `"": [".*"]` — that exposes your whole disk.
+# =============================================================================
+
+denylist: {}
+
+read:
+  enabled: true
+
+  # Normal web browsing still works over https via Tranco (top sites). Drop this
+  # block if you want a file-only profile that reads nothing on the web.
+  tranco:
+    enabled: true
+    top_n: 1000000
+
+  website_overrides:
+    # ---- the file:// opt-in -------------------------------------------------
+    # Key "" == the empty host that file:/// URLs carry. The path regexes below
+    # decide WHICH local paths are readable; everything else on disk stays denied
+    # even though file:// is now an accepted scheme.
+    "":
+      - '^/home/me/reports/.*\.html$'   # file:///home/me/reports/*.html
+      - '^/home/me/exports/.*\.(csv|json)$'
+      # - '^/srv/dashboards/.*'         # add more paths as needed
+    #
+    # NOTE on file://localhost/... : Chrome normalizes file://localhost/x to the
+    # empty-host form file:///x, so the "" entry above already covers it — you do
+    # not need a separate "localhost" key for local files.
+
+# ---- write actions: off (this sample only grants reads) ---------------------
+infra:
+  max_browser_sessions: 10
+  max_tabs_per_session: 20

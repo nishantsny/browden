@@ -1,0 +1,44 @@
+# =============================================================================
+# browden — letting the agent read a LOCAL DEV SERVER (http://localhost:PORT).
+#
+# By default browden accepts only https:// URLs, so a plain-http dev server at
+# http://localhost:8000 is refused. A non-https scheme is re-enabled only for a
+# host you name EXPLICITLY in read.website_overrides — so you opt localhost in by
+# listing it, and a blanket `"*": [".*"]` does NOT silently re-enable http.
+#
+# PORTS ARE NOT PART OF THE HOST MATCH. The host of http://localhost:8000 and
+# http://localhost:8080 is just "localhost" — one `localhost` entry covers
+# :8000, :8080, and every other port at once.
+#
+# Navigate with the explicit scheme, e.g. http://localhost:8000 — a bare
+# "localhost:8000" (no scheme) normalizes to https://localhost:8000 instead.
+#
+# Copy this to ~/.browden/allowlist.yaml (or point --allowlist at it).
+# =============================================================================
+
+denylist: {}
+
+read:
+  enabled: true
+
+  # Normal web browsing over https still works via Tranco. Drop this block for a
+  # localhost-only profile.
+  tranco:
+    enabled: true
+    top_n: 1000000
+
+  website_overrides:
+    # ---- the localhost opt-in ----------------------------------------------
+    # One entry covers http://localhost:8000 AND http://localhost:8080 (and any
+    # other port). [".*"] allows every path; path-scope it if you prefer, e.g.
+    # localhost: ["^/app/.*"].
+    localhost: [".*"]
+    #
+    # 127.0.0.1 is a DIFFERENT host from localhost — add it separately if your
+    # dev server is reached that way:
+    # "127.0.0.1": [".*"]
+
+# ---- write actions: off (this sample only grants reads) ---------------------
+infra:
+  max_browser_sessions: 10
+  max_tabs_per_session: 20

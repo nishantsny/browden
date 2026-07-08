@@ -218,6 +218,8 @@ To refresh the Tranco snapshot, use `python3 setup/fetch_tranco.py` and restart 
 - [`configs/samples/read_only_on_popular_websites.yaml`](configs/samples/read_only_on_popular_websites.yaml)).
 - [`allow_grocery_cart_manipulation.yaml`](configs/samples/allow_grocery_cart_manipulation.yaml)
 - [`configs/samples/allowlist-read-deny.yaml`](configs/samples/allowlist-read-deny.yaml);
+- [`allow_local_file_reads.yaml`](configs/samples/allow_local_file_reads.yaml) — opt `file://` local-file reads in (scoped by path).
+- [`allow_localhost_dev_server.yaml`](configs/samples/allow_localhost_dev_server.yaml) — read a local `http://localhost:PORT` dev server.
 
 
 ## Technical design
