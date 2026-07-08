@@ -76,13 +76,45 @@ def test_non_allowlisted_host_rejected(amazon_only):
 
 
 def test_no_host_rejected(amazon_only):
+    # https passes the scheme gate, so this exercises the missing-authority check.
     with pytest.raises(ValidationError, match="no host"):
-        validate_url("http://", allowlist=amazon_only)
+        validate_url("https://", allowlist=amazon_only)
 
 
 def test_empty_string_rejected(amazon_only):
     with pytest.raises(ValidationError):
         validate_url("", allowlist=amazon_only)
+
+
+# -- M2: scheme allowlisting ------------------------------------------------
+
+def test_non_https_scheme_rejected_by_default(wildcard):
+    # Even with a wide-open host allowlist, only https is accepted by default —
+    # file:// / ftp:// must not slip through on a permissive host rule.
+    for url in ("file:///etc/passwd", "ftp://ftp.example.com/x", "http://amazon.com/"):
+        with pytest.raises(ValidationError, match="scheme not allowed"):
+            validate_url(url, allowlist=wildcard)
+
+
+class _SchemeGate:
+    """A minimal host gate carrying an explicit allowed_schemes (like ReadPolicy)."""
+    def __init__(self, schemes):
+        self.allowed_schemes = frozenset(schemes)
+
+    def is_allowed(self, host, path):
+        return True
+
+
+def test_scheme_opt_in_re_enables_file():
+    gate = _SchemeGate({"https", "file"})
+    # file:// has no authority; with file opted in and the path allowed it passes.
+    assert validate_url("file:///etc/hosts", allowlist=gate) == "file:///etc/hosts"
+
+
+def test_http_opt_in_re_enables_localhost():
+    gate = _SchemeGate({"https", "http"})
+    url = "http://localhost:8000/status"
+    assert validate_url(url, allowlist=gate) == url
 
 
 def test_wildcard_host_allows_unknown(wildcard):

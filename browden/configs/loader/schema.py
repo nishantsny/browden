@@ -7,6 +7,8 @@ The expected shape (see configs/samples/read_only_on_popular_websites.yaml):
 
     read:                         # the read/navigate gate
       enabled: <bool>             # master switch (default true)
+      schemes: [<scheme>, ...]    # URL schemes allowed (default [https]);
+                                  #   add e.g. file to re-enable local-file reads
       tranco:
         enabled: <bool>           # allow the fetched top-sites snapshot
         top_n: <positive int>     # how far down the ranking to allow
@@ -60,11 +62,16 @@ def _check_host_paths(rules, where: str) -> None:
 def _check_read(rules, where: str) -> None:
     if not isinstance(rules, dict):
         raise ConfigError(f"{where}: must be a mapping, got {type(rules).__name__}")
-    unknown = set(rules) - {"enabled", "tranco", "website_overrides"}
+    unknown = set(rules) - {"enabled", "tranco", "website_overrides", "schemes"}
     if unknown:
-        raise ConfigError(f"{where}: unknown keys {sorted(unknown)} (allowed: enabled, tranco, website_overrides)")
+        raise ConfigError(f"{where}: unknown keys {sorted(unknown)} (allowed: enabled, tranco, website_overrides, schemes)")
     if "enabled" in rules and not isinstance(rules["enabled"], bool):
         raise ConfigError(f"{where}.enabled: must be a boolean, got {type(rules['enabled']).__name__}")
+    schemes = rules.get("schemes")
+    if schemes is not None:
+        if not isinstance(schemes, list) or not schemes or not all(
+                isinstance(s, str) and s for s in schemes):
+            raise ConfigError(f"{where}.schemes: must be a non-empty list of scheme strings (e.g. [https, file])")
     tranco = rules.get("tranco")
     if tranco is not None:
         if not isinstance(tranco, dict):

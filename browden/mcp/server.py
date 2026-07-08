@@ -5,6 +5,7 @@ import os
 import sys
 from collections.abc import Awaitable, Callable
 from pathlib import Path
+from urllib.parse import urlparse
 
 
 from ..common.logger import logger
@@ -173,6 +174,32 @@ async def select_tab(id: str) -> dict:
     return {"selected": id}
 
 
+async def _guard_landing(session, id: str, result: dict) -> dict:
+    """Re-check where a navigation/reload actually came to rest.
+
+    ``validate_url`` only gates the *input* URL, but ``drv.get``/``refresh``
+    follow 3xx / meta / JS redirects to any final URL — an open redirect on an
+    allowlisted site, or a server-side 302, can land the tab on an unchecked
+    host. Re-validate ``result["url"]`` (the landing) against the read policy;
+    if it is off-allowlist, bounce the tab to ``about:blank`` and return an error
+    envelope rather than leave the browser silently parked off-list.
+    """
+    landed = result.get("url")
+    if not landed:
+        return result  # a tab-gone envelope or similar — nothing navigated
+    p = urlparse(landed)
+    # about:blank, chrome://, data:, ... aren't web landings the read gate governs.
+    if not p.netloc or p.scheme in ("about", "chrome", "data", "blob"):
+        return result
+    if _ALLOWLIST.read_policy.is_allowed(p.hostname or "", p.path):
+        return result
+    logger.warning(f"navigation landed off-allowlist at {landed!r}; bouncing to about:blank")
+    await session.navigate("about:blank", id=id)
+    return {"error": f"navigation left the allowlist (landed on {p.hostname}{p.path}) — "
+                     f"tab reset to about:blank",
+            "id": id, "url": landed}
+
+
 @mcp.tool()
 @_tool
 async def navigate(url: str, id: str) -> dict:
@@ -181,6 +208,7 @@ async def navigate(url: str, id: str) -> dict:
     url = validate_url(url, _ALLOWLIST.read_policy)
     session = _store.route(id)
     result = await session.navigate(url, id=id)  # wire dict (or the tab-gone envelope)
+    result = await _guard_landing(session, id, result)  # re-gate the post-redirect landing
     logger.info("Tool finished: navigate")
     return result
 
@@ -373,6 +401,7 @@ async def force_reload_tab(id: str) -> dict:
     logger.info(f"Tool called: force_reload_page (id={id!r})")
     session = _store.route(id)
     result = await session.force_reload_tab(id=id)
+    result = await _guard_landing(session, id, result)  # a reload can 302 off-list too
     logger.info("Tool finished: force_reload_page")
     return result
 

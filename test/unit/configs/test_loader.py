@@ -99,6 +99,9 @@ def test_empty_document_is_deny_all(tmp_path):
     ('read:\n  website_overrides:\n    "*": []\n', "non-empty list"),
     ('read:\n  website_overrides:\n    "*": [123]\n', "must be a string"),
     ('read:\n  website_overrides:\n    "*": ["["]\n', "invalid path regex"),
+    ("read:\n  schemes: https\n", "schemes: must be a non-empty list"),
+    ("read:\n  schemes: []\n", "schemes: must be a non-empty list"),
+    ("read:\n  schemes: [1]\n", "schemes: must be a non-empty list"),
     # denylist block
     ("denylist: 5\n", "denylist: expected a mapping"),
     ('denylist:\n  "*": []\n', "non-empty list"),

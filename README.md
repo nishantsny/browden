@@ -191,6 +191,12 @@ The "allowlist" policy has **three layers**, evaluated in order (first match win
      throwaway profile. **Popularity is a proxy for _established_, never a
      guarantee of _safe_** — reputable sites host untrusted content too, so this
      shrinks attack surface rather than removing it.
+   - **schemes** — independent of host, only `https` URLs are accepted by
+     default, so `file://` / `ftp://` / `data:` can never reach Chrome even on a
+     permissive host rule. Widen it deliberately with `read.schemes: [https,
+     file]` (e.g. to allow local-file reads). Navigation also re-checks the URL
+     the browser *lands* on after any redirect, so an open redirect on an
+     allowlisted site can't park the tab off-allowlist.
 3. **write actions** — `click` and `insert_text` are both default-deny, each
    gated by its **own** allowlist section (`click` and `write-text`), so
    permitting typing never implies permitting clicks, or the reverse. Each action
