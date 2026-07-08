@@ -191,6 +191,13 @@ The "allowlist" policy has **three layers**, evaluated in order (first match win
      throwaway profile. **Popularity is a proxy for _established_, never a
      guarantee of _safe_** — reputable sites host untrusted content too, so this
      shrinks attack surface rather than removing it.
+   - **scheme** — orthogonal to host: only `https` is accepted, so `file://` /
+     `ftp://` / `data:` can never reach Chrome even on a permissive host rule. A
+     non-https scheme is allowed only for a host you name **explicitly** in
+     `website_overrides` — e.g. `localhost: [".*"]` re-enables `http://localhost`,
+     and `"": ["^/home/me/.*"]` re-enables `file://` under that path. A blanket
+     `"*": [".*"]` opens the web for https but does **not** silently re-enable
+     non-https everywhere.
 
    Navigation also re-checks the URL the browser *lands* on after any redirect,
    so an open redirect on an allowlisted site (or a server-side 302) can't

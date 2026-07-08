@@ -65,6 +65,15 @@ def test_second_sample_read_deny_is_valid():
     assert al.read_policy.is_allowed("google.com", "/")  # tranco enabled in it
 
 
+def test_empty_host_override_loads_for_file_scheme(tmp_path):
+    # "" is a valid override host (the authority-less host of file:/// URLs), so
+    # an operator can scope which local-file paths reads may reach.
+    f = tmp_path / "allowlist.yaml"
+    f.write_text('read:\n  website_overrides:\n    "": ["^/home/me/.*"]\n')
+    al = load_allowlist(f)
+    assert al.read_policy.override_has_host("")
+
+
 def test_missing_file_raises_config_error(tmp_path):
     with pytest.raises(ConfigError, match="not found"):
         load_allowlist(tmp_path / "nope.yaml")
