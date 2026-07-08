@@ -22,7 +22,7 @@ from pathlib import Path
 from ...common.logger import logger
 
 TRANCO_FILENAME = "tranco-top-400k.txt.gz"
-DEFAULT_TOP_N = 500_000
+DEFAULT_TOP_N = 1_000_000
 # The snapshot lives next to the allowlist config; the loader passes that
 # sibling path in. This is only the fallback for constructions that don't know
 # a config dir (e.g. a bare ActionAllowlist(dict)) — the standard ~/.browden.
