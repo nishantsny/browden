@@ -15,6 +15,7 @@ dependencies = [
   "selenium>=4.20",
   "beautifulsoup4>=4.12",
   "pyyaml>=6.0",
+  "publicsuffix2>=2.2019",
 ]
 
 [project.optional-dependencies]

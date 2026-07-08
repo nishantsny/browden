@@ -9,48 +9,52 @@ and treat membership as a coarse "this is an established site" signal for the
 read gate. Popularity is a proxy for *established*, never a guarantee of *safe*
 — a reputable domain can still serve attacker-controlled content (see README).
 
-The check is fully local: no network at request time, O(number-of-labels) set
-lookups. A host counts as listed if it, or any of its parent domains down to the
-registrable domain, is in the top-N — so ``mail.google.com`` is covered by
-``google.com`` — while lookalikes like ``google.com.evil.com`` are not (the walk
-never reaches a bare public suffix).
+A host is matched by reducing it to its **registrable domain** (eTLD+1) via the
+Public Suffix List, then testing that against the top-N. So ``mail.google.com``
+reduces to ``google.com`` (a listed domain covers its own subdomains), while a
+shared-hosting subdomain like ``evil.github.io`` or ``bucket.s3.amazonaws.com``
+reduces to *itself* — because the PSL (private section included) marks
+``github.io`` / ``s3.amazonaws.com`` as registration boundaries — and so is
+allowed only if it ranks in its own right, never by inheriting the provider's
+stature (finding H1). A lookalike ``google.com.evil.com`` reduces to ``evil.com``.
+
+The check is fully local: no network at request time.
 """
 import gzip
 from functools import lru_cache
 from pathlib import Path
 
+import publicsuffix2
+
 from ...common.logger import logger
 
 TRANCO_FILENAME = "tranco-top-400k.txt.gz"
+PSL_FILENAME = "public_suffix_list.dat"
 DEFAULT_TOP_N = 1_000_000
-# The snapshot lives next to the allowlist config; the loader passes that
-# sibling path in. This is only the fallback for constructions that don't know
+# The snapshots live next to the allowlist config; the loader passes that
+# sibling path in. These are only the fallback for constructions that don't know
 # a config dir (e.g. a bare ActionAllowlist(dict)) — the standard ~/.browden.
 DEFAULT_TRANCO_PATH = (Path("~/.browden") / TRANCO_FILENAME).expanduser()
+DEFAULT_PSL_PATH = (Path("~/.browden") / PSL_FILENAME).expanduser()
 
-# Registrable domains and public suffixes that host mutually-untrusted tenants:
-# anyone can publish arbitrary content at ``<anything>.<suffix>``. A membership
-# hit on one of these must therefore vouch ONLY for the exact host, never as an
-# ancestor of a subdomain — otherwise an attacker-controlled ``evil.<suffix>``
-# inherits the "established site" allow (finding H1). Verified present, high in
-# the shipped Tranco top-500k: amazonaws.com (#8), github.io (#116),
-# workers.dev (#84), translate.goog (an open proxy to any origin), etc. Not
-# exhaustive — a full Public Suffix List is the proper follow-up — but this
-# neutralizes the high-rank offenders that would otherwise wildcard the web. A
-# specific site under one of these is still reachable via a website_overrides
-# entry (which is consulted before Tranco).
-_MULTITENANT_SUFFIXES = frozenset({
-    # object storage / CDNs — every bucket / distribution is attacker-controllable
-    "amazonaws.com", "s3.amazonaws.com", "cloudfront.net", "googleusercontent.com",
-    "storage.googleapis.com", "r2.dev", "blob.core.windows.net",
-    # PaaS / static hosting where anyone can deploy a subdomain
-    "workers.dev", "pages.dev", "web.app", "firebaseapp.com", "netlify.app",
-    "vercel.app", "herokuapp.com", "azurewebsites.net", "github.io",
-    "glitch.me", "repl.co", "translate.goog",
-    # blog / site builders / per-tenant SaaS
-    "blogspot.com", "wordpress.com", "wixsite.com", "weebly.com",
-    "myshopify.com", "sharepoint.com",
-})
+# publicsuffix2 ships its own (older) PSL snapshot; we use it only as a fallback.
+_BUNDLED_PSL_PATH = Path(publicsuffix2.__file__).resolve().parent / PSL_FILENAME
+
+# Multi-tenant hosts that are NOT on the Public Suffix List (verified against the
+# current list), so the PSL alone would let ``<anything>.<suffix>`` inherit the
+# suffix's Tranco rank. We add them as extra suffix rules so those subdomains
+# reduce to themselves and are gated individually, same as any PSL entry. Kept
+# deliberately small — the PSL covers github.io, s3.amazonaws.com, workers.dev,
+# pages.dev, vercel.app, blogspot.com, translate.goog, … — and only holds the
+# genuine PSL absentees. (Escape hatch for a specific host under one of these:
+# add a website_overrides entry, which is consulted before Tranco.)
+_PSL_SUPPLEMENT = (
+    "wordpress.com",            # <name>.wordpress.com blogs
+    "googleusercontent.com",    # lh3.googleusercontent.com, *.googleusercontent user content
+    "storage.googleapis.com",   # <bucket>.storage.googleapis.com
+    "weebly.com",               # <name>.weebly.com sites
+    "sharepoint.com",           # <tenant>.sharepoint.com
+)
 
 
 def canonical_host(host: str) -> str:
@@ -67,6 +71,28 @@ def canonical_host(host: str) -> str:
     if host.startswith("www."):
         host = host[4:]
     return host
+
+
+@lru_cache(maxsize=4)
+def _psl(psl_path_str: str) -> "publicsuffix2.PublicSuffixList":
+    """The Public Suffix List used to reduce a host to its registrable domain.
+
+    Prefers the fresh snapshot ``setup`` fetches next to the config; falls back
+    to publicsuffix2's *bundled* list (older — it can miss newer suffixes such as
+    ``pages.dev`` / ``vercel.app``) with a warning. Either source is extended
+    with :data:`_PSL_SUPPLEMENT` so PSL-absent multi-tenant hosts can't wildcard.
+    Memoized: parsing the ~10k-rule list is not free.
+    """
+    path = Path(psl_path_str) if psl_path_str else None
+    if path and path.exists():
+        lines = path.read_text(encoding="utf-8").splitlines()
+    else:
+        if path:
+            logger.warning(
+                f"PSL snapshot not found at {path}; using publicsuffix2's bundled "
+                f"(older) list — run setup/fetch_psl.py to refresh")
+        lines = _BUNDLED_PSL_PATH.read_text(encoding="utf-8").splitlines()
+    return publicsuffix2.PublicSuffixList(psl_file=lines + list(_PSL_SUPPLEMENT))
 
 
 @lru_cache(maxsize=8)
@@ -99,38 +125,29 @@ class TrancoList:
     """Membership test against the top-N Tranco registrable domains."""
 
     def __init__(self, top_n: int = DEFAULT_TOP_N, path: Path | None = None):
-        # path=None resolves the module-level default at call time (not at
-        # def time), so tests can repoint DEFAULT_TRANCO_PATH at a fixture.
+        # path=None resolves the module-level defaults at call time (not at def
+        # time), so tests can repoint DEFAULT_TRANCO_PATH at a fixture. The PSL
+        # snapshot sits next to the Tranco snapshot (same config dir).
         self._top_n = top_n
         self._domains = _load(str(path if path is not None else DEFAULT_TRANCO_PATH), top_n)
+        psl_path = (path.parent / PSL_FILENAME) if path is not None else DEFAULT_PSL_PATH
+        self._psl = _psl(str(psl_path))
 
     def __len__(self) -> int:
         return len(self._domains)
 
     def contains(self, host: str) -> bool:
-        """True if ``host`` or one of its parent domains is in the top-N.
+        """True iff the host's registrable domain (eTLD+1) is in the top-N.
 
-        Walks from the full host down to the two-label registrable domain, so a
-        listed ``google.com`` covers every ``*.google.com`` subdomain, but the
-        walk stops before a one-label tail — a bare public suffix (``com``,
-        ``co.uk``) is never treated as listed even if it appears in the data.
-
-        A listed :data:`_MULTITENANT_SUFFIXES` host (shared hosting / public
-        suffix) covers only *itself*, never its subdomains — otherwise an
-        attacker-controlled ``evil.blogspot.com`` / ``x.s3.amazonaws.com`` would
-        inherit the allow (finding H1). A more-specific subdomain that is itself
-        listed still matches, because it is checked first on the walk down.
+        The host is reduced to its registrable domain via the Public Suffix List
+        (private section + our supplement), so ``mail.google.com`` -> ``google.com``
+        (a listed domain covers its subdomains), while a shared-hosting subdomain
+        ``evil.github.io`` / ``bucket.s3.amazonaws.com`` reduces to *itself* and so
+        is listed only if it ranks on its own — it never inherits the provider's
+        rank (finding H1). ``google.com.evil.com`` reduces to ``evil.com``.
         """
         host = canonical_host(host)
         if not host:
             return False
-        labels = host.split(".")
-        for i in range(len(labels) - 1):  # stop before the bare TLD
-            candidate = ".".join(labels[i:])
-            if candidate in self._domains:
-                # A multi-tenant suffix reached as an ANCESTOR (i != 0) does not
-                # vouch for the subdomain beneath it; deny rather than wildcard.
-                if i != 0 and candidate in _MULTITENANT_SUFFIXES:
-                    return False
-                return True
-        return False
+        registrable = self._psl.get_sld(host)
+        return registrable is not None and registrable in self._domains
