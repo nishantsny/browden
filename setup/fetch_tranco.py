@@ -9,8 +9,8 @@ fetches it on first run, and you re-run this script to refresh it.
 
 Usage (from the repo root, any Python):
 
-    python3 setup/fetch_tranco.py                        # top 500k -> ~/.browden
-    python3 setup/fetch_tranco.py --top-n 1000000        # the whole list
+    python3 setup/fetch_tranco.py                        # top 1m -> ~/.browden
+    python3 setup/fetch_tranco.py --top-n 500000         # a smaller cutoff
     python3 setup/fetch_tranco.py --config-dir /etc/browden
 
 Tranco (https://tranco-list.eu) publishes a manipulation-resistant ranking; the
@@ -38,7 +38,7 @@ from pathlib import Path
 # These must match browden.mcp.validator.tranco (the read gate that consumes
 # the file) — keep them in sync if either changes.
 TRANCO_FILENAME = "tranco-top-400k.txt.gz"
-DEFAULT_TOP_N = 500_000
+DEFAULT_TOP_N = 1_000_000
 TRANCO_ZIP_URL = "https://tranco-list.eu/top-1m.csv.zip"
 DEFAULT_CONFIG_DIR = Path("~/.browden")
 
