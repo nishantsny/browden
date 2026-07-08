@@ -32,6 +32,7 @@ import sys
 from pathlib import Path
 
 # Sibling modules in setup/; stdlib-only, so importing them needs no venv.
+from fetch_psl import fetch as fetch_psl, snapshot_path as psl_snapshot_path
 from fetch_tranco import DEFAULT_TOP_N, TRANCO_FILENAME, fetch, snapshot_path
 from installers import (  # noqa: F401 — installers/_pythonw_for re-exported for tests
     LinuxSystemdInstaller, MacLaunchdInstaller, ServiceInstaller,
@@ -108,6 +109,26 @@ def ensure_tranco(config_dir: Path, top_n: int) -> Path:
     return dest
 
 
+def ensure_psl(config_dir: Path) -> Path:
+    """Download the Public Suffix List next to the allowlist, unless it's there.
+
+    The read gate reduces a host to its registrable domain with the PSL before
+    testing Tranco, so shared-hosting subdomains can't inherit a provider's rank.
+    Best-effort: a failed download warns and moves on — the gate falls back to
+    publicsuffix2's (older) bundled list until you run setup/fetch_psl.py.
+    """
+    dest = psl_snapshot_path(config_dir)
+    if dest.exists():
+        print(f"[skip] {dest} already exists — leaving it untouched")
+        return dest
+    try:
+        fetch_psl(dest)
+    except Exception as e:  # network error, bad body — never fatal to setup
+        print(f"[warn] could not fetch the Public Suffix List ({e}); the read gate "
+              f"falls back to publicsuffix2's bundled list until you run: python3 setup/fetch_psl.py")
+    return dest
+
+
 # --- agent config blocks ----------------------------------------------------
 
 def sse_config(service_name: str, port: int) -> str:
@@ -160,6 +181,7 @@ def main(argv: list[str] | None = None) -> None:
     config_dir = Path(args.config_dir).expanduser().resolve()
     allowlist = copy_config(config_dir)
     ensure_tranco(config_dir, args.tranco_top_n)
+    ensure_psl(config_dir)
 
     if args.python:
         service_python = args.python
