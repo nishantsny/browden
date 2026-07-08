@@ -24,10 +24,21 @@ def test_read_overrides_wildcard_is_wide_open(al):
 
 
 def test_read_overrides_can_path_scope():
-    al = ActionAllowlist({"read": {"website_overrides": {"example.com": ["^/docs/"]}}})
+    al = ActionAllowlist({"read": {"website_overrides": {"example.com": ["^/docs/.*"]}}})
     assert al.read_policy.is_allowed("example.com", "/docs/intro")
     assert not al.read_policy.is_allowed("example.com", "/secret")
     assert not al.read_policy.is_allowed("other.com", "/docs/intro")
+
+
+def test_path_regex_must_match_whole_path():
+    # A path rule fullmatches: `^/products` alone covers only exactly `/products`,
+    # not a sibling like `/products-secret-admin`. A prefix is spelled `.*`.
+    al = ActionAllowlist({"read": {"website_overrides": {"example.com": ["^/products"]}}})
+    assert al.read_policy.is_allowed("example.com", "/products")
+    assert not al.read_policy.is_allowed("example.com", "/products-secret-admin")
+    assert not al.read_policy.is_allowed("example.com", "/products/42")  # needs ^/products/.*
+    wide = ActionAllowlist({"read": {"website_overrides": {"example.com": ["^/products/.*"]}}})
+    assert wide.read_policy.is_allowed("example.com", "/products/42")
 
 
 def test_read_default_denies_when_nothing_listed():
@@ -76,7 +87,7 @@ def test_override_triumphs_over_tranco_and_can_restrict():
     # it — so it is path-scoped, and Tranco no longer waves the rest through.
     al = ActionAllowlist({"read": {
         "tranco": {"enabled": True, "top_n": 1000},
-        "website_overrides": {"google.com": ["^/allowed/"]},
+        "website_overrides": {"google.com": ["^/allowed/.*"]},
     }})
     assert al.read_policy.is_allowed("google.com", "/allowed/x")
     assert not al.read_policy.is_allowed("google.com", "/other")   # override restricts
@@ -87,7 +98,7 @@ def test_override_triumphs_over_tranco_and_can_restrict():
 def test_wildcard_override_scopes_every_host_over_tranco():
     al = ActionAllowlist({"read": {
         "tranco": {"enabled": True, "top_n": 1000},
-        "website_overrides": {"*": ["^/docs/"]},
+        "website_overrides": {"*": ["^/docs/.*"]},
     }})
     assert al.read_policy.is_allowed("google.com", "/docs/x")  # top site, path matches
     assert not al.read_policy.is_allowed("google.com", "/home")  # scoped even for a top site
@@ -154,7 +165,7 @@ def test_denylist_not_evaded_by_dot_segments():
 
 
 def test_path_scoped_allow_not_escaped_by_dot_segments():
-    al = ActionAllowlist({"read": {"website_overrides": {"example.com": ["^/docs/"]}}})
+    al = ActionAllowlist({"read": {"website_overrides": {"example.com": ["^/docs/.*"]}}})
     assert al.read_policy.is_allowed("example.com", "/docs/x/../intro")  # stays /docs/
     assert not al.read_policy.is_allowed("example.com", "/docs/../secret")  # escapes /docs/
 

@@ -32,9 +32,12 @@ read:
   # An override TRIUMPHS over Tranco: once a host is listed, its rule alone
   # decides — so this both allows sites Tranco doesn't cover AND lets you
   # path-scope (or block) one it would otherwise wave through.
+  # A path regex must match the WHOLE path, so end a prefix rule with `.*`:
+  # `^/manual/.*` covers /manual/intro, whereas `^/manual` matches only exactly
+  # /manual (and would NOT cover a sibling like /manual-secret).
   website_overrides: {}
     # "*": [".*"]          # uncomment to read ANY site
-    # docs.example.com: ["^/manual/"]   # scope a Tranco site to one path
+    # docs.example.com: ["^/manual/.*"]   # scope a Tranco site to one path subtree
 
 # ---- write actions --------------------------------------------------------
 # The one write action, `click`, ships disabled (default-deny). Uncomment to
