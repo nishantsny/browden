@@ -5,6 +5,7 @@ import os
 import sys
 from collections.abc import Awaitable, Callable
 from pathlib import Path
+from urllib.parse import urlparse
 
 
 from ..common.logger import logger
@@ -20,6 +21,7 @@ from .session_management.BrowserSessionStore import BrowserSessionStore, Unknown
 
 from .validator import (
     ActionAllowlist,
+    ValidationError,
     check_action_host,
     validate_click_target,
     validate_url,
@@ -105,6 +107,51 @@ def _tool(fn: Callable[..., Awaitable[dict]]) -> Callable[..., Awaitable[dict]]:
     return wrapper
 
 
+def _read_ok(url: str) -> bool:
+    """Whether the read policy admits ``url`` — the reading counterpart of the
+    gate navigate() applies. Used to stop the DOM-read/screenshot tools acting on
+    a tab that sits on a non-allowlisted site (finding H2)."""
+    p = urlparse(url)
+    return _ALLOWLIST.read_policy.is_allowed(p.hostname or "", p.path)
+
+
+async def _gate_tab_read(session, id: str) -> "dict | None":
+    """Refuse a read tool when the tab's LIVE url isn't on the read allowlist.
+
+    navigate() gates where the agent may *go*, but the DOM-query, screenshot and
+    reload tools acted on whichever tab was focused with no policy check at all —
+    so any tab the human (or a redirect) parked on a non-allowlisted site (a bank,
+    webmail, an internal app) could still be scraped or screenshotted and its
+    content fed to the model (finding H2). Re-check the tab's live url here so the
+    read allowlist governs *reading*, not only navigation.
+
+    Returns the tab-gone envelope if the tab has closed, ``None`` when the read
+    may proceed, and raises :class:`ValidationError` (same refusal shape as
+    navigate/click) when the tab's host is not on the read allowlist.
+    """
+    url = await session.current_url(id=id)
+    if url is None:
+        return {"error": f"tab {id} is no longer open — call list_tabs for current tabs", "id": id}
+    if not _read_ok(url):
+        host = urlparse(url).hostname or url
+        raise ValidationError(
+            f"tab {id} is on {host!r}, which the read allowlist does not permit — refusing to read it")
+    return None
+
+
+def _redact_unlisted(tab: dict) -> dict:
+    """Blank the url/title of a listed tab whose host isn't on the read allowlist.
+
+    list_tabs aggregates every tab across every profile, so without this it leaks
+    the urls/titles of whatever non-allowlisted sites the human has open (H2). The
+    id/selected/profile_dir survive so the agent can still manage the tab (select
+    it, navigate it elsewhere, close it) — it just can't see where it sits."""
+    if _read_ok(tab.get("url") or ""):
+        return tab
+    return {**tab, "url": "<hidden: not on read allowlist>",
+            "title": "<hidden: not on read allowlist>"}
+
+
 # -- navigation tools -------------------------------------------------------
 
 @mcp.tool()
@@ -124,7 +171,9 @@ async def list_tabs() -> list[dict]:
         if not await session.is_live():
             logger.info(f"list_tabs: skipping dead session (profile={session.profile_dir})")
             return []
-        return await session.list_tabs()  # already wire dicts with composite ids
+        # Redact tabs on non-allowlisted hosts so the listing can't leak the
+        # human's other open sites (H2); the id survives so they stay manageable.
+        return [_redact_unlisted(t) for t in await session.list_tabs()]
 
     listings = await asyncio.gather(*(_fetch(s) for s in _store.sessions()))
     logger.info("Tool finished: list_tabs")
@@ -299,6 +348,9 @@ async def get_element_by_id(element_id: str, id: str,
     """document.getElementById on a tab — one element node, or found=false (not an error) if absent."""
     logger.info(f"Tool called: get_element_by_id (element_id={element_id!r}, id={id!r})")
     session = _store.route(id)
+    gone = await _gate_tab_read(session, id)  # H2: read gate on the tab's live url
+    if gone is not None:
+        return gone
     result = await session.get_element_by_id(
         element_id, id=id, include_html=include_html, max_html_bytes=max_html_bytes)
     logger.info("Tool finished: get_element_by_id")
@@ -313,6 +365,9 @@ async def get_elements_by_class_name(class_names: str, id: str,
     """document.getElementsByClassName on a tab — space-separated names, element must have ALL. Paginated."""
     logger.info(f"Tool called: get_elements_by_class_name (class_names={class_names!r}, id={id!r})")
     session = _store.route(id)
+    gone = await _gate_tab_read(session, id)  # H2: read gate on the tab's live url
+    if gone is not None:
+        return gone
     result = await session.get_elements_by_class_name(
         class_names, id=id, limit=limit, offset=offset,
         include_html=include_html, max_html_bytes=max_html_bytes)
@@ -327,6 +382,9 @@ async def query_selector(css_selector: str, id: str,
     """document.querySelector on a tab — one element node, or found=false if no match. Invalid CSS → error."""
     logger.info(f"Tool called: query_selector (css_selector={css_selector!r}, id={id!r})")
     session = _store.route(id)
+    gone = await _gate_tab_read(session, id)  # H2: read gate on the tab's live url
+    if gone is not None:
+        return gone
     result = await session.query_selector(
         css_selector, id=id, include_html=include_html, max_html_bytes=max_html_bytes)
     logger.info("Tool finished: query_selector")
@@ -341,6 +399,9 @@ async def query_selector_all(css_selector: str, id: str,
     """document.querySelectorAll on a tab — paginated list of element nodes. Invalid CSS → error."""
     logger.info(f"Tool called: query_selector_all (css_selector={css_selector!r}, id={id!r})")
     session = _store.route(id)
+    gone = await _gate_tab_read(session, id)  # H2: read gate on the tab's live url
+    if gone is not None:
+        return gone
     result = await session.query_selector_all(
         css_selector, id=id, limit=limit, offset=offset,
         include_html=include_html, max_html_bytes=max_html_bytes)
@@ -359,6 +420,9 @@ async def screenshot(id: str):  # -> dict | Image; unannotated: FastMCP can't sc
     """
     logger.info(f"Tool called: screenshot (id={id!r})")
     session = _store.route(id)
+    gone = await _gate_tab_read(session, id)  # H2: read gate on the tab's live url
+    if gone is not None:
+        return gone
     result = await session.screenshot(id=id)
     if isinstance(result, dict):  # tab gone — structured error, not an image
         return result
@@ -372,6 +436,9 @@ async def force_reload_tab(id: str) -> dict:
     """Reload the named tab and refresh its cached DOM."""
     logger.info(f"Tool called: force_reload_page (id={id!r})")
     session = _store.route(id)
+    gone = await _gate_tab_read(session, id)  # H2: read gate on the tab's live url
+    if gone is not None:
+        return gone
     result = await session.force_reload_tab(id=id)
     logger.info("Tool finished: force_reload_page")
     return result

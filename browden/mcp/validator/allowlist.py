@@ -3,14 +3,11 @@ from pathlib import Path
 
 import yaml
 
-from .tranco import DEFAULT_TOP_N, TRANCO_FILENAME, TrancoList
+from .tranco import DEFAULT_TOP_N, TRANCO_FILENAME, TrancoList, canonical_host
 
-
-def _canonical_host(host: str) -> str:
-    host = host.lower()
-    if host.startswith("www."):
-        host = host[4:]
-    return host
+# canonical_host is imported (not redefined) so the denylist/overrides normalize
+# hosts identically to the Tranco check — a trailing dot or leading www. must not
+# make the two gates disagree (finding H3).
 
 
 _ENCODED_DOT = re.compile(r"%2e", re.IGNORECASE)
@@ -62,8 +59,11 @@ class Allowlist:
     """Per-host path-regex allowlist. Use host key '*' for a wildcard fallback."""
 
     def __init__(self, rules: dict[str, list[str]]):
+        # Keys are canonicalized the SAME way lookups are (see is_allowed), so a
+        # rule written 'www.x.com' or 'x.com.' matches host 'x.com' and vice
+        # versa — no silently-inert denylist entries, no trailing-dot bypass (H3).
         self._rules: dict[str, list[re.Pattern[str]]] = {
-            host.lower(): [re.compile(p) for p in patterns]
+            canonical_host(host): [re.compile(p) for p in patterns]
             for host, patterns in rules.items()
         }
 
@@ -72,7 +72,7 @@ class Allowlist:
         return cls(yaml.safe_load(path.read_text()) or {})
 
     def is_allowed(self, host: str, path: str) -> bool:
-        patterns = self._rules.get(_canonical_host(host)) or self._rules.get("*")
+        patterns = self._rules.get(canonical_host(host)) or self._rules.get("*")
         if not patterns:
             return False
         target = _normalize_path(path or "/")
@@ -85,7 +85,7 @@ class Allowlist:
         denied because its path doesn't match. Lets the read policy give an
         explicit override precedence over Tranco even when it path-scopes a host.
         """
-        return _canonical_host(host) in self._rules or "*" in self._rules
+        return canonical_host(host) in self._rules or "*" in self._rules
 
 
 class ReadPolicy:
@@ -209,14 +209,14 @@ class ActionAllowlist:
                         f"{action}.{host}: a write-action host requires a 'label' regex "
                         f"(use '.*' to allow any control on this host)")
                 paths[host] = spec.get("paths", [".*"])
-                labels[_canonical_host(host)] = re.compile(spec["label"])
+                labels[canonical_host(host)] = re.compile(spec["label"])
                 # Optional: exact field id/name values that authorize a text box
                 # with no visible label (write-text only; see field_id_matches).
                 raw_ids = spec.get("field_ids") or []
                 if raw_ids and not isinstance(raw_ids, list):
                     raise ValueError(
                         f"{action}.{host}: 'field_ids' must be a list of id/name strings")
-                field_ids[_canonical_host(host)] = {str(x) for x in raw_ids}
+                field_ids[canonical_host(host)] = {str(x) for x in raw_ids}
             self._sections[action] = Allowlist(paths)
             self._labels[action] = labels
             self._field_ids[action] = field_ids
@@ -270,7 +270,7 @@ class ActionAllowlist:
 
     def label_pattern(self, action: str, host: str) -> "re.Pattern[str] | None":
         """Return the required visible-label regex for ``action`` on ``host``, or None if none configured."""
-        return (self._labels.get(action) or {}).get(_canonical_host(host))
+        return (self._labels.get(action) or {}).get(canonical_host(host))
 
     def field_ids(self, action: str, host: str) -> "set[str]":
         """The exact field id/name values authorized for ``action`` on ``host`` (empty set if none).
@@ -278,4 +278,4 @@ class ActionAllowlist:
         Only meaningful for ``write-text``: these name label-less text boxes that
         the visible-label regex cannot reach (see ``intent.field_id_matches``).
         """
-        return (self._field_ids.get(action) or {}).get(_canonical_host(host), set())
+        return (self._field_ids.get(action) or {}).get(canonical_host(host), set())
