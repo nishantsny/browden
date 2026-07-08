@@ -97,6 +97,10 @@ clone-and-run on every OS; the notes below only cover what differs per platform.
 - Run the setup command with `python3`.
 - Headed Chrome needs an X11 `DISPLAY` (the `env` block in the stdio config); on
   a machine with no display, set `BROWDEN_HEADLESS=1`.
+- Chrome's renderer sandbox stays **on** by default. If it can't start (an
+  unprivileged container, or a runner with user namespaces disabled) and Chrome
+  refuses to launch, set `BROWDEN_NO_SANDBOX=1` to drop it — a deliberate opt-in,
+  since it weakens renderer isolation.
 - `--mode service` installs a **systemd user** unit.
 
 ### macOS

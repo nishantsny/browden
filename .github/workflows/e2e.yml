@@ -12,6 +12,10 @@ jobs:
       # Drive Chrome with no display; the e2e conftest also sets this, but make
       # it explicit at the job level so any ad-hoc run behaves the same.
       BROWDEN_HEADLESS: "1"
+      # GitHub-hosted runners restrict unprivileged user namespaces, so Chrome's
+      # sandbox can't start here — opt into --no-sandbox for CI only. It is OFF by
+      # default so real deployments keep the renderer sandbox.
+      BROWDEN_NO_SANDBOX: "1"
     steps:
       - uses: actions/checkout@v7
 
