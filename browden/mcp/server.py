@@ -23,6 +23,7 @@ from .validator import (
     check_action_host,
     ensure_url_is_in_allowlist,
     is_url_allowed,
+    tab_gone_envelope,
     validate_click_target,
     validate_url,
     validate_write_text_target,
@@ -236,8 +237,7 @@ async def click(css_selector: str, id: str) -> dict:
     # checked against the tab's live URL before the element is ever queried.
     url = await session.current_url(id=id)
     if url is None:
-        return {"error": f"tab {id} is no longer open — call list_tabs for current tabs",
-                "id": id}
+        return tab_gone_envelope(id)
     check_action_host(_ALLOWLIST, "click", url)  # raises if denied / host not allowed
 
     # Gates 2-3: fetch the element (limit=2 so ambiguity is detectable), then let
@@ -283,8 +283,7 @@ async def insert_text(css_selector: str, value: str, id: str) -> dict:
     # checked against the tab's live URL before the element is ever queried.
     url = await session.current_url(id=id)
     if url is None:
-        return {"error": f"tab {id} is no longer open — call list_tabs for current tabs",
-                "id": id}
+        return tab_gone_envelope(id)
     check_action_host(_ALLOWLIST, "write-text", url)  # raises if denied / host not allowed
 
     # Gates 2-3: fetch the element (limit=2 so ambiguity is detectable), then let
@@ -317,7 +316,7 @@ async def get_element_by_id(element_id: str, id: str,
     session = _store.route(id)
     url = await session.current_url(id=id)
     if url is None:
-        return {"error": f"tab {id} is no longer open — call list_tabs for current tabs", "id": id}
+        return tab_gone_envelope(id)
     ensure_url_is_in_allowlist(_ALLOWLIST, url)  # H2: gate the tab's live url before reading
     result = await session.get_element_by_id(
         element_id, id=id, include_html=include_html, max_html_bytes=max_html_bytes)
@@ -335,7 +334,7 @@ async def get_elements_by_class_name(class_names: str, id: str,
     session = _store.route(id)
     url = await session.current_url(id=id)
     if url is None:
-        return {"error": f"tab {id} is no longer open — call list_tabs for current tabs", "id": id}
+        return tab_gone_envelope(id)
     ensure_url_is_in_allowlist(_ALLOWLIST, url)  # H2: gate the tab's live url before reading
     result = await session.get_elements_by_class_name(
         class_names, id=id, limit=limit, offset=offset,
@@ -353,7 +352,7 @@ async def query_selector(css_selector: str, id: str,
     session = _store.route(id)
     url = await session.current_url(id=id)
     if url is None:
-        return {"error": f"tab {id} is no longer open — call list_tabs for current tabs", "id": id}
+        return tab_gone_envelope(id)
     ensure_url_is_in_allowlist(_ALLOWLIST, url)  # H2: gate the tab's live url before reading
     result = await session.query_selector(
         css_selector, id=id, include_html=include_html, max_html_bytes=max_html_bytes)
@@ -371,7 +370,7 @@ async def query_selector_all(css_selector: str, id: str,
     session = _store.route(id)
     url = await session.current_url(id=id)
     if url is None:
-        return {"error": f"tab {id} is no longer open — call list_tabs for current tabs", "id": id}
+        return tab_gone_envelope(id)
     ensure_url_is_in_allowlist(_ALLOWLIST, url)  # H2: gate the tab's live url before reading
     result = await session.query_selector_all(
         css_selector, id=id, limit=limit, offset=offset,
@@ -393,7 +392,7 @@ async def screenshot(id: str):  # -> dict | Image; unannotated: FastMCP can't sc
     session = _store.route(id)
     url = await session.current_url(id=id)
     if url is None:
-        return {"error": f"tab {id} is no longer open — call list_tabs for current tabs", "id": id}
+        return tab_gone_envelope(id)
     ensure_url_is_in_allowlist(_ALLOWLIST, url)  # H2: gate the tab's live url before reading
     result = await session.screenshot(id=id)
     if isinstance(result, dict):  # tab gone — structured error, not an image
@@ -410,7 +409,7 @@ async def force_reload_tab(id: str) -> dict:
     session = _store.route(id)
     url = await session.current_url(id=id)
     if url is None:
-        return {"error": f"tab {id} is no longer open — call list_tabs for current tabs", "id": id}
+        return tab_gone_envelope(id)
     ensure_url_is_in_allowlist(_ALLOWLIST, url)  # H2: gate the tab's live url before reading
     result = await session.force_reload_tab(id=id)
     logger.info("Tool finished: force_reload_page")

@@ -1,6 +1,6 @@
 """Re-export validator symbols for convenient access."""
 from .allowlist import ActionAllowlist, Allowlist, ReadPolicy
-from .errors import ValidationError
+from .errors import ValidationError, tab_gone_envelope
 from .intent import (
     classify_anchor_target,
     field_id_matches,
@@ -35,6 +35,7 @@ __all__ = [
     "is_fillable_control",
     "is_url_allowed",
     "label_matches",
+    "tab_gone_envelope",
     "validate_click_target",
     "validate_write_text_target",
     "validate_url",
