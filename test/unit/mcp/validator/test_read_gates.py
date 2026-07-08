@@ -124,6 +124,13 @@ def test_ensure_url_allowed_raises_for_denied_host():
         ensure_url_allowed(_READ, "https://evil.example.com/x")
 
 
+def test_ensure_url_allowed_always_allows_about_blank():
+    # A not-yet-navigated tab is readable even under a host-specific policy or a
+    # denylist — there is no site to gate.
+    ensure_url_allowed(_READ, "about:blank")    # no raise
+    ensure_url_allowed(_DENIED, "about:blank")  # no raise
+
+
 def test_ensure_url_allowed_respects_denylist():
     with pytest.raises(ValidationError):
         ensure_url_allowed(_DENIED, AMAZON)
