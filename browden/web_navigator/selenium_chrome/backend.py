@@ -136,8 +136,8 @@ def _chrome_args(profile_dir: Path, port: int) -> list[str]:
         f"--user-data-dir={profile_dir}",
         f"--remote-debugging-port={port}",
         # Chrome >= 111 rejects DevTools websocket connections from a foreign
-        # origin unless this is set; Selenium's attach needs it. Scope it to the
-        # exact loopback origin Selenium connects from (debuggerAddress is
+        # origin unless this is set; Selenium's attach needs it. Scope allowed
+        # origins to the exact loopback origin Selenium connects from (debuggerAddress is
         # 127.0.0.1:<port>) rather than "*": a wildcard lets *any* origin that
         # reaches this ephemeral loopback port — another local process, or a
         # malicious local page scanning loopback ports — open a DevTools
