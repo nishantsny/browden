@@ -13,6 +13,7 @@ import shutil
 import subprocess
 import sys
 from pathlib import Path
+from xml.sax.saxutils import escape as _xml_escape
 
 # Service-description templates live as standalone files in setup/templates/ so
 # each is editable/reviewable in its native format. Each is a str.format() string
@@ -151,9 +152,14 @@ class WindowsTaskInstaller(ServiceInstaller):
             port=self.port, allowlist=self.allowlist)
 
     def render(self) -> str:
+        # Every placeholder lands in XML *element text*, so XML-escape each value:
+        # a path or service name containing & < > (e.g. C:\dev\a&b\…) would
+        # otherwise produce malformed XML that Task Scheduler refuses to import.
         return _template("windows-task.xml").format(
-            service_name=self.service_name, repo_root=self.repo_root,
-            pythonw=_pythonw_for(self.python), launcher=self.launcher_path())
+            service_name=_xml_escape(self.service_name),
+            repo_root=_xml_escape(str(self.repo_root)),
+            pythonw=_xml_escape(_pythonw_for(self.python)),
+            launcher=_xml_escape(str(self.launcher_path())))
 
     def install(self) -> None:
         self._require("schtasks")

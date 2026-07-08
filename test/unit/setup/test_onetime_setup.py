@@ -86,6 +86,20 @@ def test_windows_task_render(tmp_path):
     assert "allowlist.yaml" in launcher
 
 
+def test_windows_task_render_xml_escapes_values(tmp_path):
+    # A path or service name with XML-special chars (&, <, >) must not corrupt the
+    # task XML — it has to escape and still parse.
+    import xml.etree.ElementTree as ET
+    inst = ots.WindowsTaskInstaller(
+        service_name="browden & <co>", port=22050,
+        allowlist=tmp_path / "allowlist.yaml", python="/venv/bin/python",
+        display=":0", repo_root=tmp_path / "a & b", config_dir=tmp_path / "cfg")
+    task = inst.render()
+    assert "browden & <co>" not in task          # raw specials never leak through
+    assert "browden &amp; &lt;co&gt;" in task     # escaped instead
+    ET.fromstring(task)                           # and the result is well-formed XML
+
+
 # -- agent config blocks -----------------------------------------------------
 
 def test_sse_config_points_at_port():
