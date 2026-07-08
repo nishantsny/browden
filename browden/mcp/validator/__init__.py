@@ -9,12 +9,11 @@ from .intent import (
     is_fillable_control,
     label_matches,
 )
-from .tranco import PopularityAllowlist, TrancoList
-from .url import validate_url
+from .popularity import PopularityAllowlist
+from .tranco import TrancoList
+from .read_gates import ensure_url_is_in_allowlist, is_url_allowed, validate_url
 from .write_gates import (
     check_action_host,
-    ensure_url_is_in_allowlist,
-    is_url_allowed,
     validate_click_target,
     validate_write_text_target,
 )

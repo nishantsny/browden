@@ -11,8 +11,6 @@ from browden.mcp.validator import (
     ActionAllowlist,
     ValidationError,
     check_action_host,
-    ensure_url_is_in_allowlist,
-    is_url_allowed,
     validate_click_target,
     validate_write_text_target,
 )
@@ -142,33 +140,5 @@ def test_write_text_label_mismatch_rejected():
     with pytest.raises(ValidationError, match="required write-text label"):
         validate_write_text_target(_ALLOWLIST, AMAZON, "#x", _found(_field(label="Coupon code")))
 
-
-# -- read gate: is_url_allowed / ensure_url_is_in_allowlist (H2) --------------
-
-def test_is_url_allowed_reflects_read_policy():
-    assert is_url_allowed(_ALLOWLIST, AMAZON)                       # amazon override
-    assert not is_url_allowed(_ALLOWLIST, "https://evil.example.com/x")
-
-
-def test_ensure_url_is_in_allowlist_passes_for_allowed_host():
-    ensure_url_is_in_allowlist(_ALLOWLIST, AMAZON)  # no raise
-
-
-def test_ensure_url_is_in_allowlist_raises_for_denied_host():
-    with pytest.raises(ValidationError, match="read allowlist"):
-        ensure_url_is_in_allowlist(_ALLOWLIST, "https://evil.example.com/x")
-
-
-def test_ensure_url_is_in_allowlist_respects_denylist():
-    # _DENIED denylists amazon.com — a denied host is never read-allowed either.
-    assert not is_url_allowed(_DENIED, AMAZON)
-    with pytest.raises(ValidationError):
-        ensure_url_is_in_allowlist(_DENIED, AMAZON)
-
-
-def test_read_gate_exempts_non_web_schemes():
-    # about:blank / new-tab / data: have no web host the read allowlist governs,
-    # so a read tool never refuses them (the agent can't navigate there anyway).
-    for u in ("about:blank", "data:text/html,<h1>hi</h1>", "chrome://newtab/"):
-        assert is_url_allowed(_ALLOWLIST, u)
-        ensure_url_is_in_allowlist(_ALLOWLIST, u)  # no raise
+# The read-tool gate (is_url_allowed / ensure_url_is_in_allowlist) now lives in
+# read_gates.py and is covered by test_read_gates.py.

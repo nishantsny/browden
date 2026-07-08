@@ -3,7 +3,8 @@ from pathlib import Path
 
 import yaml
 
-from .tranco import DEFAULT_TOP_N, TRANCO_FILENAME, PopularityAllowlist, canonical_host
+from .popularity import PopularityAllowlist
+from .tranco import DEFAULT_TOP_N, TRANCO_FILENAME, canonical_host
 
 # canonical_host is imported (not redefined) so the denylist/overrides normalize
 # hosts identically to the Tranco check — a trailing dot or leading www. must not

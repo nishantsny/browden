@@ -133,7 +133,7 @@ async def list_tabs() -> list[dict]:
         kept: list[dict] = []
         for tab in await session.list_tabs():
             url = tab.get("url")
-            if url and is_url_allowed(_ALLOWLIST, url):
+            if url and is_url_allowed(_ALLOWLIST.read_policy, url):
                 kept.append(tab)
                 continue
             logger.warning(f"list_tabs: closing non-allowlisted tab {url!r} (id={tab.get('id')})")

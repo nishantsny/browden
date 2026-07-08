@@ -41,13 +41,14 @@ async def test_mcp_endpoint(mcp_server, mcp_client_session):
         query_data = json.loads(query_res.content[0].text)
         assert query_data.get("found") is True
     
-        # navigate to a data: URL -> MCP tool error (no netloc => validate_url rejects) -> proves validator is live
+        # navigate to a hostless URL -> MCP tool error (no netloc => validate_url
+        # rejects) -> proves the validator is live even under the '*' read policy.
         try:
-            nav_res = await mcp_client.call_tool("navigate", {"url": "data:text/html,<h1>Hello</h1>", "id": tab_id})
+            nav_res = await mcp_client.call_tool("navigate", {"url": "http://", "id": tab_id})
             assert nav_res.isError is True
         except Exception as e:
             # MCP python SDK might raise an exception if it's a server error
-            assert "ValidationError" in str(e) or "not allowed" in str(e) or "error" in str(e).lower()
+            assert "ValidationError" in str(e) or "no host" in str(e).lower() or "error" in str(e).lower()
     
         # screenshot returns image content
         screenshot_res = await mcp_client.call_tool("screenshot", {"id": tab_id})

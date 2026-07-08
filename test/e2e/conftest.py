@@ -56,7 +56,12 @@ def mcp_server(tmp_path_factory):
     sys.path.insert(0, os.path.dirname(__file__))
     from mcp_harness import McpServerHarness
     cache_dir = tmp_path_factory.mktemp("harness_cache")
-    harness = McpServerHarness(cache_dir)
+    # A read-anything policy ('*' override): these tests exercise tool mechanics
+    # and profile isolation, not the read gate itself (that is test_psl_read_gate).
+    # '*' keeps the offline blank tabs the suite drives readable and un-closed.
+    allowlist = cache_dir / "allowlist.yaml"
+    allowlist.write_text('read:\n  website_overrides:\n    "*": [".*"]\n')
+    harness = McpServerHarness(cache_dir, allowlist_path=allowlist)
     harness.start()
     yield harness
     harness.stop()

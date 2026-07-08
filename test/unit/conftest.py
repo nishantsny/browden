@@ -19,7 +19,8 @@ from pathlib import Path
 
 import pytest
 
-from browden.mcp.validator import tranco
+from browden.mcp.validator import popularity, tranco
+from browden.mcp.validator.popularity import PopularityAllowlist
 
 TRANCO_FIXTURE = Path(__file__).resolve().parents[1] / "fixtures" / "tranco-mini.txt.gz"
 
@@ -27,11 +28,14 @@ TRANCO_FIXTURE = Path(__file__).resolve().parents[1] / "fixtures" / "tranco-mini
 @pytest.fixture(autouse=True)
 def _tranco_fixture(monkeypatch):
     """Pin the default Tranco snapshot at the mini fixture and the default PSL at
-    publicsuffix2's bundled list; clear both memoized loaders around each test."""
+    publicsuffix2's bundled list; clear the memoized loaders (and the per-instance
+    ``contains`` cache) around each test."""
     monkeypatch.setattr(tranco, "DEFAULT_TRANCO_PATH", TRANCO_FIXTURE)
-    monkeypatch.setattr(tranco, "DEFAULT_PSL_PATH", tranco._BUNDLED_PSL_PATH)
+    monkeypatch.setattr(popularity, "DEFAULT_PSL_PATH", popularity._BUNDLED_PSL_PATH)
     tranco._load.cache_clear()
-    tranco._psl.cache_clear()
+    popularity._psl.cache_clear()
+    PopularityAllowlist.contains.cache_clear()
     yield
     tranco._load.cache_clear()
-    tranco._psl.cache_clear()
+    popularity._psl.cache_clear()
+    PopularityAllowlist.contains.cache_clear()
