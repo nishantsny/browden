@@ -13,6 +13,43 @@ def _canonical_host(host: str) -> str:
     return host
 
 
+_ENCODED_DOT = re.compile(r"%2e", re.IGNORECASE)
+
+
+def _normalize_path(path: str) -> str:
+    """Resolve a URL path to the form Chrome will actually request.
+
+    Chrome decodes an encoded dot (``%2e`` -> ``.``) and removes ``.`` / ``..``
+    segments *before* issuing the request, so a path-scoped allow/deny rule has
+    to match against that resolved form. Otherwise ``/./checkout``,
+    ``/x/../checkout`` and ``/%2e/checkout`` all slip past a rule written for
+    ``/checkout`` (a denylist entry is evaded; a path-scoped allow is escaped).
+
+    We decode *only* the dot encoding, not the whole path: Chrome keeps other
+    percent-escapes (notably ``%2f``) encoded, so a blanket unquote would diverge
+    from the browser in the other direction. A leading and trailing slash are
+    preserved because both are significant to the regexes rules are written with.
+    """
+    decoded = _ENCODED_DOT.sub(".", path)
+    leading = decoded.startswith("/")
+    trailing = decoded.endswith("/")
+    out: list[str] = []
+    for seg in decoded.split("/"):
+        if seg in ("", "."):
+            continue
+        if seg == "..":
+            if out:
+                out.pop()
+            continue
+        out.append(seg)
+    normalized = "/".join(out)
+    if leading:
+        normalized = "/" + normalized
+    if trailing and not normalized.endswith("/"):
+        normalized += "/"
+    return normalized or "/"
+
+
 def _paths_map(rules: object) -> dict[str, list[str]]:
     """Coerce a host -> (list | {'paths': ...}) mapping to host -> [path regex]."""
     out: dict[str, list[str]] = {}
@@ -38,7 +75,7 @@ class Allowlist:
         patterns = self._rules.get(_canonical_host(host)) or self._rules.get("*")
         if not patterns:
             return False
-        target = path or "/"
+        target = _normalize_path(path or "/")
         return any(p.match(target) for p in patterns)
 
     def covers(self, host: str) -> bool:

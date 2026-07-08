@@ -140,6 +140,31 @@ def test_empty_denylist_denies_nothing():
     assert not ActionAllowlist({"denylist": {}}).is_denied("anywhere.test", "/x")
 
 
+# -- M1: path normalization (dot-segments / %2e can't evade path rules) --------
+
+def test_denylist_not_evaded_by_dot_segments():
+    # Chrome resolves ./ , /../ and %2e before requesting, so a path-scoped
+    # denylist must decide on the same normalized form it will actually fetch.
+    al = ActionAllowlist({"denylist": {"reddit.com": ["^/checkout"]}})
+    assert al.is_denied("reddit.com", "/checkout")
+    assert al.is_denied("reddit.com", "/./checkout")      # was a bypass
+    assert al.is_denied("reddit.com", "/x/../checkout")   # was a bypass
+    assert al.is_denied("reddit.com", "/%2e/checkout")    # was a bypass
+    assert al.is_denied("reddit.com", "/%2E/checkout")    # case-insensitive
+
+
+def test_path_scoped_allow_not_escaped_by_dot_segments():
+    al = ActionAllowlist({"read": {"website_overrides": {"example.com": ["^/docs/"]}}})
+    assert al.read_policy.is_allowed("example.com", "/docs/x/../intro")  # stays /docs/
+    assert not al.read_policy.is_allowed("example.com", "/docs/../secret")  # escapes /docs/
+
+
+def test_normalization_preserves_trailing_slash():
+    al = ActionAllowlist({"denylist": {"example.com": ["^/checkout/$"]}})
+    assert al.is_denied("example.com", "/checkout/")
+    assert al.is_denied("example.com", "/./checkout/")
+
+
 # -- write (click) section ----------------------------------------------------
 
 def test_click_allows_listed_hosts(al):
