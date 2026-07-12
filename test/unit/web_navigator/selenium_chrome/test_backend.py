@@ -152,9 +152,22 @@ def test_chrome_args_enable_swiftshader_when_headless(tmp_path, monkeypatch):
 def test_chrome_args_headless_when_enabled(tmp_path, monkeypatch):
     monkeypatch.setenv("BROWDEN_CHROME_BINARY", "/usr/bin/google-chrome")
     monkeypatch.setenv("BROWDEN_HEADLESS", "1")
+    monkeypatch.delenv("BROWDEN_NO_SANDBOX", raising=False)
     args = _chrome_args(tmp_path / "profile", 9222)
     assert "--headless=new" in args
-    assert "--no-sandbox" in args
+    # Headless does NOT imply --no-sandbox: the sandbox stays on unless opted out.
+    assert "--no-sandbox" not in args
+
+
+def test_chrome_args_no_sandbox_is_opt_in(tmp_path, monkeypatch):
+    monkeypatch.setenv("BROWDEN_CHROME_BINARY", "/usr/bin/google-chrome")
+    monkeypatch.delenv("BROWDEN_NO_SANDBOX", raising=False)
+    # Off by default, even headless — the sandbox is kept.
+    monkeypatch.setenv("BROWDEN_HEADLESS", "1")
+    assert "--no-sandbox" not in _chrome_args(tmp_path / "profile", 9222)
+    # Explicit opt-in adds it (the escape hatch for sandbox-less hosts).
+    monkeypatch.setenv("BROWDEN_NO_SANDBOX", "1")
+    assert "--no-sandbox" in _chrome_args(tmp_path / "profile", 9222)
 
 
 def test_find_chrome_binary_honours_env(monkeypatch):

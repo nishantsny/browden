@@ -46,6 +46,20 @@ def _headless_enabled() -> bool:
     return os.environ.get("BROWDEN_HEADLESS", "").strip().lower() in ("1", "true", "yes", "on")
 
 
+def _no_sandbox_enabled() -> bool:
+    """Whether to disable Chrome's setuid/namespace sandbox — opt-in only.
+
+    ``--no-sandbox`` removes a layer of renderer isolation, exactly the layer
+    that matters most on the hosts browden is likely to drive at hostile web
+    content (CI runners, containers, servers). So we default to keeping the
+    sandbox ON and only drop it when the operator explicitly sets
+    ``BROWDEN_NO_SANDBOX=1`` (or true/yes/on) — the escape hatch for environments
+    where the sandbox cannot start, e.g. an unprivileged container or a runner
+    with user namespaces disabled, where Chrome would otherwise refuse to launch.
+    """
+    return os.environ.get("BROWDEN_NO_SANDBOX", "").strip().lower() in ("1", "true", "yes", "on")
+
+
 SINGLETON_FILES = ("SingletonLock", "SingletonCookie", "SingletonSocket")
 TITLE_WAIT_SECONDS = 3
 # Cold Chrome starts can take several seconds; under concurrent launches (many
@@ -160,15 +174,21 @@ def _chrome_args(profile_dir: Path, port: int) -> list[str]:
         "--enable-unsafe-swiftshader",
     ]
     if _headless_enabled():
-        # New headless mode + the flags a sandboxed CI container needs.
+        # New headless mode + the flags a headless container commonly needs.
         logger.info("Launching Chrome headless")
         args += [
             "--headless=new",
-            "--no-sandbox",
             "--disable-dev-shm-usage",
             "--disable-gpu",
             "--window-size=1280,1024",
         ]
+    if _no_sandbox_enabled():
+        # Opt-in only (BROWDEN_NO_SANDBOX): dropping the sandbox weakens renderer
+        # isolation, so we never do it implicitly — not even headless. Set it on
+        # hosts where the sandbox can't start (unprivileged containers, runners
+        # with user namespaces disabled).
+        logger.warning("Launching Chrome with --no-sandbox (renderer sandbox disabled)")
+        args.append("--no-sandbox")
     return args
 
 
