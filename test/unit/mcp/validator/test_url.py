@@ -14,13 +14,14 @@ def amazon_only() -> Allowlist:
                 "^/dp/[A-Z0-9]{10}/?$",
                 "^/[^/]+/dp/[A-Z0-9]{10}/?$",
             ]
-        }
+        },
+        full_match=True,
     )
 
 
 @pytest.fixture
 def wildcard() -> Allowlist:
-    return Allowlist({"*": [".*"]})
+    return Allowlist({"*": [".*"]}, full_match=True)
 
 
 def test_bare_domain_normalized(amazon_only):
@@ -97,7 +98,7 @@ def test_wildcard_host_allows_unknown(wildcard):
 
 
 def test_wildcard_host_only_used_when_specific_host_absent():
-    al = Allowlist({"amazon.com": ["^/$"], "*": [".*"]})
+    al = Allowlist({"amazon.com": ["^/$"], "*": [".*"]}, full_match=True)
     # Specific host has its own (narrow) rules — fallback NOT used.
     with pytest.raises(ValidationError):
         validate_url("https://amazon.com/orders", allowlist=al)

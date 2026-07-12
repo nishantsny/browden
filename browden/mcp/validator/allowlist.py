@@ -61,7 +61,7 @@ def _paths_map(rules: object) -> dict[str, list[str]]:
 class Allowlist:
     """Per-host path-regex allowlist. Use host key '*' for a wildcard fallback."""
 
-    def __init__(self, rules: dict[str, list[str]], full_match: bool):
+    def __init__(self, rules: dict[str, list[str]], *, full_match: bool):
         # full_match decides how a path regex is applied. An *allow* list
         # fullmatches (the pattern must span the whole path) so `^/products` does
         # not also wave through `/products-secret-admin`. A *denylist* is the
@@ -231,7 +231,7 @@ class ActionAllowlist:
                     raise ValueError(
                         f"{action}.{host}: 'field_ids' must be a list of id/name strings")
                 field_ids[_canonical_host(host)] = {str(x) for x in raw_ids}
-            self._sections[action] = Allowlist(paths)
+            self._sections[action] = Allowlist(paths, full_match=True)
             self._labels[action] = labels
             self._field_ids[action] = field_ids
 
@@ -256,7 +256,7 @@ class ActionAllowlist:
         if tranco_cfg.get("enabled"):
             snapshot = tranco_path if (tranco_path and tranco_path.exists()) else None
             tranco = TrancoList(top_n=int(tranco_cfg.get("top_n", DEFAULT_TOP_N)), path=snapshot)
-        overrides = Allowlist(_paths_map(cfg.get("website_overrides")))
+        overrides = Allowlist(_paths_map(cfg.get("website_overrides")), full_match=True)
         return ReadPolicy(enabled=enabled, tranco=tranco, overrides=overrides, denylist=denylist)
 
     @classmethod
@@ -280,7 +280,7 @@ class ActionAllowlist:
 
     def section(self, action: str) -> Allowlist:
         """Return the host/path allowlist for ``action``; an empty (deny-all) one if unlisted."""
-        return self._sections.get(action) or Allowlist({})
+        return self._sections.get(action) or Allowlist({}, full_match=True)
 
     def label_pattern(self, action: str, host: str) -> "re.Pattern[str] | None":
         """Return the required visible-label regex for ``action`` on ``host``, or None if none configured."""
