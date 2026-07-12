@@ -23,7 +23,7 @@ from .intent import (
     is_fillable_control,
     label_matches,
 )
-from .url import validate_url
+from .read_gates import validate_url
 
 
 def check_action_host(allowlist: ActionAllowlist, action: str, url: str) -> None:
