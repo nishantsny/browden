@@ -13,7 +13,14 @@ def validate_url(url: str, allowlist: "Allowlist | ReadPolicy") -> str:
     :class:`ReadPolicy` (denylist + Tranco + overrides). A URL is accepted iff
     that gate allows its ``(host, path)``. For allowed URLs, query strings and
     fragments are preserved unchanged — so '?', '#', '&' and spaces pass through.
+
+    ``about:blank`` is allowed explicitly: it is the inert empty page (a fresh
+    tab, and the target the redirect guard resets a tab to), it carries nothing
+    readable, and it has no host to write an allowlist rule against — so the gate
+    admits it directly rather than forcing an unexpressible host rule.
     """
+    if url == "about:blank":
+        return url
     if "://" not in url:
         url = "https://" + url
     p = urlparse(url)

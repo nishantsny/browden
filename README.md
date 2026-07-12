@@ -191,6 +191,11 @@ The "allowlist" policy has **three layers**, evaluated in order (first match win
      throwaway profile. **Popularity is a proxy for _established_, never a
      guarantee of _safe_** — reputable sites host untrusted content too, so this
      shrinks attack surface rather than removing it.
+
+   Navigation also re-checks the URL the browser *lands* on after any redirect,
+   so an open redirect on an allowlisted site (or a server-side 302) can't
+   silently park the tab off-allowlist — an off-list landing resets the tab to
+   `about:blank`.
 3. **write actions** — `click` and `insert_text` are both default-deny, each
    gated by its **own** allowlist section (`click` and `write-text`), so
    permitting typing never implies permitting clicks, or the reverse. Each action

@@ -275,6 +275,71 @@ async def test_navigate_tool_requires_page_id():
 
 
 @pytest.mark.asyncio
+async def test_navigate_bounces_when_redirect_lands_off_allowlist():
+    # M3: the input URL is allowlisted (amazon.com is a Tranco top-site) but a
+    # redirect parks the tab on an off-allowlist host. The landing is re-gated,
+    # the tab is bounced to about:blank, and an error envelope is returned.
+    import browden.mcp.server as server
+    importlib.reload(server)
+    session = _fake_session(navigate={
+        "id": "pre-h1", "url": "https://nonexistent-xyz-9876.test/landing",
+        "title": "t", "selected": "True", "profile_dir": "/p"})
+    with patch.object(server._store, "route", return_value=session):
+        result = await server.navigate("amazon.com", "pre-h1")
+    assert "error" in result and "allowlist" in result["error"]
+    # The tab was reset: navigate awaited again with about:blank.
+    assert any(c.args and c.args[0] == "about:blank"
+               for c in session.navigate.await_args_list)
+
+
+@pytest.mark.asyncio
+async def test_navigate_passes_through_when_landing_on_allowlist():
+    # A landing that is itself allowlisted (amazon.com, Tranco) is returned as-is,
+    # with no about:blank bounce.
+    import browden.mcp.server as server
+    importlib.reload(server)
+    session = _fake_session(navigate={
+        "id": "pre-h1", "url": "https://amazon.com/", "title": "t",
+        "selected": "True", "profile_dir": "/p"})
+    with patch.object(server._store, "route", return_value=session):
+        result = await server.navigate("amazon.com", "pre-h1")
+    assert result["url"] == "https://amazon.com/"
+    assert all(c.args[0] != "about:blank"
+               for c in session.navigate.await_args_list if c.args)
+
+
+@pytest.mark.asyncio
+async def test_navigate_bounces_when_landing_on_non_web_scheme():
+    # A redirect that ends on a non-allowlisted scheme (chrome://, data:, blob:)
+    # is NOT waved through — it is re-gated like any other landing and bounced.
+    import browden.mcp.server as server
+    importlib.reload(server)
+    session = _fake_session(navigate={
+        "id": "pre-h1", "url": "chrome://settings/", "title": "t",
+        "selected": "True", "profile_dir": "/p"})
+    with patch.object(server._store, "route", return_value=session):
+        result = await server.navigate("amazon.com", "pre-h1")
+    assert "error" in result
+    assert any(c.args and c.args[0] == "about:blank"
+               for c in session.navigate.await_args_list)
+
+
+@pytest.mark.asyncio
+async def test_navigate_passes_through_when_landing_on_about_blank():
+    # about:blank is allowed explicitly by validate_url, so a tab that legitimately
+    # rests there (e.g. a 204/download) re-gates clean — no bounce, no error.
+    import browden.mcp.server as server
+    importlib.reload(server)
+    session = _fake_session(navigate={
+        "id": "pre-h1", "url": "about:blank", "title": "", "selected": "True",
+        "profile_dir": "/p"})
+    with patch.object(server._store, "route", return_value=session):
+        result = await server.navigate("amazon.com", "pre-h1")
+    assert result["url"] == "about:blank"
+    assert "error" not in result
+
+
+@pytest.mark.asyncio
 async def test_force_reload_page_tool_requires_page_id():
     import browden.mcp.server as server
     importlib.reload(server)
