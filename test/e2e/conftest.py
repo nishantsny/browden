@@ -56,6 +56,9 @@ def mcp_server(tmp_path_factory):
     sys.path.insert(0, os.path.dirname(__file__))
     from mcp_harness import McpServerHarness
     cache_dir = tmp_path_factory.mktemp("harness_cache")
+    # The read gate special-cases un-navigated browser tabs (about:blank and the
+    # chrome://new-tab-page/ new-tab page), so this suite runs under the repo sample
+    # allowlist and its blank / new tabs stay readable and are not closed.
     harness = McpServerHarness(cache_dir)
     harness.start()
     yield harness

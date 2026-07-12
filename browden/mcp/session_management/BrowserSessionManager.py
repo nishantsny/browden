@@ -34,6 +34,7 @@ import time
 
 from ...common.logger import logger
 from ...dom import query, serialize
+from ..validator.errors import tab_gone_envelope
 from ...web_navigator.interface import TabNotFoundError
 from ...web_navigator.page_id import format_page_id, split_page_id
 from ...web_navigator.registry import TabRegistry
@@ -122,8 +123,7 @@ class BrowserSessionManager:
 
     def _tab_gone(self, id: str) -> dict:
         logger.warning(f"Requested tab is no longer open: {id}")
-        return {"error": f"tab {id} is no longer open — call list_tabs for current tabs",
-                "id": id}
+        return tab_gone_envelope(id)
 
     # -- navigation tools ---------------------------------------------------
 

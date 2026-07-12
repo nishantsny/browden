@@ -202,21 +202,23 @@ async def test_list_pages_tool_delegates_and_stamps_namespace():
     importlib.reload(server)
     # The session composes its own tabs' ids and returns finished wire dicts;
     # list_tabs just aggregates them across sessions.
-    session = _fake_session(list_tabs=[
-        {"id": "pre-h1", "url": "u", "title": "t", "selected": "True", "profile_dir": "/fake/path"}])
+    # google.com is read-allowed (mini Tranco fixture), so the tab is kept as-is.
+    tab = {"id": "pre-h1", "url": "https://www.google.com/", "title": "t",
+           "selected": "True", "profile_dir": "/fake/path"}
+    session = _fake_session(list_tabs=[tab])
     server._store._sessions["pre"] = session
     result = await server.list_tabs()
-    assert result == [{"id": "pre-h1", "url": "u", "title": "t", "selected": "True",
-                       "profile_dir": "/fake/path"}]
+    assert result == [tab]
     session.list_tabs.assert_awaited_once()
+    session.close_tab.assert_not_called()  # allowlisted tab is never closed
 
 
 @pytest.mark.asyncio
 async def test_list_pages_skips_dead_sessions_without_driving_them():
     import browden.mcp.server as server
     importlib.reload(server)
-    live = _fake_session(list_tabs=[{"id": "aa-h1", "url": "u", "title": "t", "selected": "True", "profile_dir": "/a"}])
-    dead = _fake_session(list_tabs=[{"id": "bb-h1", "url": "u", "title": "t", "selected": "True", "profile_dir": "/b"}])
+    live = _fake_session(list_tabs=[{"id": "aa-h1", "url": "https://www.google.com/", "title": "t", "selected": "True", "profile_dir": "/a"}])
+    dead = _fake_session(list_tabs=[{"id": "bb-h1", "url": "https://www.google.com/", "title": "t", "selected": "True", "profile_dir": "/b"}])
     dead.is_live = AsyncMock(return_value=False)
     server._store._sessions.update({"aa": live, "bb": dead})
     result = await server.list_tabs()
@@ -352,6 +354,7 @@ async def test_dom_tools_delegate_with_kwargs():
     import browden.mcp.server as server
     importlib.reload(server)
     session = _fake_session(
+        current_url="https://www.google.com/",  # read-allowed so the H2 gate passes
         get_element_by_id={"found": False, "element": None},
         query_selector_all={"total_count": 0, "elements": []},
         force_reload_tab={"reloaded": True},
@@ -382,7 +385,7 @@ async def test_screenshot_tool_returns_image():
     import browden.mcp.server as server
     importlib.reload(server)
     png = b"\x89PNG\r\n\x1a\n" + b"fakepixels"
-    session = _fake_session(screenshot=png)
+    session = _fake_session(current_url="https://www.google.com/", screenshot=png)
     with patch.object(server._store, "route", return_value=session):
         result = await server.screenshot("pre-h1")
     session.screenshot.assert_awaited_once_with(id="pre-h1")
@@ -392,14 +395,17 @@ async def test_screenshot_tool_returns_image():
 
 
 @pytest.mark.asyncio
-async def test_screenshot_tool_passes_through_error_envelope():
+async def test_screenshot_tool_returns_tab_gone_envelope():
+    # A closed tab has no live URL; the read gate short-circuits with the standard
+    # tab-gone envelope before ever screenshotting (H2).
     import browden.mcp.server as server
     importlib.reload(server)
-    gone = {"error": "tab pre-h9 is no longer open", "id": "pre-h9"}
-    session = _fake_session(screenshot=gone)
+    session = _fake_session(current_url=None)
     with patch.object(server._store, "route", return_value=session):
         result = await server.screenshot("pre-h9")
-    assert result == gone  # a dict error is forwarded as-is (id echoed), not an Image
+    assert result == {"error": "tab pre-h9 is no longer open — call list_tabs for current tabs",
+                      "id": "pre-h9"}
+    session.screenshot.assert_not_called()
 
 
 @pytest.mark.asyncio
@@ -437,3 +443,36 @@ async def test_tool_returns_envelope_for_unknown_page_id():
     result = await server.query_selector("body", id="deadbeef-123")
     assert "error" in result
     assert result["id"] == "deadbeef-123"
+
+
+# -- H2: read gate on the DOM-read / screenshot / list_tabs tools -------------
+
+@pytest.mark.asyncio
+async def test_read_tool_refuses_tab_on_non_allowlisted_host():
+    # A tab parked on a non-allowlisted site is refused before any read happens.
+    from browden.mcp.validator import ValidationError
+    import browden.mcp.server as server
+    importlib.reload(server)
+    session = _fake_session(current_url="https://nonexistent-xyz-99.test/secret",
+                            query_selector={"found": True})
+    with patch.object(server._store, "route", return_value=session):
+        with pytest.raises(ValidationError, match="read allowlist"):
+            await server.query_selector("body", id="pre-h1")
+    session.query_selector.assert_not_awaited()  # never reached the read
+
+
+@pytest.mark.asyncio
+async def test_list_tabs_closes_non_allowlisted_tabs():
+    # list_tabs closes tabs on non-allowlisted hosts (best-effort) and drops them
+    # from the listing; allowlisted tabs are kept and never closed.
+    import browden.mcp.server as server
+    importlib.reload(server)
+    keep = {"id": "pre-h1", "url": "https://www.google.com/", "title": "g",
+            "selected": "True", "profile_dir": "/p"}
+    drop = {"id": "pre-h2", "url": "https://secret-bank-xyz-99.test/acct", "title": "bank",
+            "selected": "False", "profile_dir": "/p"}
+    session = _fake_session(list_tabs=[keep, drop], close_tab={"closed": "pre-h2"})
+    server._store._sessions["pre"] = session
+    result = await server.list_tabs()
+    assert result == [keep]                                 # non-allowlisted tab dropped
+    session.close_tab.assert_awaited_once_with("pre-h2")    # ...because it was closed
