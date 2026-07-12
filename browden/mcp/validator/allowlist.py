@@ -61,13 +61,13 @@ def _paths_map(rules: object) -> dict[str, list[str]]:
 class Allowlist:
     """Per-host path-regex allowlist. Use host key '*' for a wildcard fallback."""
 
-    def __init__(self, rules: dict[str, list[str]]):
-        # Canonicalize rule host keys the same way lookups do (lowercase + strip a
-        # leading "www."). Lookups always canonicalize the queried host, so a rule
-        # keyed "www.tracker.com" would otherwise be dead weight — never matched,
-        # never warned about (a denylist entry silently doing nothing). Folding
-        # "www." off the key makes "www.tracker.com" and "tracker.com" the one
-        # rule they visibly read as. "*" canonicalizes to itself.
+    def __init__(self, rules: dict[str, list[str]], full_match: bool):
+        # full_match decides how a path regex is applied. An *allow* list
+        # fullmatches (the pattern must span the whole path) so `^/products` does
+        # not also wave through `/products-secret-admin`. A *denylist* is the
+        # opposite risk — it should block broadly — so it keeps prefix semantics
+        # (start-anchored `re.match`): `^/checkout` still denies `/checkout/pay`.
+        self._full_match = full_match
         self._rules: dict[str, list[re.Pattern[str]]] = {
             _canonical_host(host): [re.compile(p) for p in patterns]
             for host, patterns in rules.items()
@@ -82,7 +82,14 @@ class Allowlist:
         if not patterns:
             return False
         target = _normalize_path(path or "/")
-        return any(p.match(target) for p in patterns)
+        # An allow list fullmatches (see __init__): `^/products` must cover the
+        # whole path, so it does not also permit `/products-secret-admin`; a
+        # prefix rule is spelled `^/products/.*`. The denylist keeps prefix match
+        # so it still blocks broadly.
+        return any(
+            (p.fullmatch(target) if self._full_match else p.match(target))
+            for p in patterns
+        )
 
     def covers(self, host: str) -> bool:
         """True if a rule set governs ``host`` (an exact entry or the ``*`` wildcard).
@@ -195,7 +202,8 @@ class ActionAllowlist:
         self._field_ids: dict[str, dict[str, set[str]]] = {}
         self.max_browser_sessions = 10
         self.max_tabs_per_session = 20
-        self._denylist = Allowlist(_paths_map(sections.get("denylist")))
+        # A denylist blocks broadly: prefix match, not fullmatch (see Allowlist).
+        self._denylist = Allowlist(_paths_map(sections.get("denylist")), full_match=False)
         self._read_policy = self._build_read_policy(
             sections.get("read"), self._denylist, tranco_path)
         for action, rules in sections.items():

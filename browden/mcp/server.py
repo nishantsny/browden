@@ -5,6 +5,7 @@ import os
 import sys
 from collections.abc import Awaitable, Callable
 from pathlib import Path
+from urllib.parse import urlparse
 
 
 from ..common.logger import logger
@@ -20,6 +21,7 @@ from .session_management.BrowserSessionStore import BrowserSessionStore, Unknown
 
 from .validator import (
     ActionAllowlist,
+    ValidationError,
     check_action_host,
     validate_click_target,
     validate_url,
@@ -173,6 +175,37 @@ async def select_tab(id: str) -> dict:
     return {"selected": id}
 
 
+async def _guard_landing(session, id: str, result: dict) -> dict:
+    """Re-check where a navigation/reload actually came to rest.
+
+    ``validate_url`` only gates the *input* URL, but ``drv.get``/``refresh``
+    follow 3xx / meta / JS redirects to any final URL — an open redirect on an
+    allowlisted site, or a server-side 302, can land the tab on an unchecked
+    host. Re-gate the landing (``result["url"]``) with the *same* ``validate_url``
+    the navigate input passed through, so it is judged by exactly the same policy
+    on the way out as on the way in. A landing that fails — an off-allowlist host
+    or a scheme the policy doesn't admit (``chrome://`` / ``data:`` / ``blob:`` /
+    …) — bounces the tab to ``about:blank`` and returns an error envelope rather
+    than leaving it silently parked off-list.
+
+    ``about:blank`` needs no special-case here: ``validate_url`` allows it
+    explicitly (it is the inert empty state and our own bounce target), so a tab
+    that legitimately rests there re-gates clean.
+    """
+    landed = result.get("url")
+    if not landed:
+        return result  # a tab-gone envelope or similar — nothing navigated
+    try:
+        validate_url(landed, _ALLOWLIST.read_policy)
+    except ValidationError:
+        logger.warning(f"navigation landed off-allowlist at {landed!r}; bouncing to about:blank")
+        await session.navigate("about:blank", id=id)
+        return {"error": f"navigation left the allowlist (landed on {landed}) — "
+                         f"tab reset to about:blank",
+                "id": id, "url": landed}
+    return result
+
+
 @mcp.tool()
 @_tool
 async def navigate(url: str, id: str) -> dict:
@@ -181,6 +214,7 @@ async def navigate(url: str, id: str) -> dict:
     url = validate_url(url, _ALLOWLIST.read_policy)
     session = _store.route(id)
     result = await session.navigate(url, id=id)  # wire dict (or the tab-gone envelope)
+    result = await _guard_landing(session, id, result)  # re-gate the post-redirect landing
     logger.info("Tool finished: navigate")
     return result
 
@@ -373,6 +407,7 @@ async def force_reload_tab(id: str) -> dict:
     logger.info(f"Tool called: force_reload_page (id={id!r})")
     session = _store.route(id)
     result = await session.force_reload_tab(id=id)
+    result = await _guard_landing(session, id, result)  # a reload can 302 off-list too
     logger.info("Tool finished: force_reload_page")
     return result
 
