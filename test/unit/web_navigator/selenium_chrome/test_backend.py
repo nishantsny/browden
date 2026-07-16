@@ -325,9 +325,10 @@ def test_get_profile_dir_returns_construction_path(tmp_path):
 
 @patch("browden.web_navigator.selenium_chrome.backend._launch_chrome")
 @patch("browden.web_navigator.selenium_chrome.backend.webdriver")
-def test_current_tab_id_triggers_restart_on_no_such_window(mock_webdriver, mock_launch):
+def test_drv_restarts_when_current_window_is_gone(mock_webdriver, mock_launch):
     _patch_launch(mock_launch)
-    # Initial driver that has lost its current window
+    # Initial driver that has lost its current window: window_handles still works,
+    # but current_window_handle raises — exactly what _drv()'s health check probes.
     dead_drv = _make_fake_driver(handles=("h1",))
     type(dead_drv).current_window_handle = PropertyMock(side_effect=NoSuchWindowException("no such window"))
 
@@ -338,8 +339,8 @@ def test_current_tab_id_triggers_restart_on_no_such_window(mock_webdriver, mock_
 
     backend = _backend_with_driver(dead_drv)
 
-    # This should now trigger _drv() to restart and return the new handle
-    assert backend.current_tab_id() == "new_h1"
+    # Any driving call goes through _drv(), whose health check restarts the session.
+    assert backend.list_tab_ids() == ["new_h1"]
     dead_drv.quit.assert_called_once()
     assert mock_webdriver.Chrome.call_count == 1
 
