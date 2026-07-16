@@ -65,6 +65,31 @@ def test_second_sample_read_deny_is_valid():
     assert al.read_policy.is_allowed("google.com", "/")  # tranco enabled in it
 
 
+def test_local_file_sample_opts_file_scheme_in():
+    # The file:// walkthrough sample must load and actually opt the empty file
+    # host in, without opening every host to non-https.
+    al = load_allowlist(SAMPLE_ALLOWLIST.parent / "allow_local_file_reads.yaml")
+    assert al.read_policy.override_has_host("")            # file:/// host opted in
+    assert not al.read_policy.override_has_host("example.com")
+
+
+def test_localhost_dev_sample_opts_localhost_in():
+    # The localhost dev-server sample must load and opt localhost in (covering any
+    # port) without opting 127.0.0.1 in.
+    al = load_allowlist(SAMPLE_ALLOWLIST.parent / "allow_localhost_dev_server.yaml")
+    assert al.read_policy.override_has_host("localhost")
+    assert not al.read_policy.override_has_host("127.0.0.1")
+
+
+def test_empty_host_override_loads_for_file_scheme(tmp_path):
+    # "" is a valid override host (the authority-less host of file:/// URLs), so
+    # an operator can scope which local-file paths reads may reach.
+    f = tmp_path / "allowlist.yaml"
+    f.write_text('read:\n  website_overrides:\n    "": ["^/home/me/.*"]\n')
+    al = load_allowlist(f)
+    assert al.read_policy.override_has_host("")
+
+
 def test_missing_file_raises_config_error(tmp_path):
     with pytest.raises(ConfigError, match="not found"):
         load_allowlist(tmp_path / "nope.yaml")

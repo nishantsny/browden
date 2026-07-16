@@ -109,6 +109,15 @@ class Allowlist:
         """
         return _canonical_host(host) in self._rules or "*" in self._rules
 
+    def has_host(self, host: str) -> bool:
+        """True if an explicit (non-wildcard) entry names ``host``.
+
+        Unlike :meth:`covers` this ignores the ``*`` fallback — it answers "did
+        the operator name *this* host specifically", which the scheme gate uses
+        to decide whether a non-https scheme was deliberately opted in for it.
+        """
+        return _canonical_host(host) in self._rules
+
 
 class ReadPolicy:
     """The read/navigate gate: a denylist veto plus two ways to be allowed.
@@ -147,6 +156,19 @@ class ReadPolicy:
         if self._overrides.covers(host):
             return self._overrides.is_allowed(host, path)
         return self._tranco is not None and self._tranco.contains(host)
+
+    def override_has_host(self, host: str) -> bool:
+        """True if the read overrides name ``host`` explicitly (not via ``*``).
+
+        The scheme gate (see :func:`validate_url`) consults this: a non-https URL
+        (``file://``, plaintext ``http://``, …) is accepted only for a host the
+        operator has *explicitly* overridden. So opening the web wholesale with
+        ``website_overrides: {"*": [".*"]}`` does **not** silently re-enable
+        ``file://`` or plaintext http everywhere — you name the host to opt it in
+        (e.g. ``localhost: [".*"]`` for http, or ``"": ["^/home/me/.*"]`` for
+        file:// paths, which carry an empty host).
+        """
+        return self._overrides.has_host(host)
 
 
 class ActionAllowlist:

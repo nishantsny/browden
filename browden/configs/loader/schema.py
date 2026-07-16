@@ -52,8 +52,12 @@ def _check_host_paths(rules, where: str) -> None:
     if not isinstance(rules, dict):
         raise ConfigError(f"{where}: expected a mapping of host -> path regexes, got {type(rules).__name__}")
     for host, patterns in rules.items():
-        if not isinstance(host, str) or not host:
-            raise ConfigError(f"{where}: hosts must be non-empty strings, got {host!r}")
+        # The empty host "" is permitted: it is the authority-less host that
+        # file:// URLs carry (file:///etc/passwd), so `"": [<path regex>]` is how
+        # an operator scopes which local-file paths are readable once file:// is
+        # opted in. Every other host must be a non-empty string.
+        if not isinstance(host, str):
+            raise ConfigError(f"{where}: hosts must be strings, got {host!r}")
         _check_patterns(patterns, f"{where}.{host}")
 
 

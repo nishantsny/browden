@@ -31,26 +31,51 @@ def validate_url(url: str, gate: "Allowlist | ReadPolicy") -> str:
     A not-yet-navigated tab's URL (``about:blank`` or the browser new-tab page,
     ``chrome://new-tab-page/``) is special-cased first and returned unchanged: there
     is no site to gate, and prepending ``https://`` would mangle it into a bogus
-    host. These are matched exactly (see ``_ALWAYS_ALLOWED``); other non-web schemes
-    are left to the PRs that add their handling.
+    host. These are matched exactly (see ``_ALWAYS_ALLOWED``).
+
+    **Scheme gate (#70 M2).** For the read policy, only ``https`` is accepted by
+    default, so ``file://localhost/etc/passwd`` and ``ftp://…`` can't slip through
+    on a permissive host rule. A non-https scheme is allowed only for a host the
+    operator has *explicitly* overridden (``gate.override_has_host``) — so
+    ``localhost: [".*"]`` re-enables ``http://localhost`` and ``"": ["^/x/.*"]``
+    re-enables ``file://`` paths, while a blanket ``"*": [".*"]`` does not silently
+    re-open non-https everywhere. Gates without that notion (a write-action
+    :class:`Allowlist`) keep their prior scheme-agnostic behavior.
 
     Otherwise: prepends ``https://`` to a bare host, requires a host (a navigate/
-    write target must resolve to one), then requires ``gate`` (anything with
+    write target must resolve to one — except ``file://``, which is authority-less
+    and gated on its path), then requires ``gate`` (anything with
     ``is_allowed(host, path)`` — the read :class:`ReadPolicy` or a write-action
     :class:`Allowlist` section) to admit it. Raises :class:`ValidationError` on a
-    missing host or a blocked one; returns the normalized URL when allowed — query
-    strings and fragments pass through unchanged, so '?', '#', '&' and spaces
-    survive.
+    disallowed scheme, a missing host, or a blocked ``(host, path)``; returns the
+    normalized URL when allowed — query strings and fragments pass through
+    unchanged, so '?', '#', '&' and spaces survive.
     """
     if url in _ALWAYS_ALLOWED:
         return url
     if "://" not in url:
         url = "https://" + url
     p = urlparse(url)
-    if not p.netloc:
+    scheme = p.scheme.lower()
+    host = p.hostname or ""
+    # Scheme gate: only the read policy carries scheme intent (it exposes
+    # override_has_host). A non-https scheme is admitted only for a host the
+    # operator explicitly overrode, so a blanket "*": [".*"] does not silently
+    # re-open file:// or plaintext http everywhere. A write-action Allowlist has
+    # no such method and keeps its scheme-agnostic behavior.
+    override_has_host = getattr(gate, "override_has_host", None)
+    if override_has_host is not None and scheme != "https" and not override_has_host(host):
+        logger.warning(f"URL scheme blocked: {scheme!r} in {url!r} "
+                       f"(only https, unless the host has an explicit read override)")
+        raise ValidationError(
+            f"URL scheme not allowed: {scheme!r} — only https, unless {host!r} has an "
+            f"explicit website_overrides entry")
+    # http(s) et al. must name a host; file:// legitimately has no authority
+    # (file:///etc/passwd) and is gated on its path against the allowlist below.
+    if scheme != "file" and not p.netloc:
         logger.warning(f"URL validation failed: no host in {url!r}")
         raise ValidationError(f"Invalid URL (no host): {url}")
-    if not gate.is_allowed(p.hostname or "", p.path):
+    if not gate.is_allowed(host, p.path):
         logger.warning(f"URL blocked by allowlist: {p.hostname}{p.path}")
         raise ValidationError(f"URL not on allowlist: {p.hostname}{p.path}")
     logger.info(f"URL allowed: {url!r}")

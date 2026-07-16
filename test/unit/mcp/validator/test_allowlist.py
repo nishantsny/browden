@@ -192,6 +192,23 @@ def test_normalization_preserves_trailing_slash():
     assert al.is_denied("example.com", "/./checkout/")
 
 
+# -- M2: override_has_host (the scheme gate's opt-in check) -------------------
+
+def test_override_has_host_is_explicit_not_wildcard():
+    al = ActionAllowlist({"read": {"website_overrides": {"localhost": [".*"], "*": [".*"]}}})
+    rp = al.read_policy
+    assert rp.override_has_host("localhost")          # explicit entry
+    assert rp.override_has_host("www.localhost")      # www-canonicalized
+    assert not rp.override_has_host("example.com")    # only "*" covers it — not explicit
+    assert not rp.override_has_host("")               # no empty-host entry here
+
+
+def test_override_has_host_matches_empty_host_for_file():
+    rp = ActionAllowlist({"read": {"website_overrides": {"": ["^/home/.*"]}}}).read_policy
+    assert rp.override_has_host("")                    # the authority-less file:// host
+    assert not rp.override_has_host("example.com")
+
+
 # -- write (click) section ----------------------------------------------------
 
 def test_click_allows_listed_hosts(al):
