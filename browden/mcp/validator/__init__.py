@@ -9,6 +9,7 @@ from .intent import (
     is_fillable_control,
     label_matches,
 )
+from .popularity import PopularityAllowlist
 from .tranco import TrancoList
 from .read_gates import ensure_url_allowed, validate_url
 from .write_gates import (
@@ -20,6 +21,7 @@ from .write_gates import (
 __all__ = [
     "ActionAllowlist",
     "Allowlist",
+    "PopularityAllowlist",
     "ReadPolicy",
     "TrancoList",
     "ValidationError",

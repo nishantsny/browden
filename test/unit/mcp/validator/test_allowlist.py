@@ -274,5 +274,35 @@ def test_from_file_all_comments_is_deny_all(tmp_path):
     assert not al.section("click").is_allowed("amazon.com", "/")
 
 
+# -- host canonicalization consistency (H3) ----------------------------------
+
+def test_denylist_not_bypassed_by_trailing_dot():
+    # evil.com. resolves to evil.com in the browser, so the denylist must treat
+    # them alike (canonical_host strips the trailing dot) or the deny is bypassed.
+    al = ActionAllowlist({
+        "read": {"tranco": {"enabled": True, "top_n": 1000}},
+        "denylist": {"google.com": [".*"]},
+    })
+    assert al.is_denied("google.com", "/")
+    assert al.is_denied("google.com.", "/")                    # trailing-dot form
+    assert not al.read_policy.is_allowed("google.com.", "/")   # net: still blocked
+
+
+def test_denylist_keys_and_lookups_agree_on_www():
+    # A rule written with or without www. matches a host written either way —
+    # keys and lookups canonicalize identically, so no silently-inert entry.
+    for entry in ("tracker.com", "www.tracker.com"):
+        al = ActionAllowlist({"denylist": {entry: [".*"]}})
+        assert al.is_denied("tracker.com", "/")
+        assert al.is_denied("www.tracker.com", "/")
+
+
+def test_override_matches_trailing_dot_and_www():
+    al = ActionAllowlist({"read": {"website_overrides": {"example.com": [".*"]}}})
+    assert al.read_policy.is_allowed("example.com", "/")
+    assert al.read_policy.is_allowed("example.com.", "/")
+    assert al.read_policy.is_allowed("www.example.com", "/")
+
+
 # The shipped sample (configs/samples/read_only_on_popular_websites.yaml) is
 # covered by test/unit/configs/test_loader.py through the schema-validating loader.
