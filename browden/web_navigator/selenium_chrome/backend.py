@@ -374,19 +374,50 @@ class SeleniumChromeBackend(WebNavigatorBackend):
                 raise
         return self._driver
 
+    def _tabinfo(self, drv, *, selected: bool) -> TabInfo:
+        """Snapshot the driver's *currently focused* window as a TabInfo.
+
+        The four TabInfo constructions (list_tabs / new_blank_tab / navigate /
+        reload) all read the same fields off the focused window and only differ in
+        ``selected`` — so callers switch to the window they mean, then ask here.
+        """
+        return TabInfo(
+            per_session_id=drv.current_window_handle,
+            url=drv.current_url,
+            title=drv.title,
+            selected=selected,
+            profile_dir=str(self._profile_dir),
+        )
+
+    @staticmethod
+    def _resolve_one_visible(drv, css_selector: str):
+        """Re-find a policy-validated selector live and return its single actionable element.
+
+        The identical resolve-and-vet block ``click_element`` and
+        ``insert_text_element`` both run. Ambiguity is a deny: the policy layer
+        validated exactly one element on the snapshot, so anything other than one
+        live match — or a match that is hidden or disabled — means the DOM moved
+        under us, and the caller must not act on it.
+        """
+        matches = drv.find_elements(By.CSS_SELECTOR, css_selector)
+        if len(matches) == 0:
+            raise NoSuchElementException(f"no element matches {css_selector!r}")
+        if len(matches) > 1:
+            raise ValueError(f"selector {css_selector!r} matched {len(matches)} live elements")
+        el = matches[0]
+        if not el.is_displayed():
+            raise ValueError("target element is not visible")
+        if not el.is_enabled():
+            raise ValueError("target element is disabled")
+        return el
+
     def list_tabs(self) -> list[TabInfo]:
         drv = self._drv()
         current_handle = drv.current_window_handle
         pages = []
         for handle in drv.window_handles:
             drv.switch_to.window(handle)
-            pages.append(TabInfo(
-                per_session_id=handle,
-                url=drv.current_url,
-                title=drv.title,
-                selected=(handle == current_handle),
-                profile_dir=str(self._profile_dir),
-            ))
+            pages.append(self._tabinfo(drv, selected=(handle == current_handle)))
         drv.switch_to.window(current_handle)
         return pages
 
@@ -396,13 +427,7 @@ class SeleniumChromeBackend(WebNavigatorBackend):
     def new_blank_tab(self) -> TabInfo:
         drv = self._drv()
         drv.switch_to.new_window("tab")
-        return TabInfo(
-            per_session_id=drv.current_window_handle,
-            url=drv.current_url,
-            title=drv.title,
-            selected=True,
-            profile_dir=str(self._profile_dir),
-        )
+        return self._tabinfo(drv, selected=True)
 
     def close_tab(self, tab_id: str) -> None:
         drv = self._drv()
@@ -429,13 +454,7 @@ class SeleniumChromeBackend(WebNavigatorBackend):
         except NoSuchWindowException:
             raise TabNotFoundError("there is no active tab to navigate") from None
         _wait_for_title(drv)
-        return TabInfo(
-            per_session_id=drv.current_window_handle,
-            url=drv.current_url,
-            title=drv.title,
-            selected=True,
-            profile_dir=str(self._profile_dir),
-        )
+        return self._tabinfo(drv, selected=True)
 
     def current_tab_id(self) -> str:
         try:
@@ -455,13 +474,7 @@ class SeleniumChromeBackend(WebNavigatorBackend):
             _switch(drv, tab_id)
         drv.refresh()
         _wait_for_title(drv)
-        return TabInfo(
-            per_session_id=drv.current_window_handle,
-            url=drv.current_url,
-            title=drv.title,
-            selected=True,
-            profile_dir=str(self._profile_dir),
-        )
+        return self._tabinfo(drv, selected=True)
 
     def current_url(self) -> str:
         try:
@@ -482,20 +495,9 @@ class SeleniumChromeBackend(WebNavigatorBackend):
         drv = self._drv()
         try:
             url_before = drv.current_url
-            matches = drv.find_elements(By.CSS_SELECTOR, css_selector)
+            el = self._resolve_one_visible(drv, css_selector)
         except NoSuchWindowException:
             raise TabNotFoundError("there is no active tab to click in") from None
-        # Ambiguity is a deny: the policy layer validated exactly one element on the
-        # snapshot, so more (or fewer) live matches means the DOM moved under us.
-        if len(matches) == 0:
-            raise NoSuchElementException(f"no element matches {css_selector!r}")
-        if len(matches) > 1:
-            raise ValueError(f"selector {css_selector!r} matched {len(matches)} live elements")
-        el = matches[0]
-        if not el.is_displayed():
-            raise ValueError("target element is not visible")
-        if not el.is_enabled():
-            raise ValueError("target element is disabled")
         el.click()
         _wait_for_title(drv)
         return {
@@ -509,20 +511,9 @@ class SeleniumChromeBackend(WebNavigatorBackend):
     def insert_text_element(self, css_selector: str, value: str) -> dict:
         drv = self._drv()
         try:
-            matches = drv.find_elements(By.CSS_SELECTOR, css_selector)
+            el = self._resolve_one_visible(drv, css_selector)
         except NoSuchWindowException:
             raise TabNotFoundError("there is no active tab to insert text into") from None
-        # Ambiguity is a deny: the policy layer validated exactly one element on the
-        # snapshot, so more (or fewer) live matches means the DOM moved under us.
-        if len(matches) == 0:
-            raise NoSuchElementException(f"no element matches {css_selector!r}")
-        if len(matches) > 1:
-            raise ValueError(f"selector {css_selector!r} matched {len(matches)} live elements")
-        el = matches[0]
-        if not el.is_displayed():
-            raise ValueError("target element is not visible")
-        if not el.is_enabled():
-            raise ValueError("target element is disabled")
         try:
             el.clear()
         except InvalidElementStateException:
