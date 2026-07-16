@@ -5,8 +5,10 @@ from .loader import (
     load_allowlist,
     resolve_allowlist_path,
 )
+from .refresher import AllowlistRefresher
 
 __all__ = [
+    "AllowlistRefresher",
     "ConfigError",
     "SAMPLE_ALLOWLIST",
     "USER_CONFIG_DIR",

@@ -11,6 +11,7 @@ from urllib.parse import urlparse
 
 from ..common.logger import logger
 from ..configs.loader import (
+    AllowlistRefresher,
     ConfigError,
     SAMPLE_ALLOWLIST,
     load_allowlist,
@@ -38,26 +39,17 @@ _INSTRUCTIONS = (
     "browden drives a real Chrome session. Within a single profile-dir there is ONE browser session. You can open multiple tabs within that one session, though concurrent requests are only supported across different sessions, but within the same session (this is a limitation of selenium: the underlying automation library). A new profile-dir can be chosen while crating a new tab. If you choose a previously used profile-dir, then the previous session will be reused. Creating a new tab will return a tab-id which is unique across all sessions, pass it back verbatim on other tools."
 )
 
-# How often the background poller re-stats the allowlist file to hot-reload it.
-_RELOAD_INTERVAL_SECONDS = 10
-
 
 @contextlib.asynccontextmanager
 async def _allowlist_lifespan(_server: FastMCP) -> AsyncIterator[None]:
-    """Run the allowlist hot-reload poller for the server's lifetime.
+    """Run the live allowlist's hot-reload poller for the server's lifetime.
 
-    The poller lives on the *same* event loop as the tools, so the reload's
-    atomic rebind can never interleave with a tool mid-statement. Started on
-    server boot, cancelled cleanly on shutdown.
+    Delegates to the refresher (see ``configs/loader/refresher.py``): the poller
+    lives on the *same* event loop as the tools, started on boot and cancelled
+    cleanly on shutdown.
     """
-    task = asyncio.create_task(_allowlist_reload_loop())
-    logger.info(f"Allowlist hot-reload poller started ({_RELOAD_INTERVAL_SECONDS}s interval)")
-    try:
+    async with _refresher.run():
         yield
-    finally:
-        task.cancel()
-        with contextlib.suppress(asyncio.CancelledError):
-            await task
 
 
 mcp = FastMCP(
@@ -68,75 +60,16 @@ mcp = FastMCP(
     lifespan=_allowlist_lifespan,
 )
 
-# Import-time default: the repo sample (reads open, writes deny-all), so unit
-# tests and library imports see a deterministic policy. main() re-resolves
-# (CLI > env > user config > sample) and replaces this before serving.
-_ALLOWLIST = load_allowlist(SAMPLE_ALLOWLIST) if SAMPLE_ALLOWLIST.exists() else ActionAllowlist({})
-
-# Allowlist hot-reload state. The loaded ActionAllowlist is immutable after
-# construction, so a reload never mutates it in place — it builds a fresh one
-# off to the side and atomically rebinds _ALLOWLIST (a single GIL-atomic store).
-# Every tool only ever *reads* that reference and uses a frozen object, so the
-# swap needs no lock: a call already in flight simply finishes against the
-# policy it read. _ALLOWLIST_PATH is the config file the poller watches (main()
-# seeds it; a bare library import leaves it None -> nothing is polled), and
-# _ALLOWLIST_STAT is the (mtime, size) we last loaded, our change signature.
-_ALLOWLIST_PATH: Path | None = None
-_ALLOWLIST_STAT: tuple[float, int] | None = None
+# Import-time default: a *static* refresher over the repo sample (reads open,
+# writes deny-all), so unit tests and library imports see a deterministic policy
+# and watch no file. main() re-resolves (CLI > env > user config > sample) and
+# replaces this with a file-watching refresher before serving. Every tool reads
+# the live policy off ``_refresher.allowlist``, which the refresher hot-reloads
+# in place via a lock-free atomic swap (see configs/loader/refresher.py).
+_refresher = AllowlistRefresher.static(
+    load_allowlist(SAMPLE_ALLOWLIST) if SAMPLE_ALLOWLIST.exists() else ActionAllowlist({}))
 
 logger.info("Browden MCP module initialized")
-
-
-def _stat_signature(path: Path) -> tuple[float, int] | None:
-    """The change signature ``(st_mtime, st_size)`` of ``path``, or None if it can't be stat'd.
-
-    Pairing size with mtime catches a same-second edit that leaves the file the
-    same length but changed content — pure mtime can alias those on coarse
-    filesystem timestamp resolution.
-    """
-    try:
-        st = path.stat()
-    except OSError:
-        return None
-    return (st.st_mtime, st.st_size)
-
-
-def _maybe_reload_allowlist() -> bool:
-    """Hot-reload ``_ALLOWLIST`` iff the watched config file's signature changed.
-
-    Fail-safe by design: a vanished or unreadable file, or a config that no
-    longer parses (a mid-edit save, invalid YAML), leaves the last-good
-    allowlist in place — a security gate must never fall open or crash on a bad
-    edit. Returns True only when a fresh allowlist was actually swapped in.
-    """
-    global _ALLOWLIST, _ALLOWLIST_STAT
-    if _ALLOWLIST_PATH is None:
-        return False
-    sig = _stat_signature(_ALLOWLIST_PATH)
-    if sig is None or sig == _ALLOWLIST_STAT:
-        return False  # gone/unreadable, or unchanged since last load — nothing to do
-    try:
-        new_allowlist = load_allowlist(_ALLOWLIST_PATH)
-    except ConfigError as e:
-        # Record the signature so we don't re-parse the same broken file every
-        # tick; the operator's next real edit changes it again and we retry.
-        _ALLOWLIST_STAT = sig
-        logger.warning(f"allowlist reload skipped, keeping last-good config: {e}")
-        return False
-    _ALLOWLIST = new_allowlist  # atomic RCU swap: readers see old-or-new, never torn
-    _ALLOWLIST_STAT = sig
-    logger.info(f"Reloaded allowlist config from {_ALLOWLIST_PATH}")
-    return True
-
-
-async def _allowlist_reload_loop() -> None:
-    """Poll the watched config every ``_RELOAD_INTERVAL_SECONDS`` and hot-reload on change."""
-    while True:
-        await asyncio.sleep(_RELOAD_INTERVAL_SECONDS)
-        try:
-            _maybe_reload_allowlist()
-        except Exception as e:  # a single bad tick must never kill the poller
-            logger.warning(f"allowlist reload tick failed: {e}")
 
 # All per-profile session state and the customer<->backend id mapping live in
 # the store (see session_management/BrowserSessionStore.py).
@@ -222,7 +155,7 @@ async def list_tabs() -> list[dict]:
         # last tab can't be closed) and drop it from the listing.
         kept: list[dict] = []
         for tab in await session.list_tabs():
-            if ensure_url_allowed(_ALLOWLIST, tab.get("url") or ""):
+            if ensure_url_allowed(_refresher.allowlist, tab.get("url") or ""):
                 kept.append(tab)
                 continue
             logger.warning(f"list_tabs: closing non-allowlisted tab {tab.get('url')!r} (id={tab.get('id')})")
@@ -250,8 +183,8 @@ async def new_blank_tab(profile_dir: str | None = None) -> dict:
     """
     logger.info(f"Tool called: new_blank_tab (profile_dir={profile_dir!r})")
     try:
-        session = _store.get_or_create_session(_backend_for(profile_dir), max_sessions=_ALLOWLIST.max_browser_sessions)
-        result = await session.new_blank_tab(max_tabs=_ALLOWLIST.max_tabs_per_session)  # wire dict with composite id
+        session = _store.get_or_create_session(_backend_for(profile_dir), max_sessions=_refresher.allowlist.max_browser_sessions)
+        result = await session.new_blank_tab(max_tabs=_refresher.allowlist.max_tabs_per_session)  # wire dict with composite id
     except RuntimeError as e:
         return {"error": str(e)}
     logger.info("Tool finished: new_blank_tab")
@@ -300,7 +233,7 @@ async def _guard_landing(session, id: str, result: dict) -> dict:
     if not landed:
         return result  # a tab-gone envelope or similar — nothing navigated
     try:
-        validate_url(landed, _ALLOWLIST.read_policy)
+        validate_url(landed, _refresher.allowlist.read_policy)
     except ValidationError:
         logger.warning(f"navigation landed off-allowlist at {landed!r}; bouncing to about:blank")
         await session.navigate("about:blank", id=id)
@@ -315,7 +248,7 @@ async def _guard_landing(session, id: str, result: dict) -> dict:
 async def navigate(url: str, id: str) -> dict:
     """Navigate the named tab to url. Url is gated by the per-host allowlist (query strings and fragments pass through)."""
     logger.info(f"Tool called: navigate (url={url!r}, id={id!r})")
-    url = validate_url(url, _ALLOWLIST.read_policy)
+    url = validate_url(url, _refresher.allowlist.read_policy)
     session = _store.route(id)
     result = await session.navigate(url, id=id)  # wire dict (or the tab-gone envelope)
     result = await _guard_landing(session, id, result)  # re-gate the post-redirect landing
@@ -359,14 +292,14 @@ async def click(css_selector: str, id: str) -> dict:
     url = await session.current_url(id=id)
     if url is None:
         return tab_gone_envelope(id)
-    check_action_host(_ALLOWLIST, "click", url)  # raises if denied / host not allowed
+    check_action_host(_refresher.allowlist, "click", url)  # raises if denied / host not allowed
 
     # Gates 2-3: fetch the element (limit=2 so ambiguity is detectable), then let
     # the validator judge integrity, anchor target, and the host's required label.
     found = await session.query_selector_all(css_selector, id=id, limit=2)
     if "error" in found:
         return found
-    validate_click_target(_ALLOWLIST, url, css_selector, found)  # raises on any failed gate
+    validate_click_target(_refresher.allowlist, url, css_selector, found)  # raises on any failed gate
 
     result = await session.click(css_selector, id=id)
     logger.info("Tool finished: click")
@@ -405,14 +338,14 @@ async def insert_text(css_selector: str, value: str, id: str) -> dict:
     url = await session.current_url(id=id)
     if url is None:
         return tab_gone_envelope(id)
-    check_action_host(_ALLOWLIST, "write-text", url)  # raises if denied / host not allowed
+    check_action_host(_refresher.allowlist, "write-text", url)  # raises if denied / host not allowed
 
     # Gates 2-3: fetch the element (limit=2 so ambiguity is detectable), then let
     # the validator judge integrity and the host's required label / field-id.
     found = await session.query_selector_all(css_selector, id=id, limit=2)
     if "error" in found:
         return found
-    validate_write_text_target(_ALLOWLIST, url, css_selector, found)  # raises on any failed gate
+    validate_write_text_target(_refresher.allowlist, url, css_selector, found)  # raises on any failed gate
 
     result = await session.insert_text(css_selector, value, id=id)
     logger.info("Tool finished: insert_text")
@@ -438,7 +371,7 @@ async def get_element_by_id(element_id: str, id: str,
     url = await session.current_url(id=id)
     if url is None:
         return tab_gone_envelope(id)
-    if not ensure_url_allowed(_ALLOWLIST, url):  # H2: gate the tab's live url before reading
+    if not ensure_url_allowed(_refresher.allowlist, url):  # H2: gate the tab's live url before reading
         raise ValidationError(f"URL not on the read allowlist: {url}")
     result = await session.get_element_by_id(
         element_id, id=id, include_html=include_html, max_html_bytes=max_html_bytes)
@@ -457,7 +390,7 @@ async def get_elements_by_class_name(class_names: str, id: str,
     url = await session.current_url(id=id)
     if url is None:
         return tab_gone_envelope(id)
-    if not ensure_url_allowed(_ALLOWLIST, url):  # H2: gate the tab's live url before reading
+    if not ensure_url_allowed(_refresher.allowlist, url):  # H2: gate the tab's live url before reading
         raise ValidationError(f"URL not on the read allowlist: {url}")
     result = await session.get_elements_by_class_name(
         class_names, id=id, limit=limit, offset=offset,
@@ -476,7 +409,7 @@ async def query_selector(css_selector: str, id: str,
     url = await session.current_url(id=id)
     if url is None:
         return tab_gone_envelope(id)
-    if not ensure_url_allowed(_ALLOWLIST, url):  # H2: gate the tab's live url before reading
+    if not ensure_url_allowed(_refresher.allowlist, url):  # H2: gate the tab's live url before reading
         raise ValidationError(f"URL not on the read allowlist: {url}")
     result = await session.query_selector(
         css_selector, id=id, include_html=include_html, max_html_bytes=max_html_bytes)
@@ -495,7 +428,7 @@ async def query_selector_all(css_selector: str, id: str,
     url = await session.current_url(id=id)
     if url is None:
         return tab_gone_envelope(id)
-    if not ensure_url_allowed(_ALLOWLIST, url):  # H2: gate the tab's live url before reading
+    if not ensure_url_allowed(_refresher.allowlist, url):  # H2: gate the tab's live url before reading
         raise ValidationError(f"URL not on the read allowlist: {url}")
     result = await session.query_selector_all(
         css_selector, id=id, limit=limit, offset=offset,
@@ -518,7 +451,7 @@ async def screenshot(id: str):  # -> dict | Image; unannotated: FastMCP can't sc
     url = await session.current_url(id=id)
     if url is None:
         return tab_gone_envelope(id)
-    if not ensure_url_allowed(_ALLOWLIST, url):  # H2: gate the tab's live url before reading
+    if not ensure_url_allowed(_refresher.allowlist, url):  # H2: gate the tab's live url before reading
         raise ValidationError(f"URL not on the read allowlist: {url}")
     result = await session.screenshot(id=id)
     if isinstance(result, dict):  # tab gone — structured error, not an image
@@ -536,7 +469,7 @@ async def force_reload_tab(id: str) -> dict:
     url = await session.current_url(id=id)
     if url is None:
         return tab_gone_envelope(id)
-    if not ensure_url_allowed(_ALLOWLIST, url):  # H2: gate the tab's live url before reading
+    if not ensure_url_allowed(_refresher.allowlist, url):  # H2: gate the tab's live url before reading
         raise ValidationError(f"URL not on the read allowlist: {url}")
     result = await session.force_reload_tab(id=id)
     result = await _guard_landing(session, id, result)  # a reload can 302 off-list too
@@ -547,11 +480,12 @@ async def force_reload_tab(id: str) -> dict:
 def main(argv: list[str] | None = None) -> None:
     """CLI entry point: resolve + load the allowlist, then serve.
 
-    The loaded, schema-verified allowlist replaces the module default so every
-    tool (the internal consumers of ``_ALLOWLIST``) gates against the config
-    the operator chose.
+    Replaces the module default with a file-watching refresher over the config
+    the operator chose, so every tool (the internal consumers of
+    ``_refresher.allowlist``) gates against it — and picks up edits live, since
+    ``_allowlist_lifespan`` runs the refresher's poller while the server serves.
     """
-    global _ALLOWLIST, _ALLOWLIST_PATH, _ALLOWLIST_STAT
+    global _refresher
     parser = argparse.ArgumentParser(
         prog="browden", description="Browden MCP server")
     parser.add_argument(
@@ -564,14 +498,9 @@ def main(argv: list[str] | None = None) -> None:
     if path is None:
         parser.error("no allowlist config found — run setup/onetime_setup.py or pass --allowlist")
     try:
-        _ALLOWLIST = load_allowlist(path)
+        _refresher = AllowlistRefresher.from_path(path)
     except ConfigError as e:
         parser.error(str(e))
-    # Point the hot-reload poller (started by _allowlist_lifespan on serve) at
-    # this file and seed the signature we just loaded, so the first tick only
-    # reloads if the operator edits it after startup.
-    _ALLOWLIST_PATH = path.expanduser()
-    _ALLOWLIST_STAT = _stat_signature(_ALLOWLIST_PATH)
     logger.info(f"Loaded allowlist config from {path}")
 
     transport = os.environ.get("MCP_TRANSPORT", "stdio")
