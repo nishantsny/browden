@@ -298,10 +298,11 @@ def test_switch_failure_becomes_page_not_found():
     backend = _backend_with_driver(drv)
 
     # page_ids are raw Selenium handles; a handle Selenium rejects must surface
-    # as a clean TabNotFoundError, not the driver's stack-trace exception.
+    # as a clean TabNotFoundError, not the driver's stack-trace exception. The
+    # tab-targeting methods that still take a handle (select_tab / close_tab) are
+    # where that translation lives — get_page_source / reload / screenshot no
+    # longer self-focus, so the caller's select_tab is the one gate.
     for call in (lambda: backend.select_tab("dead"),
-                 lambda: backend.get_tab_html("dead"),
-                 lambda: backend.reload("dead"),
                  lambda: backend.close_tab("dead")):
         with pytest.raises(TabNotFoundError) as exc:
             call()

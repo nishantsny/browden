@@ -28,17 +28,18 @@ def test_screenshot_returns_png_bytes(backend):
     backend.new_blank_tab()
     page = backend.navigate(DATA_URL)
 
-    png = backend.screenshot(page.handle)
+    backend.select_tab(page.handle)  # caller focuses first (uniform contract)
+    png = backend.screenshot()
 
     assert isinstance(png, bytes)
     assert png.startswith(PNG_MAGIC)
     assert len(png) > 1000  # a real rendered viewport, not an empty stub
 
 
-def test_screenshot_defaults_to_active_tab(backend):
+def test_screenshot_captures_the_focused_tab(backend):
     backend.new_blank_tab()
     backend.navigate(DATA_URL)
 
-    png = backend.screenshot()  # no handle -> active tab
+    png = backend.screenshot()  # acts on the focused tab (navigate left it focused)
 
     assert png.startswith(PNG_MAGIC)

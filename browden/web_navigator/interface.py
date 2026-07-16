@@ -89,20 +89,20 @@ class WebNavigatorBackend(ABC):
         """Navigate the current tab to url. Url is pre-validated."""
 
     @abstractmethod
-    def get_tab_html(self, handle: str | None = None) -> str:
-        """Return the rendered HTML (post-JS DOM) of a tab; active tab if handle is None."""
+    def get_tab_html(self) -> str:
+        """Return the rendered HTML (post-JS DOM) of the focused tab. Caller focuses first."""
 
     @abstractmethod
-    def reload(self, handle: str | None = None) -> TabInfo:
-        """Reload a tab in the browser; active tab if handle is None."""
+    def reload(self) -> TabInfo:
+        """Reload the focused tab in the browser. Caller focuses the tab first."""
 
     @abstractmethod
     def current_url(self) -> str:
-        """Return the URL of the active tab. Caller focuses the tab first."""
+        """Return the URL of the focused tab. Caller focuses the tab first."""
 
     @abstractmethod
-    def screenshot(self, handle: str | None = None) -> bytes:
-        """Capture a PNG screenshot of a tab's viewport; active tab if handle is None.
+    def screenshot(self) -> bytes:
+        """Capture a PNG screenshot of the focused tab's viewport. Caller focuses first.
 
         Read-only — never mutates tab state. Returns the raw PNG bytes; the
         caller is responsible for any encoding (e.g. base64 for transport).

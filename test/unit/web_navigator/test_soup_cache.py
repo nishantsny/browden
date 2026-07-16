@@ -7,14 +7,18 @@ class FakeBackend:
         self.source = "<html><body><p id='x'>hi</p></body></html>"
         self.get_calls = 0
         self.reload_calls = 0
+        self.focused = None  # last tab select_tab focused
 
-    def get_tab_html(self, handle=None):
+    def select_tab(self, handle):
+        self.focused = handle
+
+    def get_tab_html(self):
         self.get_calls += 1
         return self.source
 
-    def reload(self, handle=None):
+    def reload(self):
         self.reload_calls += 1
-        return TabInfo(handle=handle or "active", url="https://www.amazon.com/", title="T", selected=True, profile_dir="/p")
+        return TabInfo(handle=self.focused or "active", url="https://www.amazon.com/", title="T", selected=True, profile_dir="/p")
 
 
 def test_first_get_parses_without_reloading(fake_clock):
