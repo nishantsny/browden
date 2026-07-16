@@ -13,25 +13,29 @@ Usage (from the repo root, any Python):
     python3 setup/fetch_tranco.py --top-n 500000         # a smaller cutoff
     python3 setup/fetch_tranco.py --config-dir /etc/browden
 
-Tranco (https://tranco-list.eu) publishes a manipulation-resistant ranking; the
-daily "top-1m" download is a zip of ``rank,domain`` CSV rows. We keep the first
---top-n domains, lower-cased, one per line, gzipped. Popularity is a proxy for
-"established", never a guarantee of "safe" — see the README.
+How it fetches (issue #69): Tranco (https://tranco-list.eu) publishes a daily,
+manipulation-resistant ranking behind a stable per-list id. We resolve the
+current id from ``/top-1m-id`` and download the first ``--top-n`` rows of that
+list as CSV from ``/download/<id>/<top-n>`` — ``rank,domain`` rows, of which we
+keep the domain, lower-cased, one per line, gzipped. Pinning the id keeps a run
+reproducible: the same id yields the same list. (Tranco documents a
+``/api/lists/id/<id>`` metadata endpoint, but the *list data* is served from
+``/download/<id>/<n>``.) Popularity is a proxy for "established", never a
+guarantee of "safe" — see the README.
 
-Licensing / reproducibility: the default ``--url`` is Tranco's daily combined
-list, which may aggregate CC BY-NC (non-commercial) and CC BY-SA sources. For
-commercial use — or just a stable, reproducible list — build one restricted to
-permissively-licensed sources at https://tranco-list.eu/configure and pass its
-permanent permalink, e.g.
-``--url https://tranco-list.eu/download/<LIST_ID>/1000000``. See the README's
-Attribution section.
+The download is size-bounded (see ``_read_cap_bytes``) so a wrong/hostile URL
+can't stream unbounded data into memory.
+
+Licensing / reproducibility: the daily list may aggregate CC BY-NC
+(non-commercial) and CC BY-SA sources. For commercial use — or a specific,
+permissively-licensed list — build one at https://tranco-list.eu/configure and
+pass its permalink, e.g. ``--url https://tranco-list.eu/download/<LIST_ID>/1000000``.
+See the README's Attribution section.
 """
 import argparse
 import csv
 import gzip
-import io
 import urllib.request
-import zipfile
 from pathlib import Path
 
 # stdlib-only on purpose: this runs with any Python, before the venv exists.
@@ -39,7 +43,19 @@ from pathlib import Path
 # the file) — keep them in sync if either changes.
 TRANCO_FILENAME = "tranco-top-400k.txt.gz"
 DEFAULT_TOP_N = 1_000_000
-TRANCO_ZIP_URL = "https://tranco-list.eu/top-1m.csv.zip"
+
+# The current daily list's id (a short token, e.g. "XN2NN"), and the CSV data
+# for the first ``count`` rows of a given list.
+TRANCO_ID_URL = "https://tranco-list.eu/top-1m-id"
+TRANCO_DOWNLOAD_TEMPLATE = "https://tranco-list.eu/download/{list_id}/{count}"
+
+# Upper bound on the download read: ~50 MiB for the full 1M list, scaled linearly
+# by --top-n, never below 1 MiB (issue #69) — a safety bound against a wrong or
+# hostile URL streaming unbounded data, not a tight fit (the real 1M CSV is well
+# under 50 MiB).
+_MAX_READ_BYTES = 50 * 1024 * 1024
+_MIN_READ_BYTES = 1 * 1024 * 1024
+
 DEFAULT_CONFIG_DIR = Path("~/.browden")
 
 
@@ -48,21 +64,60 @@ def snapshot_path(config_dir: Path) -> Path:
     return config_dir.expanduser() / TRANCO_FILENAME
 
 
-def fetch(top_n: int, out_path: Path, url: str = TRANCO_ZIP_URL) -> int:
-    """Download the Tranco top-1m list and write the first ``top_n`` domains to
-    ``out_path`` (gzipped, one lower-cased registrable domain per line)."""
-    print(f"Downloading {url} ...")
+def _read_cap_bytes(top_n: int) -> int:
+    """Max bytes to read for ``top_n`` rows: 50 MiB at 1M, scaled down, 1 MiB floor."""
+    scaled = _MAX_READ_BYTES * max(top_n, 0) // DEFAULT_TOP_N
+    return max(_MIN_READ_BYTES, scaled)
+
+
+def _domains_from_csv(text: str, top_n: int, *, truncated: bool) -> list[str]:
+    """Parse ``rank,domain`` CSV text into up to ``top_n`` lower-cased domains.
+
+    When ``truncated`` (the read hit its byte cap) the final line may be a partial
+    row, so it is dropped before parsing rather than risk keeping a cut-off domain.
+    """
+    lines = text.splitlines()
+    if truncated and lines:
+        lines = lines[:-1]
+    domains: list[str] = []
+    for row in csv.reader(lines):
+        if len(row) >= 2 and row[1].strip():
+            domains.append(row[1].strip().lower())
+        if len(domains) >= top_n:
+            break
+    return domains
+
+
+def _resolve_list_id(url: str = TRANCO_ID_URL) -> str:
+    """Fetch the current daily list's id (a short token) from ``/top-1m-id``."""
+    with urllib.request.urlopen(url, timeout=30) as resp:
+        list_id = resp.read(256).decode("utf-8").strip()
+    if not list_id:
+        raise RuntimeError(f"empty Tranco list id from {url}")
+    return list_id
+
+
+def fetch(top_n: int, out_path: Path, url: str | None = None) -> int:
+    """Write the first ``top_n`` Tranco domains to ``out_path`` (gzipped, one per line).
+
+    With no ``url`` the current list id is resolved from ``/top-1m-id`` and the
+    CSV is pulled from ``/download/<id>/<top_n>``; pass an explicit ``url`` to pin
+    a specific list permalink instead. The response body is read under a
+    size cap (:func:`_read_cap_bytes`).
+    """
+    if url is None:
+        list_id = _resolve_list_id()
+        url = TRANCO_DOWNLOAD_TEMPLATE.format(list_id=list_id, count=top_n)
+    cap = _read_cap_bytes(top_n)
+    print(f"Downloading {url} (up to {cap} bytes) ...")
     with urllib.request.urlopen(url, timeout=120) as resp:
-        blob = resp.read()
-    with zipfile.ZipFile(io.BytesIO(blob)) as zf:
-        name = zf.namelist()[0]
-        rows = csv.reader(io.TextIOWrapper(zf.open(name), encoding="utf-8"))
-        domains = []
-        for row in rows:
-            if len(row) >= 2 and row[1].strip():
-                domains.append(row[1].strip().lower())
-            if len(domains) >= top_n:
-                break
+        blob = resp.read(cap)
+    truncated = len(blob) >= cap
+    if truncated:
+        print(f"WARNING: response reached the {cap}-byte cap; dropping a possibly-partial last row")
+    domains = _domains_from_csv(blob.decode("utf-8", errors="replace"), top_n, truncated=truncated)
+    if not domains:
+        raise RuntimeError(f"no domains parsed from {url} — unexpected response format")
     out_path.parent.mkdir(parents=True, exist_ok=True)
     with gzip.open(out_path, "wt", encoding="utf-8", compresslevel=9) as fh:
         fh.write("\n".join(domains) + "\n")
@@ -78,10 +133,10 @@ def main() -> None:
                     help=f"config dir the snapshot is written into (default: {DEFAULT_CONFIG_DIR})")
     ap.add_argument("--out", type=Path, default=None,
                     help="explicit output .txt.gz path (overrides --config-dir)")
-    ap.add_argument("--url", default=TRANCO_ZIP_URL,
-                    help="Tranco list zip URL (default: the daily top-1m). Point "
-                         "at a permanent list permalink to pin a specific, "
-                         "permissively-licensed list — see the module docstring.")
+    ap.add_argument("--url", default=None,
+                    help="pin an explicit Tranco list CSV permalink (e.g. "
+                         "https://tranco-list.eu/download/<LIST_ID>/1000000); "
+                         "default resolves the current daily list id automatically")
     args = ap.parse_args()
     out = args.out if args.out is not None else snapshot_path(args.config_dir)
     fetch(args.top_n, out, args.url)
