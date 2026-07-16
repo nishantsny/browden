@@ -1,6 +1,10 @@
 # =============================================================================
 # browden — allowing the agent to read LOCAL FILES (file://).
 #
+# LIVE RELOAD: browden re-reads this file about every 10s while it runs, so
+# edits take effect without a restart. A save that doesn't parse (mid-edit, bad
+# YAML) is ignored and the last valid version stays in force.
+#
 # By default browden accepts only https:// URLs: file://, ftp://, data:, etc.
 # are refused no matter what the host allowlist says, so a prompt-injected agent
 # can't be steered into reading /etc/passwd or your SSH keys off disk.

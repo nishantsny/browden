@@ -1,5 +1,9 @@
 # browden access policy — grocery cart manipulation (shopping).
 #
+# LIVE RELOAD: browden re-reads this file about every 10s while it runs, so
+# edits take effect without a restart. A save that doesn't parse (mid-edit, bad
+# YAML) is ignored and the last valid version stays in force.
+#
 # A worked example that ENABLES the `click` write action so an agent can add
 # items to (and adjust) a cart on a few grocery/retail storefronts. Copy this to
 # ~/.browden/allowlist.yaml if you want the shopping workflow instead of the
