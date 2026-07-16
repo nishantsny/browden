@@ -13,7 +13,7 @@ Usage (from the repo root, any Python):
     python3 setup/fetch_tranco.py --top-n 500000         # a smaller cutoff
     python3 setup/fetch_tranco.py --config-dir /etc/browden
 
-How it fetches (issue #69): Tranco (https://tranco-list.eu) publishes a daily,
+Tranco (https://tranco-list.eu) publishes a daily,
 manipulation-resistant ranking behind a stable per-list id. We resolve the
 current id from ``/top-1m-id`` and download the first ``--top-n`` rows of that
 list as CSV from ``/download/<id>/<top-n>`` — ``rank,domain`` rows, of which we
