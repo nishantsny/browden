@@ -43,12 +43,6 @@ from ...web_navigator.soup_cache import SoupCache
 IDLE_TTL_SECONDS = 3600
 REAP_INTERVAL_SECONDS = 300
 
-# Sentinel: _with_tab returns the standard tab-gone envelope when a tab has
-# vanished, unless the caller passes an explicit ``gone`` value (current_url
-# wants None). A distinct object so ``gone=None`` is honoured, not misread as
-# "use the default".
-_TAB_GONE = object()
-
 
 class BrowserSessionManager:
     def __init__(self, backend, *, namespace: str, clock=time.monotonic, start_reaper: bool = True):
@@ -114,7 +108,7 @@ class BrowserSessionManager:
         finally:
             self._driver_busy = False
 
-    async def _with_tab(self, id: str, work, *, invalidate: bool, gone=_TAB_GONE):
+    async def _with_tab(self, id: str, work, invalidate: bool = False):
         """Run ``work(handle)`` for a specific tab off the loop, maintaining tracking.
 
         The one skeleton every per-tab op shared: resolve the ``id`` to its raw
@@ -123,15 +117,18 @@ class BrowserSessionManager:
         it too runs off-loop), and on success touch the tab's registry entry —
         invalidating its cached soup when ``invalidate`` (i.e. the op mutated the
         DOM). If the tab has vanished (``TabNotFoundError``), drop it from cache +
-        registry and return the gone-response: the standard tab-gone envelope, or
-        ``gone`` when the caller wants another value (``current_url`` passes None).
+        registry and return the standard tab-gone envelope.
+
+        Every tab op that returns a wire envelope uses this. ``current_url`` is the
+        one exception (it returns a bare URL / None, not an envelope) and keeps its
+        own tiny try/except.
         """
         handle = self._handle(id)
         try:
             result = await self._run_driver(work, handle)
         except TabNotFoundError:
             self._drop(handle)
-            return self._tab_gone(id) if gone is _TAB_GONE else gone
+            return self._tab_gone(id)
         if invalidate:
             self._cache.invalidate(handle)
         self._registry.touch(handle)
@@ -208,13 +205,25 @@ class BrowserSessionManager:
         return await self._with_tab(id, work, invalidate=True)
 
     async def current_url(self, *, id: str) -> str | None:
-        """Return ``id``'s live URL (for the per-action host gate), or None if the tab is gone."""
-        self.sweep_idle()
+        """Return ``id``'s live URL (for the per-action host gate), or None if the tab is gone.
 
-        def work(handle):
+        The one op that doesn't return a wire envelope, so it can't share
+        ``_with_tab`` (which renders the tab-gone envelope): a gone tab is None
+        here, which the caller — the per-action host gate — turns into the envelope.
+        """
+        self.sweep_idle()
+        handle = self._handle(id)
+
+        def work():
             self._backend.select_tab(handle)
             return self._backend.current_url()
-        return await self._with_tab(id, work, invalidate=False, gone=None)
+        try:
+            url = await self._run_driver(work)
+        except TabNotFoundError:
+            self._drop(handle)
+            return None
+        self._registry.touch(handle)
+        return url
 
     # -- write tools --------------------------------------------------------
 
