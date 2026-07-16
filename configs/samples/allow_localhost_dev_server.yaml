@@ -1,6 +1,10 @@
 # =============================================================================
 # browden — letting the agent read a LOCAL DEV SERVER (http://localhost:PORT).
 #
+# LIVE RELOAD: browden re-reads this file about every 10s while it runs, so
+# edits take effect without a restart. A save that doesn't parse (mid-edit, bad
+# YAML) is ignored and the last valid version stays in force.
+#
 # By default browden accepts only https:// URLs, so a plain-http dev server at
 # http://localhost:8000 is refused. A non-https scheme is re-enabled only for a
 # host you name EXPLICITLY in read.website_overrides — so you opt localhost in by
