@@ -2,6 +2,7 @@ import argparse
 import asyncio
 import contextlib
 import functools
+import inspect
 import os
 import sys
 from collections.abc import AsyncIterator, Awaitable, Callable
@@ -130,9 +131,96 @@ def _tool(fn: Callable[..., Awaitable[dict]]) -> Callable[..., Awaitable[dict]]:
     return wrapper
 
 
+# insert_text's typed content may be sensitive (card/CVV/etc.), so the call log
+# names the field but never the value — every other tool arg is fair to log.
+_UNLOGGED_ARGS = frozenset({"value"})
+
+
+def _logged(fn: Callable[..., Awaitable]) -> Callable[..., Awaitable]:
+    """Bracket a tool call with the ``Tool called``/``Tool finished`` log lines.
+
+    Replaces the hand-written pair every tool used to open and close with. The
+    call line names the tool and reprs its arguments (minus :data:`_UNLOGGED_ARGS`);
+    the finish line fires only on a normal return, so an exception (a failed gate)
+    leaves just the call line — same as the old hand-rolled logging.
+    """
+    sig = inspect.signature(fn)
+
+    @functools.wraps(fn)
+    async def wrapper(*args, **kwargs):
+        try:
+            bound = sig.bind(*args, **kwargs)
+            shown = ", ".join(f"{k}={v!r}" for k, v in bound.arguments.items()
+                              if k not in _UNLOGGED_ARGS)
+        except TypeError:
+            shown = ""  # bad call (e.g. missing id) — let the body raise the real error
+        logger.info(f"Tool called: {fn.__name__} ({shown})")
+        result = await fn(*args, **kwargs)
+        logger.info(f"Tool finished: {fn.__name__}")
+        return result
+
+    return wrapper
+
+
+def _tab_gate(check: Callable[[str], None]):
+    """Build a decorator enforcing a per-tab URL policy before the tool body runs.
+
+    Collapses the read/host-gate preamble every DOM and write tool repeated: route
+    the id to its session, read the tab's *live* URL, short-circuit to the tab-gone
+    envelope if the tab is closed, then run ``check(url)`` (which raises to deny).
+    The tool body may declare keyword-only ``session`` / ``url`` parameters to
+    receive the already-routed session and that live URL, so it re-routes nothing
+    and re-reads nothing. Those two are server-injected, so they're stripped from
+    the signature the MCP schema (and the caller) sees.
+    """
+    def decorator(fn):
+        sig = inspect.signature(fn)
+        injected = [n for n in ("session", "url") if n in sig.parameters]
+        public = sig.replace(
+            parameters=[p for n, p in sig.parameters.items() if n not in injected])
+
+        @functools.wraps(fn)
+        async def wrapper(*args, **kwargs) -> dict:
+            bound = public.bind(*args, **kwargs)
+            bound.apply_defaults()
+            id = bound.arguments["id"]
+            session = _store.route(id)
+            url = await session.current_url(id=id)
+            if url is None:
+                return tab_gone_envelope(id)
+            check(url)  # raises (ValidationError / host gate) to deny
+            available = {"session": session, "url": url}
+            return await fn(**bound.arguments, **{n: available[n] for n in injected})
+
+        wrapper.__signature__ = public  # hide the injected params from the MCP schema
+        return wrapper
+
+    return decorator
+
+
+def _read_check(url: str) -> None:
+    """H2: refuse a read of a tab whose live URL isn't on the read allowlist."""
+    if not ensure_url_allowed(_refresher.allowlist, url):
+        raise ValidationError(f"URL not on the read allowlist: {url}")
+
+
+read_gated = _tab_gate(_read_check)
+
+
+def host_gated(action: str):
+    """Gate a write tool (``click`` / ``write-text``) on the tab's live host.
+
+    The per-action counterpart of :data:`read_gated`: the tab's host must be
+    listed under ``action`` (denylist vetoes first), checked against the live URL
+    before the element is ever queried.
+    """
+    return _tab_gate(lambda url: check_action_host(_refresher.allowlist, action, url))
+
+
 # -- navigation tools -------------------------------------------------------
 
 @mcp.tool()
+@_logged
 async def list_tabs() -> list[dict]:
     """List all open browser tabs across all profiles' sessions.
 
@@ -143,8 +231,6 @@ async def list_tabs() -> list[dict]:
     Profiles whose Chrome has exited are skipped (they have no open tabs);
     listing never relaunches a browser.
     """
-    logger.info("Tool called: list_tabs")
-
     async def _fetch(session) -> list[dict]:
         if not await session.is_live():
             logger.info(f"list_tabs: skipping dead session (profile={session.profile_dir})")
@@ -166,11 +252,11 @@ async def list_tabs() -> list[dict]:
         return kept
 
     listings = await asyncio.gather(*(_fetch(s) for s in _store.sessions()))
-    logger.info("Tool finished: list_tabs")
     return [tab for tabs in listings for tab in tabs]
 
 
 @mcp.tool()
+@_logged
 async def new_blank_tab(profile_dir: str | None = None) -> dict:
     """Open a new blank tab and return it (navigate it afterwards).
 
@@ -181,34 +267,31 @@ async def new_blank_tab(profile_dir: str | None = None) -> dict:
     sequentially — concurrent requests (even to different ids) race over
     the shared focused window and give undefined results.
     """
-    logger.info(f"Tool called: new_blank_tab (profile_dir={profile_dir!r})")
     try:
         session = _store.get_or_create_session(_backend_for(profile_dir), max_sessions=_refresher.allowlist.max_browser_sessions)
         result = await session.new_blank_tab(max_tabs=_refresher.allowlist.max_tabs_per_session)  # wire dict with composite id
     except RuntimeError as e:
         return {"error": str(e)}
-    logger.info("Tool finished: new_blank_tab")
     return result
+
 
 @mcp.tool()
 @_tool
+@_logged
 async def close_tab(id: str) -> dict:
     """Close a tab by id."""
-    logger.info(f"Tool called: close_tab (id={id!r})")
     session = _store.route(id)
     await session.close_tab(id)
-    logger.info("Tool finished: close_tab")
     return {"closed": id}
 
 
 @mcp.tool()
 @_tool
+@_logged
 async def select_tab(id: str) -> dict:
     """Switch the active tab."""
-    logger.info(f"Tool called: select_tab (id={id!r})")
     session = _store.route(id)
     await session.select_tab(id)
-    logger.info("Tool finished: select_tab")
     return {"selected": id}
 
 
@@ -245,14 +328,13 @@ async def _guard_landing(session, id: str, result: dict) -> dict:
 
 @mcp.tool()
 @_tool
+@_logged
 async def navigate(url: str, id: str) -> dict:
     """Navigate the named tab to url. Url is gated by the per-host allowlist (query strings and fragments pass through)."""
-    logger.info(f"Tool called: navigate (url={url!r}, id={id!r})")
     url = validate_url(url, _refresher.allowlist.read_policy)
     session = _store.route(id)
     result = await session.navigate(url, id=id)  # wire dict (or the tab-gone envelope)
     result = await _guard_landing(session, id, result)  # re-gate the post-redirect landing
-    logger.info("Tool finished: navigate")
     return result
 
 
@@ -260,7 +342,9 @@ async def navigate(url: str, id: str) -> dict:
 
 @mcp.tool()
 @_tool
-async def click(css_selector: str, id: str) -> dict:
+@_logged
+@host_gated("click")
+async def click(css_selector: str, id: str, *, session, url) -> dict:
     """Click a control on a tab — the only write action.
 
     Three server-side gates, all default-deny, must pass:
@@ -284,31 +368,22 @@ async def click(css_selector: str, id: str) -> dict:
          explicitly as ``label: '.*'`` (an omitted label fails config parsing).
     Any gate failing raises a ValidationError and nothing is clicked.
     """
-    logger.info(f"Tool called: click (css_selector={css_selector!r}, id={id!r})")
-    session = _store.route(id)
-
-    # Gate 1: per-action host allowlist (denylist veto + the click section),
-    # checked against the tab's live URL before the element is ever queried.
-    url = await session.current_url(id=id)
-    if url is None:
-        return tab_gone_envelope(id)
-    check_action_host(_refresher.allowlist, "click", url)  # raises if denied / host not allowed
-
+    # Gate 1 (the tab's live host is listed under `click`) is enforced by
+    # @host_gated before we get here; it hands us the routed session and live url.
     # Gates 2-3: fetch the element (limit=2 so ambiguity is detectable), then let
     # the validator judge integrity, anchor target, and the host's required label.
     found = await session.query_selector_all(css_selector, id=id, limit=2)
     if "error" in found:
         return found
     validate_click_target(_refresher.allowlist, url, css_selector, found)  # raises on any failed gate
-
-    result = await session.click(css_selector, id=id)
-    logger.info("Tool finished: click")
-    return result
+    return await session.click(css_selector, id=id)
 
 
 @mcp.tool()
 @_tool
-async def insert_text(css_selector: str, value: str, id: str) -> dict:
+@_logged
+@host_gated("write-text")
+async def insert_text(css_selector: str, value: str, id: str, *, session, url) -> dict:
     """Type text into a field on a tab — the write-text action.
 
     The text-entry counterpart of ``click``. Three server-side gates, all
@@ -330,26 +405,15 @@ async def insert_text(css_selector: str, value: str, id: str) -> dict:
          by exact ``id``/``name``; the field passes if the label OR an id matches.
     Any gate failing raises a ValidationError and nothing is typed.
     """
-    logger.info(f"Tool called: insert_text (css_selector={css_selector!r}, id={id!r})")
-    session = _store.route(id)
-
-    # Gate 1: per-action host allowlist ('write-text'; denylist vetoes first),
-    # checked against the tab's live URL before the element is ever queried.
-    url = await session.current_url(id=id)
-    if url is None:
-        return tab_gone_envelope(id)
-    check_action_host(_refresher.allowlist, "write-text", url)  # raises if denied / host not allowed
-
+    # Gate 1 (the tab's live host is listed under `write-text`) is enforced by
+    # @host_gated before we get here; it hands us the routed session and live url.
     # Gates 2-3: fetch the element (limit=2 so ambiguity is detectable), then let
     # the validator judge integrity and the host's required label / field-id.
     found = await session.query_selector_all(css_selector, id=id, limit=2)
     if "error" in found:
         return found
     validate_write_text_target(_refresher.allowlist, url, css_selector, found)  # raises on any failed gate
-
-    result = await session.insert_text(css_selector, value, id=id)
-    logger.info("Tool finished: insert_text")
-    return result
+    return await session.insert_text(css_selector, value, id=id)
 
 
 # -- DOM-query tools --------------------------------------------------------
@@ -363,118 +427,81 @@ async def insert_text(css_selector: str, value: str, id: str) -> dict:
 
 @mcp.tool()
 @_tool
+@_logged
+@read_gated
 async def get_element_by_id(element_id: str, id: str,
-                            include_html: bool = False, max_html_bytes: int = 4096) -> dict:
+                            include_html: bool = False, max_html_bytes: int = 4096,
+                            *, session) -> dict:
     """document.getElementById on a tab — one element node, or found=false (not an error) if absent."""
-    logger.info(f"Tool called: get_element_by_id (element_id={element_id!r}, id={id!r})")
-    session = _store.route(id)
-    url = await session.current_url(id=id)
-    if url is None:
-        return tab_gone_envelope(id)
-    if not ensure_url_allowed(_refresher.allowlist, url):  # H2: gate the tab's live url before reading
-        raise ValidationError(f"URL not on the read allowlist: {url}")
-    result = await session.get_element_by_id(
+    return await session.get_element_by_id(
         element_id, id=id, include_html=include_html, max_html_bytes=max_html_bytes)
-    logger.info("Tool finished: get_element_by_id")
-    return result
 
 
 @mcp.tool()
 @_tool
+@_logged
+@read_gated
 async def get_elements_by_class_name(class_names: str, id: str,
                                      limit: int = 10, offset: int = 0,
-                                     include_html: bool = False, max_html_bytes: int = 4096) -> dict:
+                                     include_html: bool = False, max_html_bytes: int = 4096,
+                                     *, session) -> dict:
     """document.getElementsByClassName on a tab — space-separated names, element must have ALL. Paginated."""
-    logger.info(f"Tool called: get_elements_by_class_name (class_names={class_names!r}, id={id!r})")
-    session = _store.route(id)
-    url = await session.current_url(id=id)
-    if url is None:
-        return tab_gone_envelope(id)
-    if not ensure_url_allowed(_refresher.allowlist, url):  # H2: gate the tab's live url before reading
-        raise ValidationError(f"URL not on the read allowlist: {url}")
-    result = await session.get_elements_by_class_name(
+    return await session.get_elements_by_class_name(
         class_names, id=id, limit=limit, offset=offset,
         include_html=include_html, max_html_bytes=max_html_bytes)
-    logger.info("Tool finished: get_elements_by_class_name")
-    return result
 
 
 @mcp.tool()
 @_tool
+@_logged
+@read_gated
 async def query_selector(css_selector: str, id: str,
-                         include_html: bool = False, max_html_bytes: int = 4096) -> dict:
+                         include_html: bool = False, max_html_bytes: int = 4096,
+                         *, session) -> dict:
     """document.querySelector on a tab — one element node, or found=false if no match. Invalid CSS → error."""
-    logger.info(f"Tool called: query_selector (css_selector={css_selector!r}, id={id!r})")
-    session = _store.route(id)
-    url = await session.current_url(id=id)
-    if url is None:
-        return tab_gone_envelope(id)
-    if not ensure_url_allowed(_refresher.allowlist, url):  # H2: gate the tab's live url before reading
-        raise ValidationError(f"URL not on the read allowlist: {url}")
-    result = await session.query_selector(
+    return await session.query_selector(
         css_selector, id=id, include_html=include_html, max_html_bytes=max_html_bytes)
-    logger.info("Tool finished: query_selector")
-    return result
 
 
 @mcp.tool()
 @_tool
+@_logged
+@read_gated
 async def query_selector_all(css_selector: str, id: str,
                              limit: int = 10, offset: int = 0,
-                             include_html: bool = False, max_html_bytes: int = 4096) -> dict:
+                             include_html: bool = False, max_html_bytes: int = 4096,
+                             *, session) -> dict:
     """document.querySelectorAll on a tab — paginated list of element nodes. Invalid CSS → error."""
-    logger.info(f"Tool called: query_selector_all (css_selector={css_selector!r}, id={id!r})")
-    session = _store.route(id)
-    url = await session.current_url(id=id)
-    if url is None:
-        return tab_gone_envelope(id)
-    if not ensure_url_allowed(_refresher.allowlist, url):  # H2: gate the tab's live url before reading
-        raise ValidationError(f"URL not on the read allowlist: {url}")
-    result = await session.query_selector_all(
+    return await session.query_selector_all(
         css_selector, id=id, limit=limit, offset=offset,
         include_html=include_html, max_html_bytes=max_html_bytes)
-    logger.info("Tool finished: query_selector_all")
-    return result
 
 
 @mcp.tool()
 @_tool
-async def screenshot(id: str):  # -> dict | Image; unannotated: FastMCP can't schema-ify Image
+@_logged
+@read_gated
+async def screenshot(id: str, *, session):  # -> dict | Image; unannotated: FastMCP can't schema-ify Image
     """Capture a PNG screenshot of a tab's current viewport.
 
     Read-only: it grabs live pixels from the rendered page and never mutates it
     or the DOM cache. Returns the image on success, or
     ``{"error": ..., "id": ...}`` if the tab is no longer open.
     """
-    logger.info(f"Tool called: screenshot (id={id!r})")
-    session = _store.route(id)
-    url = await session.current_url(id=id)
-    if url is None:
-        return tab_gone_envelope(id)
-    if not ensure_url_allowed(_refresher.allowlist, url):  # H2: gate the tab's live url before reading
-        raise ValidationError(f"URL not on the read allowlist: {url}")
     result = await session.screenshot(id=id)
     if isinstance(result, dict):  # tab gone — structured error, not an image
         return result
-    logger.info("Tool finished: screenshot")
     return Image(data=result, format="png")
 
 
 @mcp.tool()
 @_tool
-async def force_reload_tab(id: str) -> dict:
+@_logged
+@read_gated
+async def force_reload_tab(id: str, *, session) -> dict:
     """Reload the named tab and refresh its cached DOM."""
-    logger.info(f"Tool called: force_reload_page (id={id!r})")
-    session = _store.route(id)
-    url = await session.current_url(id=id)
-    if url is None:
-        return tab_gone_envelope(id)
-    if not ensure_url_allowed(_refresher.allowlist, url):  # H2: gate the tab's live url before reading
-        raise ValidationError(f"URL not on the read allowlist: {url}")
     result = await session.force_reload_tab(id=id)
-    result = await _guard_landing(session, id, result)  # a reload can 302 off-list too
-    logger.info("Tool finished: force_reload_page")
-    return result
+    return await _guard_landing(session, id, result)  # a reload can 302 off-list too
 
 
 def main(argv: list[str] | None = None) -> None:
