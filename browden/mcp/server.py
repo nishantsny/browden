@@ -1,9 +1,10 @@
 import argparse
 import asyncio
+import contextlib
 import functools
 import os
 import sys
-from collections.abc import Awaitable, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -37,18 +38,105 @@ _INSTRUCTIONS = (
     "browden drives a real Chrome session. Within a single profile-dir there is ONE browser session. You can open multiple tabs within that one session, though concurrent requests are only supported across different sessions, but within the same session (this is a limitation of selenium: the underlying automation library). A new profile-dir can be chosen while crating a new tab. If you choose a previously used profile-dir, then the previous session will be reused. Creating a new tab will return a tab-id which is unique across all sessions, pass it back verbatim on other tools."
 )
 
+# How often the background poller re-stats the allowlist file to hot-reload it.
+_RELOAD_INTERVAL_SECONDS = 10
+
+
+@contextlib.asynccontextmanager
+async def _allowlist_lifespan(_server: FastMCP) -> AsyncIterator[None]:
+    """Run the allowlist hot-reload poller for the server's lifetime.
+
+    The poller lives on the *same* event loop as the tools, so the reload's
+    atomic rebind can never interleave with a tool mid-statement. Started on
+    server boot, cancelled cleanly on shutdown.
+    """
+    task = asyncio.create_task(_allowlist_reload_loop())
+    logger.info(f"Allowlist hot-reload poller started ({_RELOAD_INTERVAL_SECONDS}s interval)")
+    try:
+        yield
+    finally:
+        task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await task
+
+
 mcp = FastMCP(
     "browden",
     instructions=_INSTRUCTIONS,
     host=os.environ.get("MCP_HOST", DEFAULT_HOST),
-    port=int(os.environ.get("MCP_PORT", DEFAULT_PORT))
+    port=int(os.environ.get("MCP_PORT", DEFAULT_PORT)),
+    lifespan=_allowlist_lifespan,
 )
 
 # Import-time default: the repo sample (reads open, writes deny-all), so unit
 # tests and library imports see a deterministic policy. main() re-resolves
 # (CLI > env > user config > sample) and replaces this before serving.
 _ALLOWLIST = load_allowlist(SAMPLE_ALLOWLIST) if SAMPLE_ALLOWLIST.exists() else ActionAllowlist({})
+
+# Allowlist hot-reload state. The loaded ActionAllowlist is immutable after
+# construction, so a reload never mutates it in place — it builds a fresh one
+# off to the side and atomically rebinds _ALLOWLIST (a single GIL-atomic store).
+# Every tool only ever *reads* that reference and uses a frozen object, so the
+# swap needs no lock: a call already in flight simply finishes against the
+# policy it read. _ALLOWLIST_PATH is the config file the poller watches (main()
+# seeds it; a bare library import leaves it None -> nothing is polled), and
+# _ALLOWLIST_STAT is the (mtime, size) we last loaded, our change signature.
+_ALLOWLIST_PATH: Path | None = None
+_ALLOWLIST_STAT: tuple[float, int] | None = None
+
 logger.info("Browden MCP module initialized")
+
+
+def _stat_signature(path: Path) -> tuple[float, int] | None:
+    """The change signature ``(st_mtime, st_size)`` of ``path``, or None if it can't be stat'd.
+
+    Pairing size with mtime catches a same-second edit that leaves the file the
+    same length but changed content — pure mtime can alias those on coarse
+    filesystem timestamp resolution.
+    """
+    try:
+        st = path.stat()
+    except OSError:
+        return None
+    return (st.st_mtime, st.st_size)
+
+
+def _maybe_reload_allowlist() -> bool:
+    """Hot-reload ``_ALLOWLIST`` iff the watched config file's signature changed.
+
+    Fail-safe by design: a vanished or unreadable file, or a config that no
+    longer parses (a mid-edit save, invalid YAML), leaves the last-good
+    allowlist in place — a security gate must never fall open or crash on a bad
+    edit. Returns True only when a fresh allowlist was actually swapped in.
+    """
+    global _ALLOWLIST, _ALLOWLIST_STAT
+    if _ALLOWLIST_PATH is None:
+        return False
+    sig = _stat_signature(_ALLOWLIST_PATH)
+    if sig is None or sig == _ALLOWLIST_STAT:
+        return False  # gone/unreadable, or unchanged since last load — nothing to do
+    try:
+        new_allowlist = load_allowlist(_ALLOWLIST_PATH)
+    except ConfigError as e:
+        # Record the signature so we don't re-parse the same broken file every
+        # tick; the operator's next real edit changes it again and we retry.
+        _ALLOWLIST_STAT = sig
+        logger.warning(f"allowlist reload skipped, keeping last-good config: {e}")
+        return False
+    _ALLOWLIST = new_allowlist  # atomic RCU swap: readers see old-or-new, never torn
+    _ALLOWLIST_STAT = sig
+    logger.info(f"Reloaded allowlist config from {_ALLOWLIST_PATH}")
+    return True
+
+
+async def _allowlist_reload_loop() -> None:
+    """Poll the watched config every ``_RELOAD_INTERVAL_SECONDS`` and hot-reload on change."""
+    while True:
+        await asyncio.sleep(_RELOAD_INTERVAL_SECONDS)
+        try:
+            _maybe_reload_allowlist()
+        except Exception as e:  # a single bad tick must never kill the poller
+            logger.warning(f"allowlist reload tick failed: {e}")
 
 # All per-profile session state and the customer<->backend id mapping live in
 # the store (see session_management/BrowserSessionStore.py).
@@ -463,7 +551,7 @@ def main(argv: list[str] | None = None) -> None:
     tool (the internal consumers of ``_ALLOWLIST``) gates against the config
     the operator chose.
     """
-    global _ALLOWLIST
+    global _ALLOWLIST, _ALLOWLIST_PATH, _ALLOWLIST_STAT
     parser = argparse.ArgumentParser(
         prog="browden", description="Browden MCP server")
     parser.add_argument(
@@ -479,6 +567,11 @@ def main(argv: list[str] | None = None) -> None:
         _ALLOWLIST = load_allowlist(path)
     except ConfigError as e:
         parser.error(str(e))
+    # Point the hot-reload poller (started by _allowlist_lifespan on serve) at
+    # this file and seed the signature we just loaded, so the first tick only
+    # reloads if the operator edits it after startup.
+    _ALLOWLIST_PATH = path.expanduser()
+    _ALLOWLIST_STAT = _stat_signature(_ALLOWLIST_PATH)
     logger.info(f"Loaded allowlist config from {path}")
 
     transport = os.environ.get("MCP_TRANSPORT", "stdio")
