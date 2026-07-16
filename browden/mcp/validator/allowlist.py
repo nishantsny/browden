@@ -74,8 +74,17 @@ class Allowlist:
         }
 
     @classmethod
-    def from_file(cls, path: Path) -> "Allowlist":
-        return cls(yaml.safe_load(path.read_text()) or {})
+    def create_allowlist(cls, rules: dict[str, list[str]]) -> "Allowlist":
+        """An ALLOW list: each path regex must fullmatch the whole path, so
+        ``^/products`` does not also admit ``/products-secret-admin`` (spell a
+        prefix rule as ``^/products/.*``)."""
+        return cls(rules, full_match=True)
+
+    @classmethod
+    def create_denylist(cls, rules: dict[str, list[str]]) -> "Allowlist":
+        """A DENY list: each path regex prefix-matches (start-anchored) so it
+        blocks broadly — ``^/checkout`` still denies ``/checkout/pay``."""
+        return cls(rules, full_match=False)
 
     def is_allowed(self, host: str, path: str) -> bool:
         patterns = self._rules.get(_canonical_host(host)) or self._rules.get("*")
@@ -203,7 +212,7 @@ class ActionAllowlist:
         self.max_browser_sessions = 10
         self.max_tabs_per_session = 20
         # A denylist blocks broadly: prefix match, not fullmatch (see Allowlist).
-        self._denylist = Allowlist(_paths_map(sections.get("denylist")), full_match=False)
+        self._denylist = Allowlist.create_denylist(_paths_map(sections.get("denylist")))
         self._read_policy = self._build_read_policy(
             sections.get("read"), self._denylist, tranco_path)
         for action, rules in sections.items():
@@ -231,7 +240,7 @@ class ActionAllowlist:
                     raise ValueError(
                         f"{action}.{host}: 'field_ids' must be a list of id/name strings")
                 field_ids[_canonical_host(host)] = {str(x) for x in raw_ids}
-            self._sections[action] = Allowlist(paths, full_match=True)
+            self._sections[action] = Allowlist.create_allowlist(paths)
             self._labels[action] = labels
             self._field_ids[action] = field_ids
 
@@ -256,7 +265,7 @@ class ActionAllowlist:
         if tranco_cfg.get("enabled"):
             snapshot = tranco_path if (tranco_path and tranco_path.exists()) else None
             tranco = TrancoList(top_n=int(tranco_cfg.get("top_n", DEFAULT_TOP_N)), path=snapshot)
-        overrides = Allowlist(_paths_map(cfg.get("website_overrides")), full_match=True)
+        overrides = Allowlist.create_allowlist(_paths_map(cfg.get("website_overrides")))
         return ReadPolicy(enabled=enabled, tranco=tranco, overrides=overrides, denylist=denylist)
 
     @classmethod
@@ -280,7 +289,7 @@ class ActionAllowlist:
 
     def section(self, action: str) -> Allowlist:
         """Return the host/path allowlist for ``action``; an empty (deny-all) one if unlisted."""
-        return self._sections.get(action) or Allowlist({}, full_match=True)
+        return self._sections.get(action) or Allowlist.create_allowlist({})
 
     def label_pattern(self, action: str, host: str) -> "re.Pattern[str] | None":
         """Return the required visible-label regex for ``action`` on ``host``, or None if none configured."""
