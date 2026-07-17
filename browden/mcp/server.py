@@ -6,7 +6,6 @@ import os
 import sys
 from collections.abc import AsyncIterator, Awaitable, Callable
 from pathlib import Path
-from urllib.parse import urlparse
 
 
 from ..common.logger import logger

@@ -3,7 +3,6 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from browden.common.tab import TabInfo
 
 
 def test_server_instructions_state_concurrency_contract():

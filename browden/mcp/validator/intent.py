@@ -15,6 +15,7 @@ and enabled-state are re-verified *live* by the backend at click time; the stati
 checks here are best-effort defence in depth on the cached snapshot.
 """
 
+import re
 from urllib.parse import urljoin, urlparse
 
 # Attributes a tab uses to steer AI agents — untrustworthy by construction, so an

@@ -33,7 +33,7 @@ from pathlib import Path
 
 # Sibling modules in setup/; stdlib-only, so importing them needs no venv.
 from fetch_psl import fetch as fetch_psl, snapshot_path as psl_snapshot_path
-from fetch_tranco import DEFAULT_TOP_N, TRANCO_FILENAME, fetch, snapshot_path
+from fetch_tranco import DEFAULT_TOP_N, fetch, snapshot_path
 from installers import (  # noqa: F401 — installers/_pythonw_for re-exported for tests
     LinuxSystemdInstaller, MacLaunchdInstaller, ServiceInstaller,
     WindowsTaskInstaller, _pythonw_for, _run, select_installer_cls,

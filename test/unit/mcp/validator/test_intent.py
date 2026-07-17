@@ -157,9 +157,11 @@ def test_field_label_matches_visible_field_names():
     assert field_label_matches(node("input", type="number", **{"aria-label": "Grocery tip amount"}), pat)
     assert field_label_matches(node("input", type="number", title="Grocery tip"), pat)
     # resolved by the serializer from aria-labelledby / <label>:
-    from_lblby = node("input", type="number"); from_lblby["labelledby_text"] = "Grocery Tip"
+    from_lblby = node("input", type="number")
+    from_lblby["labelledby_text"] = "Grocery Tip"
     assert field_label_matches(from_lblby, pat)
-    from_label = node("input", type="number"); from_label["field_label"] = "Grocery Tip (optional):"
+    from_label = node("input", type="number")
+    from_label["field_label"] = "Grocery Tip (optional):"
     assert field_label_matches(from_label, pat)
 
 
