@@ -108,12 +108,31 @@ class BrowserSessionManager:
         finally:
             self._driver_busy = False
 
-    async def _load_soup(self, handle: str):
-        """Fetch ``handle``'s (maybe stale-reloaded) soup. Raises ``TabNotFoundError`` if the tab is gone."""
-        def work():
-            soup, reloaded = self._cache.get_soup(handle, self._backend)
-            return soup, reloaded
-        return await self._run_driver(work)
+    async def _with_tab(self, id: str, work, invalidate: bool = False):
+        """Run ``work(handle)`` for a specific tab off the loop, maintaining tracking.
+
+        The one skeleton every per-tab op shared: resolve the ``id`` to its raw
+        backend handle, run ``work`` off the event loop (``work`` focuses/uses the
+        tab and returns the *finished* result — including any post-processing, since
+        it too runs off-loop), and on success touch the tab's registry entry —
+        invalidating its cached soup when ``invalidate`` (i.e. the op mutated the
+        DOM). If the tab has vanished (``TabNotFoundError``), drop it from cache +
+        registry and return the standard tab-gone envelope.
+
+        Every tab op that returns a wire envelope uses this. ``current_url`` is the
+        one exception (it returns a bare URL / None, not an envelope) and keeps its
+        own tiny try/except.
+        """
+        handle = self._handle(id)
+        try:
+            result = await self._run_driver(work, handle)
+        except TabNotFoundError:
+            self._drop(handle)
+            return self._tab_gone(id)
+        if invalidate:
+            self._cache.invalidate(handle)
+        self._registry.touch(handle)
+        return result
 
     def _drop(self, handle: str | None) -> None:
         """Forget a tab — used when it turns out to no longer exist."""
@@ -177,23 +196,21 @@ class BrowserSessionManager:
 
     async def navigate(self, url: str, *, id: str) -> dict:
         self.sweep_idle()
-        handle = self._handle(id)
 
-        def work():
+        def work(handle):
             self._backend.select_tab(handle)
-            return self._backend.navigate(url)
-        try:
-            tab = await self._run_driver(work)
+            tab = self._backend.navigate(url)
             logger.info(f"Navigated tab {id} to {url!r}")
-        except TabNotFoundError:
-            self._drop(handle)
-            return self._tab_gone(id)
-        self._cache.invalidate(tab.per_session_id)
-        self._registry.touch(tab.per_session_id)
-        return tab.as_dict(id=self._id(tab.per_session_id))
+            return tab.as_dict(id=self._id(tab.per_session_id))
+        return await self._with_tab(id, work, invalidate=True)
 
     async def current_url(self, *, id: str) -> str | None:
-        """Return ``id``'s live URL (for the per-action host gate), or None if the tab is gone."""
+        """Return ``id``'s live URL (for the per-action host gate), or None if the tab is gone.
+
+        The one op that doesn't return a wire envelope, so it can't share
+        ``_with_tab`` (which renders the tab-gone envelope): a gone tab is None
+        here, which the caller — the per-action host gate — turns into the envelope.
+        """
         self.sweep_idle()
         handle = self._handle(id)
 
@@ -219,22 +236,15 @@ class BrowserSessionManager:
         invalidated because the DOM has changed.
         """
         self.sweep_idle()
-        handle = self._handle(id)
 
-        def work():
+        def work(handle):
             self._backend.select_tab(handle)
-            return self._backend.click_element(css_selector)
-        try:
-            result = await self._run_driver(work)
-        except TabNotFoundError:
-            self._drop(handle)
-            return self._tab_gone(id)
-        self._cache.invalidate(handle)
-        self._registry.touch(handle)
-        logger.info(f"click: activated {css_selector!r} on tab {id}")
-        result.pop("tab_id", None)
-        result["id"] = id
-        return result
+            result = self._backend.click_element(css_selector)
+            logger.info(f"click: activated {css_selector!r} on tab {id}")
+            result.pop("tab_id", None)
+            result["id"] = id
+            return result
+        return await self._with_tab(id, work, invalidate=True)
 
     async def insert_text(self, css_selector: str, value: str, *, id: str) -> dict:
         """Type ``value`` into the (already policy-validated) text field on ``id``.
@@ -245,22 +255,15 @@ class BrowserSessionManager:
         is then invalidated because the DOM has changed.
         """
         self.sweep_idle()
-        handle = self._handle(id)
 
-        def work():
+        def work(handle):
             self._backend.select_tab(handle)
-            return self._backend.insert_text_element(css_selector, value)
-        try:
-            result = await self._run_driver(work)
-        except TabNotFoundError:
-            self._drop(handle)
-            return self._tab_gone(id)
-        self._cache.invalidate(handle)
-        self._registry.touch(handle)
-        logger.info(f"insert_text: set {css_selector!r} on tab {id}")
-        result.pop("tab_id", None)
-        result["id"] = id
-        return result
+            result = self._backend.insert_text_element(css_selector, value)
+            logger.info(f"insert_text: set {css_selector!r} on tab {id}")
+            result.pop("tab_id", None)
+            result["id"] = id
+            return result
+        return await self._with_tab(id, work, invalidate=True)
 
     # -- DOM-query tools ----------------------------------------------------
 
@@ -268,75 +271,63 @@ class BrowserSessionManager:
                                 include_html: bool = False,
                                 max_html_bytes: int = serialize.DEFAULT_MAX_HTML_BYTES) -> dict:
         self.sweep_idle()
-        handle = self._handle(id)
-        try:
-            soup, reloaded = await self._load_soup(handle)
-        except TabNotFoundError:
-            self._drop(handle)
-            return self._tab_gone(id)
-        self._registry.touch(handle)
-        el = query.by_id(soup, element_id)
-        return {
-            "id": id,
-            "reloaded": reloaded,
-            "found": el is not None,
-            "element": self._node(el, include_html, max_html_bytes),
-        }
+
+        def work(handle):
+            soup, reloaded = self._cache.get_soup(handle, self._backend)
+            el = query.by_id(soup, element_id)
+            return {
+                "id": id,
+                "reloaded": reloaded,
+                "found": el is not None,
+                "element": self._node(el, include_html, max_html_bytes),
+            }
+        return await self._with_tab(id, work, invalidate=False)
 
     async def get_elements_by_class_name(self, class_names: str, *, id: str,
                                          limit: int = query.LIMIT_DEFAULT, offset: int = 0,
                                          include_html: bool = False,
                                          max_html_bytes: int = serialize.DEFAULT_MAX_HTML_BYTES) -> dict:
         self.sweep_idle()
-        handle = self._handle(id)
-        try:
-            soup, reloaded = await self._load_soup(handle)
-        except TabNotFoundError:
-            self._drop(handle)
-            return self._tab_gone(id)
-        self._registry.touch(handle)
-        result = query.by_class(soup, class_names, limit, offset)
-        return self._list_envelope(id, reloaded, result, include_html, max_html_bytes)
+
+        def work(handle):
+            soup, reloaded = self._cache.get_soup(handle, self._backend)
+            result = query.by_class(soup, class_names, limit, offset)
+            return self._list_envelope(id, reloaded, result, include_html, max_html_bytes)
+        return await self._with_tab(id, work, invalidate=False)
 
     async def query_selector(self, css_selector: str, *, id: str,
                              include_html: bool = False,
                              max_html_bytes: int = serialize.DEFAULT_MAX_HTML_BYTES) -> dict:
         self.sweep_idle()
-        handle = self._handle(id)
-        try:
-            soup, reloaded = await self._load_soup(handle)
-        except TabNotFoundError:
-            self._drop(handle)
-            return self._tab_gone(id)
-        self._registry.touch(handle)
-        try:
-            el = query.css_one(soup, css_selector)
-        except query.InvalidSelector as e:
-            return {"error": f"invalid CSS selector: {e}", "id": id}
-        return {
-            "id": id,
-            "reloaded": reloaded,
-            "found": el is not None,
-            "element": self._node(el, include_html, max_html_bytes),
-        }
+
+        def work(handle):
+            soup, reloaded = self._cache.get_soup(handle, self._backend)
+            try:
+                el = query.css_one(soup, css_selector)
+            except query.InvalidSelector as e:
+                return {"error": f"invalid CSS selector: {e}", "id": id}
+            return {
+                "id": id,
+                "reloaded": reloaded,
+                "found": el is not None,
+                "element": self._node(el, include_html, max_html_bytes),
+            }
+        return await self._with_tab(id, work, invalidate=False)
 
     async def query_selector_all(self, css_selector: str, *, id: str,
                                  limit: int = query.LIMIT_DEFAULT, offset: int = 0,
                                  include_html: bool = False,
                                  max_html_bytes: int = serialize.DEFAULT_MAX_HTML_BYTES) -> dict:
         self.sweep_idle()
-        handle = self._handle(id)
-        try:
-            soup, reloaded = await self._load_soup(handle)
-        except TabNotFoundError:
-            self._drop(handle)
-            return self._tab_gone(id)
-        self._registry.touch(handle)
-        try:
-            result = query.css_all(soup, css_selector, limit, offset)
-        except query.InvalidSelector as e:
-            return {"error": f"invalid CSS selector: {e}", "id": id}
-        return self._list_envelope(id, reloaded, result, include_html, max_html_bytes)
+
+        def work(handle):
+            soup, reloaded = self._cache.get_soup(handle, self._backend)
+            try:
+                result = query.css_all(soup, css_selector, limit, offset)
+            except query.InvalidSelector as e:
+                return {"error": f"invalid CSS selector: {e}", "id": id}
+            return self._list_envelope(id, reloaded, result, include_html, max_html_bytes)
+        return await self._with_tab(id, work, invalidate=False)
 
     async def screenshot(self, *, id: str) -> bytes | dict:
         """Capture a PNG screenshot of ``id``'s viewport.
@@ -346,34 +337,21 @@ class BrowserSessionManager:
         ``{"error": ..., "id": ...}`` envelope if the tab is gone.
         """
         self.sweep_idle()
-        handle = self._handle(id)
 
-        def work():
+        def work(handle):
             self._backend.select_tab(handle)
-            return self._backend.screenshot()
-        try:
-            png = await self._run_driver(work)
-        except TabNotFoundError:
-            self._drop(handle)
-            return self._tab_gone(id)
-        self._registry.touch(handle)
-        logger.info(f"Captured screenshot of tab {id} ({len(png)} bytes)")
-        return png
+            png = self._backend.screenshot()
+            logger.info(f"Captured screenshot of tab {id} ({len(png)} bytes)")
+            return png
+        return await self._with_tab(id, work, invalidate=False)
 
     async def force_reload_tab(self, *, id: str) -> dict:
         self.sweep_idle()
-        handle = self._handle(id)
 
-        def work():
+        def work(handle):
             _soup, tab_info = self._cache.force_reload(handle, self._backend)
-            return tab_info
-        try:
-            tab_info = await self._run_driver(work)
-        except TabNotFoundError:
-            self._drop(handle)
-            return self._tab_gone(id)
-        self._registry.touch(handle)
-        return {"id": id, "url": tab_info.url, "title": tab_info.title, "reloaded": True}
+            return {"id": id, "url": tab_info.url, "title": tab_info.title, "reloaded": True}
+        return await self._with_tab(id, work, invalidate=False)
 
     # -- serialization helpers ---------------------------------------------
 
