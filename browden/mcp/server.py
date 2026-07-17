@@ -5,6 +5,7 @@ import functools
 import os
 import sys
 from collections.abc import AsyncIterator, Awaitable, Callable
+from dataclasses import dataclass
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -40,16 +41,34 @@ _INSTRUCTIONS = (
 )
 
 
-@contextlib.asynccontextmanager
-async def _allowlist_lifespan(_server: FastMCP) -> AsyncIterator[None]:
-    """Run the live allowlist's hot-reload poller for the server's lifetime.
+@dataclass
+class AppState:
+    """The server's per-run application state, exposed as FastMCP lifespan state.
 
-    Delegates to the refresher (see ``configs/loader/refresher.py``): the poller
-    lives on the *same* event loop as the tools, started on boot and cancelled
-    cleanly on shutdown.
+    Holds the live allowlist refresher; tools read the current policy off it via
+    ``_allowlist()`` rather than a mutable module global. Immutable itself — the
+    *refresher* hot-reloads its allowlist in place (lock-free atomic swap, see
+    ``configs/loader/refresher.py``), so a single AppState spans the whole run.
     """
-    async with _refresher.run():
-        yield
+    refresher: AllowlistRefresher
+
+    @property
+    def allowlist(self) -> ActionAllowlist:
+        return self.refresher.allowlist
+
+
+@contextlib.asynccontextmanager
+async def _allowlist_lifespan(_server: FastMCP) -> AsyncIterator[AppState]:
+    """Build the run's app-state, run the allowlist hot-reload poller, expose it.
+
+    The refresher ``main()`` resolved for this run (``_startup_refresher``, or the
+    sample-backed default for a bare ``mcp.run()``) becomes the FastMCP lifespan
+    context every tool reads via :func:`_app_state`. The poller lives on the *same*
+    event loop as the tools — started on boot, cancelled cleanly on shutdown.
+    """
+    refresher = _startup_refresher if _startup_refresher is not None else _default_state.refresher
+    async with refresher.run():
+        yield AppState(refresher=refresher)
 
 
 mcp = FastMCP(
@@ -60,14 +79,37 @@ mcp = FastMCP(
     lifespan=_allowlist_lifespan,
 )
 
-# Import-time default: a *static* refresher over the repo sample (reads open,
-# writes deny-all), so unit tests and library imports see a deterministic policy
-# and watch no file. main() re-resolves (CLI > env > user config > sample) and
-# replaces this with a file-watching refresher before serving. Every tool reads
-# the live policy off ``_refresher.allowlist``, which the refresher hot-reloads
-# in place via a lock-free atomic swap (see configs/loader/refresher.py).
-_refresher = AllowlistRefresher.static(
-    load_allowlist(SAMPLE_ALLOWLIST) if SAMPLE_ALLOWLIST.exists() else ActionAllowlist({}))
+# The run's configured refresher, resolved once in main() (CLI > env > user config
+# > sample) and read ONLY by the lifespan above to seed the app-state — never by a
+# tool. None until main() runs (a bare `mcp.run()` / library import serves the
+# sample-backed _default_state).
+_startup_refresher: AllowlistRefresher | None = None
+
+# Constant fallback app-state: a *static* refresher over the repo sample (reads
+# open, writes deny-all), watching no file. Used whenever the live policy is read
+# outside a request — library imports and direct-call unit tests, which never
+# enter the lifespan. Never reassigned; tests patch it to inject a policy.
+_default_state = AppState(AllowlistRefresher.static(
+    load_allowlist(SAMPLE_ALLOWLIST) if SAMPLE_ALLOWLIST.exists() else ActionAllowlist({})))
+
+
+def _app_state() -> AppState:
+    """The active app-state: the request's FastMCP lifespan state, else the default.
+
+    Inside a served request the lifespan context is the run's :class:`AppState`;
+    outside one (library import, a unit test calling a tool directly) there is no
+    request context, so fall back to :data:`_default_state`.
+    """
+    try:
+        return mcp.get_context().request_context.lifespan_context
+    except (LookupError, ValueError, AttributeError):
+        return _default_state
+
+
+def _allowlist() -> ActionAllowlist:
+    """The live read/action policy for the current request (see :func:`_app_state`)."""
+    return _app_state().allowlist
+
 
 logger.info("Browden MCP module initialized")
 
@@ -155,7 +197,7 @@ async def list_tabs() -> list[dict]:
         # last tab can't be closed) and drop it from the listing.
         kept: list[dict] = []
         for tab in await session.list_tabs():
-            if ensure_url_allowed(_refresher.allowlist, tab.get("url") or ""):
+            if ensure_url_allowed(_allowlist(), tab.get("url") or ""):
                 kept.append(tab)
                 continue
             logger.warning(f"list_tabs: closing non-allowlisted tab {tab.get('url')!r} (id={tab.get('id')})")
@@ -183,8 +225,8 @@ async def new_blank_tab(profile_dir: str | None = None) -> dict:
     """
     logger.info(f"Tool called: new_blank_tab (profile_dir={profile_dir!r})")
     try:
-        session = _store.get_or_create_session(_backend_for(profile_dir), max_sessions=_refresher.allowlist.max_browser_sessions)
-        result = await session.new_blank_tab(max_tabs=_refresher.allowlist.max_tabs_per_session)  # wire dict with composite id
+        session = _store.get_or_create_session(_backend_for(profile_dir), max_sessions=_allowlist().max_browser_sessions)
+        result = await session.new_blank_tab(max_tabs=_allowlist().max_tabs_per_session)  # wire dict with composite id
     except RuntimeError as e:
         return {"error": str(e)}
     logger.info("Tool finished: new_blank_tab")
@@ -233,7 +275,7 @@ async def _guard_landing(session, id: str, result: dict) -> dict:
     if not landed:
         return result  # a tab-gone envelope or similar — nothing navigated
     try:
-        validate_url(landed, _refresher.allowlist.read_policy)
+        validate_url(landed, _allowlist().read_policy)
     except ValidationError:
         logger.warning(f"navigation landed off-allowlist at {landed!r}; bouncing to about:blank")
         await session.navigate("about:blank", id=id)
@@ -248,7 +290,7 @@ async def _guard_landing(session, id: str, result: dict) -> dict:
 async def navigate(url: str, id: str) -> dict:
     """Navigate the named tab to url. Url is gated by the per-host allowlist (query strings and fragments pass through)."""
     logger.info(f"Tool called: navigate (url={url!r}, id={id!r})")
-    url = validate_url(url, _refresher.allowlist.read_policy)
+    url = validate_url(url, _allowlist().read_policy)
     session = _store.route(id)
     result = await session.navigate(url, id=id)  # wire dict (or the tab-gone envelope)
     result = await _guard_landing(session, id, result)  # re-gate the post-redirect landing
@@ -292,14 +334,14 @@ async def click(css_selector: str, id: str) -> dict:
     url = await session.current_url(id=id)
     if url is None:
         return tab_gone_envelope(id)
-    check_action_host(_refresher.allowlist, "click", url)  # raises if denied / host not allowed
+    check_action_host(_allowlist(), "click", url)  # raises if denied / host not allowed
 
     # Gates 2-3: fetch the element (limit=2 so ambiguity is detectable), then let
     # the validator judge integrity, anchor target, and the host's required label.
     found = await session.query_selector_all(css_selector, id=id, limit=2)
     if "error" in found:
         return found
-    validate_click_target(_refresher.allowlist, url, css_selector, found)  # raises on any failed gate
+    validate_click_target(_allowlist(), url, css_selector, found)  # raises on any failed gate
 
     result = await session.click(css_selector, id=id)
     logger.info("Tool finished: click")
@@ -338,14 +380,14 @@ async def insert_text(css_selector: str, value: str, id: str) -> dict:
     url = await session.current_url(id=id)
     if url is None:
         return tab_gone_envelope(id)
-    check_action_host(_refresher.allowlist, "write-text", url)  # raises if denied / host not allowed
+    check_action_host(_allowlist(), "write-text", url)  # raises if denied / host not allowed
 
     # Gates 2-3: fetch the element (limit=2 so ambiguity is detectable), then let
     # the validator judge integrity and the host's required label / field-id.
     found = await session.query_selector_all(css_selector, id=id, limit=2)
     if "error" in found:
         return found
-    validate_write_text_target(_refresher.allowlist, url, css_selector, found)  # raises on any failed gate
+    validate_write_text_target(_allowlist(), url, css_selector, found)  # raises on any failed gate
 
     result = await session.insert_text(css_selector, value, id=id)
     logger.info("Tool finished: insert_text")
@@ -371,7 +413,7 @@ async def get_element_by_id(element_id: str, id: str,
     url = await session.current_url(id=id)
     if url is None:
         return tab_gone_envelope(id)
-    if not ensure_url_allowed(_refresher.allowlist, url):  # H2: gate the tab's live url before reading
+    if not ensure_url_allowed(_allowlist(), url):  # H2: gate the tab's live url before reading
         raise ValidationError(f"URL not on the read allowlist: {url}")
     result = await session.get_element_by_id(
         element_id, id=id, include_html=include_html, max_html_bytes=max_html_bytes)
@@ -390,7 +432,7 @@ async def get_elements_by_class_name(class_names: str, id: str,
     url = await session.current_url(id=id)
     if url is None:
         return tab_gone_envelope(id)
-    if not ensure_url_allowed(_refresher.allowlist, url):  # H2: gate the tab's live url before reading
+    if not ensure_url_allowed(_allowlist(), url):  # H2: gate the tab's live url before reading
         raise ValidationError(f"URL not on the read allowlist: {url}")
     result = await session.get_elements_by_class_name(
         class_names, id=id, limit=limit, offset=offset,
@@ -409,7 +451,7 @@ async def query_selector(css_selector: str, id: str,
     url = await session.current_url(id=id)
     if url is None:
         return tab_gone_envelope(id)
-    if not ensure_url_allowed(_refresher.allowlist, url):  # H2: gate the tab's live url before reading
+    if not ensure_url_allowed(_allowlist(), url):  # H2: gate the tab's live url before reading
         raise ValidationError(f"URL not on the read allowlist: {url}")
     result = await session.query_selector(
         css_selector, id=id, include_html=include_html, max_html_bytes=max_html_bytes)
@@ -428,7 +470,7 @@ async def query_selector_all(css_selector: str, id: str,
     url = await session.current_url(id=id)
     if url is None:
         return tab_gone_envelope(id)
-    if not ensure_url_allowed(_refresher.allowlist, url):  # H2: gate the tab's live url before reading
+    if not ensure_url_allowed(_allowlist(), url):  # H2: gate the tab's live url before reading
         raise ValidationError(f"URL not on the read allowlist: {url}")
     result = await session.query_selector_all(
         css_selector, id=id, limit=limit, offset=offset,
@@ -451,7 +493,7 @@ async def screenshot(id: str):  # -> dict | Image; unannotated: FastMCP can't sc
     url = await session.current_url(id=id)
     if url is None:
         return tab_gone_envelope(id)
-    if not ensure_url_allowed(_refresher.allowlist, url):  # H2: gate the tab's live url before reading
+    if not ensure_url_allowed(_allowlist(), url):  # H2: gate the tab's live url before reading
         raise ValidationError(f"URL not on the read allowlist: {url}")
     result = await session.screenshot(id=id)
     if isinstance(result, dict):  # tab gone — structured error, not an image
@@ -469,7 +511,7 @@ async def force_reload_tab(id: str) -> dict:
     url = await session.current_url(id=id)
     if url is None:
         return tab_gone_envelope(id)
-    if not ensure_url_allowed(_refresher.allowlist, url):  # H2: gate the tab's live url before reading
+    if not ensure_url_allowed(_allowlist(), url):  # H2: gate the tab's live url before reading
         raise ValidationError(f"URL not on the read allowlist: {url}")
     result = await session.force_reload_tab(id=id)
     result = await _guard_landing(session, id, result)  # a reload can 302 off-list too
@@ -480,12 +522,13 @@ async def force_reload_tab(id: str) -> dict:
 def main(argv: list[str] | None = None) -> None:
     """CLI entry point: resolve + load the allowlist, then serve.
 
-    Replaces the module default with a file-watching refresher over the config
-    the operator chose, so every tool (the internal consumers of
-    ``_refresher.allowlist``) gates against it — and picks up edits live, since
-    ``_allowlist_lifespan`` runs the refresher's poller while the server serves.
+    Resolves the config the operator chose into a file-watching refresher and
+    stashes it in ``_startup_refresher``, which the lifespan reads once to seed
+    the run's app-state — so every tool gates against it via ``_allowlist()``,
+    and picks up edits live (``_allowlist_lifespan`` runs the poller while
+    serving). No tool-visible module global is reassigned here.
     """
-    global _refresher
+    global _startup_refresher
     parser = argparse.ArgumentParser(
         prog="browden", description="Browden MCP server")
     parser.add_argument(
@@ -498,7 +541,7 @@ def main(argv: list[str] | None = None) -> None:
     if path is None:
         parser.error("no allowlist config found — run setup/onetime_setup.py or pass --allowlist")
     try:
-        _refresher = AllowlistRefresher.from_path(path)
+        _startup_refresher = AllowlistRefresher.from_path(path)
     except ConfigError as e:
         parser.error(str(e))
     logger.info(f"Loaded allowlist config from {path}")
