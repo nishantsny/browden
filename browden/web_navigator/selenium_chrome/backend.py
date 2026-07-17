@@ -331,7 +331,7 @@ class SeleniumChromeBackend(WebNavigatorBackend):
         _terminate(self._chrome_proc)
         self._chrome_proc = None
 
-    def _session_alive(self, *, check_current: bool) -> bool:
+    def _session_alive(self, check_current: bool) -> bool:
         """Whether the attached driver is live; tears it down (no relaunch) on failure.
 
         The single liveness probe both ``is_running`` and ``_drv`` share. Always
@@ -361,12 +361,12 @@ class SeleniumChromeBackend(WebNavigatorBackend):
         as a side effect. Only the session-level probe — a valid *current window*
         is ``_drv``'s concern (it can heal one), not this look-only check.
         """
-        return self._session_alive(check_current=False)
+        return self._session_alive(False)
 
     def _drv(self):
         # Health-check the attached driver (session AND current-window context);
         # a failed probe has already torn it down, so (re)launch a fresh one.
-        if not self._session_alive(check_current=True):
+        if not self._session_alive(True):
             profile = self._profile_dir
             logger.info(f"Starting new Chrome session (profile={profile})")
             self._chrome_proc, port = _launch_chrome(profile)
