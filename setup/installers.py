@@ -26,9 +26,10 @@ def _template(name: str) -> str:
     return (TEMPLATES_DIR / name).read_text(encoding="utf-8")
 
 
-def _run(cmd: list[str], check: bool = True) -> subprocess.CompletedProcess:
+def _run(cmd: list[str], check: bool = True,
+         env: dict[str, str] | None = None) -> subprocess.CompletedProcess:
     print(f"[run]  {' '.join(cmd)}")
-    return subprocess.run(cmd, check=check)
+    return subprocess.run(cmd, check=check, env=env)
 
 
 def _pythonw_for(python: str) -> str:

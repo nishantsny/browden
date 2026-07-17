@@ -30,17 +30,19 @@ jobs:
         with:
           chrome-version: stable
 
-      - name: Install package
+      # Same locked install as unit.yml: uv sync --frozen consumes uv.lock and
+      # fails on lockfile drift, so e2e runs against the pinned dependency set.
+      - name: Install package (locked)
         run: |
-          python -m pip install --upgrade pip
-          pip install -e ".[dev]"
+          python -m pip install --upgrade pip uv
+          uv sync --frozen --extra dev
 
       - name: Run unit tests
-        run: pytest test/unit -q
+        run: uv run --no-sync pytest test/unit -q
 
       - name: Run e2e tests (headless Chrome)
         # The backend now launches Chrome directly (not via chromedriver), so it
         # needs the binary path; point it at the one setup-chrome installed.
         env:
           BROWDEN_CHROME_BINARY: ${{ steps.setup-chrome.outputs.chrome-path }}
-        run: pytest test/e2e -q
+        run: uv run --no-sync pytest test/e2e -q

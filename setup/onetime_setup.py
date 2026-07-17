@@ -59,18 +59,24 @@ def _venv_python(venv_dir: Path) -> Path:
 def ensure_venv(venv_dir: Path) -> Path:
     """Create ``venv_dir`` (if absent) and install browden into it editable.
 
-    Prefers ``uv``; falls back to the stdlib ``venv`` + ``pip``. Idempotent — an
-    existing venv is reused and the (fast) editable reinstall just refreshes it.
-    Returns the venv's Python interpreter, which the service will run.
+    Prefers ``uv sync --frozen``, which creates the venv itself and installs the
+    exact dependency set pinned in the committed ``uv.lock`` — so every install
+    is reproducible and can't break because a dependency shipped a new release.
+    Falls back to the stdlib ``venv`` + ``pip`` (range-resolved, not pinned) when
+    uv isn't on PATH. Idempotent — an existing venv is reused and the (fast)
+    reinstall just refreshes it. Returns the venv's Python interpreter, which
+    the service will run.
     """
     python = _venv_python(venv_dir)
     uv = shutil.which("uv")
     if uv:
-        if not python.exists():
-            _run([uv, "venv", str(venv_dir)])
-        _run([uv, "pip", "install", "--python", str(python), "-e", str(REPO_ROOT)])
+        # UV_PROJECT_ENVIRONMENT points uv sync at the chosen venv path (it
+        # defaults to <repo>/.venv, which is also our default --venv).
+        env = {**os.environ, "UV_PROJECT_ENVIRONMENT": str(venv_dir)}
+        _run([uv, "sync", "--frozen", "--project", str(REPO_ROOT)], env=env)
     else:
-        print("[info] uv not found on PATH — using stdlib venv + pip")
+        print("[info] uv not found on PATH — using stdlib venv + pip "
+              "(unpinned; install uv for the locked, reproducible set)")
         if not python.exists():
             _run([sys.executable, "-m", "venv", str(venv_dir)])
         _run([str(python), "-m", "pip", "install", "-e", str(REPO_ROOT)])

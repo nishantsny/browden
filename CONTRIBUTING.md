@@ -16,11 +16,15 @@ welcome — bug reports, docs, allowlist samples, and code.
 Requires **Python ≥ 3.11** and **Google Chrome** on the host.
 
 ```bash
-uv venv && uv pip install -e ".[dev]"   # or: python -m venv .venv && pip install -e ".[dev]"
-pytest test/unit/                        # fast; never launches a browser
-pytest test/e2e/                         # drives a real Chrome
-BROWDEN_HEADLESS=1 pytest test/e2e/      # on a machine with no display
+uv sync --extra dev                      # locked install from uv.lock (or: python -m venv .venv && pip install -e ".[dev]")
+uv run pytest test/unit/                 # fast; never launches a browser
+uv run pytest test/e2e/                  # drives a real Chrome
+BROWDEN_HEADLESS=1 uv run pytest test/e2e/   # on a machine with no display
 ```
+
+Dependencies are pinned in the committed `uv.lock`. If you change
+`pyproject.toml` dependencies, run `uv lock` and commit the updated lockfile —
+CI installs with `--frozen` and fails if the two drift apart.
 
 Unit tests never touch a browser and run on Linux/macOS/Windows. The e2e suite
 renders inline `data:` pages in a throwaway profile (no network, no allowlisted

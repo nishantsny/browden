@@ -275,7 +275,8 @@ Key points of the flow:
 ## Installation reference
 
 `python3 setup/onetime_setup.py` creates a venv at `.venv` and installs browden
-into it (via `uv`, falling back to stdlib `venv` + `pip`), copies the sample
+into it (via `uv sync --frozen`, pinned by the committed `uv.lock`; falls back
+to stdlib `venv` + `pip` when uv is absent), copies the sample
 allowlist to `~/.browden/allowlist.yaml` (never overwriting an existing one),
 fetches the Tranco snapshot next to it, and prints the JSON block to add to your
 agent. It's idempotent, and **defaults to stdio** (shown in
@@ -374,11 +375,16 @@ Requirements: Python ≥ 3.11 and Google Chrome on the host. Runtime deps are
 downloads), `beautifulsoup4`, and `pyyaml`.
 
 ```bash
-uv venv && uv pip install -e ".[dev]"
-pytest test/unit/                    # never launches a browser
-pytest test/e2e/                     # drives a real Chrome
-BROWDEN_HEADLESS=1 pytest test/e2e/   # on a machine with no display
+uv sync --extra dev                     # locked install from uv.lock (or: python -m venv .venv && pip install -e ".[dev]")
+uv run pytest test/unit/                # never launches a browser
+uv run pytest test/e2e/                 # drives a real Chrome
+BROWDEN_HEADLESS=1 uv run pytest test/e2e/   # on a machine with no display
 ```
+
+Dependency versions are pinned in the committed `uv.lock`; `uv sync` installs
+exactly that set. After changing dependencies in `pyproject.toml`, run
+`uv lock` and commit the updated lockfile (CI installs with `--frozen` and
+fails on drift).
 
 The e2e suite renders inline `data:` pages in a throwaway profile (no network,
 no allowlisted host) and includes a harness that stands the real MCP server up
