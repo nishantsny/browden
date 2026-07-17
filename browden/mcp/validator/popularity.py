@@ -85,12 +85,17 @@ class PopularityAllowlist:
         self._tranco = TrancoList(tranco_top_n=tranco_top_n, path=path)
         psl_path = (path.parent / PSL_FILENAME) if path is not None else DEFAULT_PSL_PATH
         self._psl = _psl(str(psl_path))
+        # Memoize per *instance*, not on the class: an @lru_cache on the method
+        # would key entries by `self` and hold a strong reference to it in the
+        # one class-wide cache — keeping superseded allowlists (e.g. after a
+        # config hot-reload) alive until enough other entries evicted them. A
+        # cache bound here dies with its instance.
+        self.contains = lru_cache(maxsize=1024)(self._contains)
 
     def __len__(self) -> int:
         return len(self._tranco)
 
-    @lru_cache(maxsize=64)
-    def contains(self, host: str) -> bool:
+    def _contains(self, host: str) -> bool:
         """True iff the host's registrable domain (eTLD+1) is in the Tranco top-N.
 
         The host is reduced to its registrable domain via the Public Suffix List
@@ -99,7 +104,7 @@ class PopularityAllowlist:
         ``evil.github.io`` / ``bucket.s3.amazonaws.com`` reduces to *itself* and so
         is listed only if it ranks on its own — it never inherits the provider's
         rank (finding H1). ``google.com.evil.com`` reduces to ``evil.com``. Memoized
-        per (instance, host): the instance is immutable after construction.
+        per instance (see ``__init__``): the instance is immutable after construction.
         """
         host = canonical_host(host)
         if not host:
