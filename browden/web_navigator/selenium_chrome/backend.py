@@ -150,13 +150,15 @@ def _chrome_args(profile_dir: Path, port: int) -> list[str]:
         f"--remote-debugging-port={port}",
         # Chrome >= 111 rejects DevTools websocket connections from a foreign
         # origin. Scope allowed origins to the exact loopback origin Selenium
-        # connects from (debuggerAddress is
-        # 127.0.0.1:<port>) rather than "*": a wildcard lets *any* origin that
-        # reaches this ephemeral loopback port — another local process, or a
-        # malicious local page scanning loopback ports — open a DevTools
+        # connects from (debuggerAddress is 127.0.0.1:<port>) rather than "*":
+        # a wildcard lets any web page that reaches this ephemeral loopback
+        # port — e.g. a malicious page scanning loopback ports, whose Origin
+        # header the browser sets and the page cannot forge — open a DevTools
         # websocket and take full CDP control (read every cookie, run JS in any
         # origin), bypassing every browden gate. Pinning the origin keeps
-        # Selenium working while shutting that out.
+        # Selenium working while shutting that out. (A hostile *native* local
+        # process can spoof any Origin header, so this flag is no defence
+        # there — local processes are trusted by design, see SECURITY.md.)
         f"--remote-allow-origins=http://127.0.0.1:{port}",
         "--no-first-run",
         "--no-default-browser-check",

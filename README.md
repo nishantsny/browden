@@ -7,8 +7,8 @@
 
 **A local, cross-platform, read-only (configurable) MCP shell around a real Chrome browser.** It lets an LLM
 agent *look at* and *navigate* the web through your own browser. The agent can read pages,
-querying the DOM, take screenshots, but can never execute any write action. The MCP
-is configurable to allow button-clicks and text-fill, allowlisted per website and visible element. 
+query the DOM, and take screenshots, but can never execute any write action. The MCP
+is configurable to allow button-clicks and text-fill, allowlisted per website and visible element.
 
 _Short demo video: https://youtu.be/q-W3Z9nlj58_
 
@@ -21,7 +21,7 @@ _Short demo video: https://youtu.be/q-W3Z9nlj58_
 
 ## When to use browden
 
-browden is deliberately narrow: a **safe, local, undetected, read-only, with allowlisted writes**. 
+browden is deliberately narrow: **safe, local, undetected, and read-only, with allowlisted writes**. 
 This allows your agent to run wild on your *own* logged-in Chrome. Use browden for your daily research needs + a few writes. 
 Defer to richer automation tools when you need to *drive* the browser rather than *read* it.
 
@@ -165,7 +165,11 @@ first use. That has two consequences:
   that profile can only be open in one window, browden *becomes* that
   window: you can watch it, but you shouldn't also run your everyday Chrome on
   the same profile at the same time, and the window is there for the agent to
-  drive — not for you to click around in.
+  drive — not for you to click around in. Note that the read perimeter is
+  enforced on the whole window: a tab parked on a site outside the read
+  allowlist is **closed** when the agent lists tabs (so it can neither read it
+  nor learn it exists) — don't keep tabs you care about open in a
+  browden-driven window.
 
 ## Safety: the allowlist
 
@@ -206,18 +210,19 @@ The "allowlist" policy has **three layers**, evaluated in order (first match win
 3. **write actions** — `click` and `insert_text` are both default-deny, each
    gated by its **own** allowlist section (`click` and `write-text`), so
    permitting typing never implies permitting clicks, or the reverse. Each action
-   needs to be enable on each domain. On each domain, the allowlist mandates a `label` regex, 
-   which should match the control's user visible text (for `click`) or the field's user visible label (for `insert_text`).
+   must be enabled per domain. On each domain, the allowlist mandates a `label` regex, 
+   which must match the control's user-visible text (for `click`) or the field's user-visible label (for `insert_text`).
    Any control can be explicitly enabled via `label: '.*'`. The
    denylist vetoes both too; page-injected agent-targeted decoys are always
    refused regardless of the label.
 
+
 To refresh the Tranco snapshot, use `python3 setup/fetch_tranco.py` and restart the MCP server.
 
 ### Sample allowlists
-- [`configs/samples/read_only_on_popular_websites.yaml`](configs/samples/read_only_on_popular_websites.yaml)).
-- [`allow_grocery_cart_manipulation.yaml`](configs/samples/allow_grocery_cart_manipulation.yaml)
-- [`configs/samples/allowlist-read-deny.yaml`](configs/samples/allowlist-read-deny.yaml);
+- [`read_only_on_popular_websites.yaml`](configs/samples/read_only_on_popular_websites.yaml) — the shipped default: Tranco reads, no writes.
+- [`allow_grocery_cart_manipulation.yaml`](configs/samples/allow_grocery_cart_manipulation.yaml) — a worked example enabling `click`/`write-text` on a few storefronts.
+- [`allowlist-read-deny.yaml`](configs/samples/allowlist-read-deny.yaml) — a fully-commented tour of the read/deny system.
 - [`allow_local_file_reads.yaml`](configs/samples/allow_local_file_reads.yaml) — opt `file://` local-file reads in (scoped by path).
 - [`allow_localhost_dev_server.yaml`](configs/samples/allow_localhost_dev_server.yaml) — read a local `http://localhost:PORT` dev server.
 

@@ -35,7 +35,7 @@ DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 8000
 
 _INSTRUCTIONS = (
-    "browden drives a real Chrome session. Within a single profile-dir there is ONE browser session. You can open multiple tabs within that one session, though concurrent requests are only supported across different sessions, but within the same session (this is a limitation of selenium: the underlying automation library). A new profile-dir can be chosen while crating a new tab. If you choose a previously used profile-dir, then the previous session will be reused. Creating a new tab will return a tab-id which is unique across all sessions, pass it back verbatim on other tools. A tab must be selected before any operation acts on it: passing a tool the tab's id selects that tab, and only one tab per session can be selected at a time, so operate on a session's tabs one at a time."
+    "browden drives a real Chrome session. Within a single profile-dir there is ONE browser session. You can open multiple tabs within that one session, but concurrent requests are only supported across different sessions, never within the same session (a limitation of selenium, the underlying automation library). A new profile-dir can be chosen while creating a new tab. If you choose a previously used profile-dir, then the previous session will be reused. Creating a new tab will return a tab-id which is unique across all sessions, pass it back verbatim on other tools. A tab must be selected before any operation acts on it: passing a tool the tab's id selects that tab, and only one tab per session can be selected at a time, so operate on a session's tabs one at a time."
 )
 
 
