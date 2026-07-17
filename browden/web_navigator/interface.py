@@ -89,10 +89,6 @@ class WebNavigatorBackend(ABC):
         """Navigate the current tab to url. Url is pre-validated."""
 
     @abstractmethod
-    def current_tab_id(self) -> str:
-        """Return the id of the currently active tab."""
-
-    @abstractmethod
     def get_page_source(self, tab_id: str | None = None) -> str:
         """Return the rendered HTML (post-JS DOM) of a tab; active tab if tab_id is None."""
 

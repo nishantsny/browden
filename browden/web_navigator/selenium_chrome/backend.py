@@ -456,12 +456,6 @@ class SeleniumChromeBackend(WebNavigatorBackend):
         _wait_for_title(drv)
         return self._tabinfo(drv, selected=True)
 
-    def current_tab_id(self) -> str:
-        try:
-            return self._drv().current_window_handle
-        except NoSuchWindowException:
-            raise TabNotFoundError("there is no active tab") from None
-
     def get_page_source(self, tab_id: str | None = None) -> str:
         drv = self._drv()
         if tab_id:

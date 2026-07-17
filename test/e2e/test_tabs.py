@@ -45,11 +45,14 @@ def test_select_page_switches_active_tab(backend):
     backend.new_blank_tab()
     b = backend.navigate(URL_B)
 
+    def selected_id():
+        return next(t.per_session_id for t in backend.list_tabs() if t.selected)
+
     backend.select_tab(a.per_session_id)
-    assert backend.current_tab_id() == a.per_session_id
+    assert selected_id() == a.per_session_id
 
     backend.select_tab(b.per_session_id)
-    assert backend.current_tab_id() == b.per_session_id
+    assert selected_id() == b.per_session_id
 
 
 def test_list_pages_marks_exactly_one_selected(backend):

@@ -79,12 +79,6 @@ class FakeBackend:
         self.calls.append(("navigate", url))
         return TabInfo(per_session_id="h1", url=url, title="t", selected=True, profile_dir=self.profile_dir)
 
-    def current_tab_id(self):
-        self.calls.append("current_tab_id")
-        if self.active in self.missing:
-            raise TabNotFoundError("there is no active tab")
-        return self.active
-
     def get_page_source(self, tab_id=None):
         self.calls.append(("get_page_source", tab_id))
         self._check(tab_id)
