@@ -21,7 +21,7 @@ class WebNavigatorBackend(ABC):
     only place third-party browser libraries (selenium, playwright, ...) are
     imported. The interface itself imports only from common.
 
-    Any method given a ``tab_id`` that no longer names an open tab — or any
+    Any method given a ``handle`` that no longer names an open tab — or any
     method that needs "the active tab" when there isn't one — raises
     ``TabNotFoundError``.
 
@@ -66,7 +66,7 @@ class WebNavigatorBackend(ABC):
         """Return all open tabs."""
 
     @abstractmethod
-    def list_tab_ids(self) -> list[str]:
+    def list_handles(self) -> list[str]:
         """Return the ids of all open tabs, cheaply (no per-tab metadata / focus changes)."""
 
     @abstractmethod
@@ -77,11 +77,11 @@ class WebNavigatorBackend(ABC):
         """
 
     @abstractmethod
-    def close_tab(self, tab_id: str) -> None:
+    def close_tab(self, handle: str) -> None:
         """Close a tab by id. Raise if it's the last tab."""
 
     @abstractmethod
-    def select_tab(self, tab_id: str) -> None:
+    def select_tab(self, handle: str) -> None:
         """Switch to a tab by id."""
 
     @abstractmethod
@@ -89,20 +89,20 @@ class WebNavigatorBackend(ABC):
         """Navigate the current tab to url. Url is pre-validated."""
 
     @abstractmethod
-    def get_page_source(self, tab_id: str | None = None) -> str:
-        """Return the rendered HTML (post-JS DOM) of a tab; active tab if tab_id is None."""
+    def get_tab_html(self, handle: str | None = None) -> str:
+        """Return the rendered HTML (post-JS DOM) of a tab; active tab if handle is None."""
 
     @abstractmethod
-    def reload(self, tab_id: str | None = None) -> TabInfo:
-        """Reload a tab in the browser; active tab if tab_id is None."""
+    def reload(self, handle: str | None = None) -> TabInfo:
+        """Reload a tab in the browser; active tab if handle is None."""
 
     @abstractmethod
     def current_url(self) -> str:
         """Return the URL of the active tab. Caller focuses the tab first."""
 
     @abstractmethod
-    def screenshot(self, tab_id: str | None = None) -> bytes:
-        """Capture a PNG screenshot of a tab's viewport; active tab if tab_id is None.
+    def screenshot(self, handle: str | None = None) -> bytes:
+        """Capture a PNG screenshot of a tab's viewport; active tab if handle is None.
 
         Read-only — never mutates tab state. Returns the raw PNG bytes; the
         caller is responsible for any encoding (e.g. base64 for transport).

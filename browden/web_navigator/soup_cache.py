@@ -32,8 +32,8 @@ class SoupCache:
     def _parse(html: str) -> BeautifulSoup:
         return BeautifulSoup(html, "html.parser")
 
-    def get_soup(self, tab_id: str, backend, now: float | None = None):
-        """Return ``(soup, reloaded)`` for ``tab_id``.
+    def get_soup(self, handle: str, backend, now: float | None = None):
+        """Return ``(soup, reloaded)`` for ``handle``.
 
         - missing entry → fetch ``page_source`` and parse; ``reloaded=False`` (the
           tab was just loaded by ``navigate``/``new_blank_tab`` — this isn't "stale").
@@ -42,25 +42,25 @@ class SoupCache:
         - present and fresh → the cached soup; ``reloaded=False``.
         """
         current = self._clock() if now is None else now
-        entry = self._entries.get(tab_id)
+        entry = self._entries.get(handle)
         if entry is None:
-            soup = self._parse(backend.get_page_source(tab_id))
-            self._entries[tab_id] = CacheEntry(soup=soup, fetched_at=current)
+            soup = self._parse(backend.get_tab_html(handle))
+            self._entries[handle] = CacheEntry(soup=soup, fetched_at=current)
             return soup, False
         if current - entry.fetched_at >= TTL_SECONDS:
-            backend.reload(tab_id)
-            soup = self._parse(backend.get_page_source(tab_id))
-            self._entries[tab_id] = CacheEntry(soup=soup, fetched_at=current)
+            backend.reload(handle)
+            soup = self._parse(backend.get_tab_html(handle))
+            self._entries[handle] = CacheEntry(soup=soup, fetched_at=current)
             return soup, True
         return entry.soup, False
 
-    def invalidate(self, tab_id: str) -> None:
-        self._entries.pop(tab_id, None)
+    def invalidate(self, handle: str) -> None:
+        self._entries.pop(handle, None)
 
-    def force_reload(self, tab_id: str, backend, now: float | None = None):
-        """Reload the tab in the browser, re-parse, store fresh. Returns ``(soup, page_info)``."""
+    def force_reload(self, handle: str, backend, now: float | None = None):
+        """Reload the tab in the browser, re-parse, store fresh. Returns ``(soup, tab_info)``."""
         current = self._clock() if now is None else now
-        page_info = backend.reload(tab_id)
-        soup = self._parse(backend.get_page_source(tab_id))
-        self._entries[tab_id] = CacheEntry(soup=soup, fetched_at=current)
-        return soup, page_info
+        tab_info = backend.reload(handle)
+        soup = self._parse(backend.get_tab_html(handle))
+        self._entries[handle] = CacheEntry(soup=soup, fetched_at=current)
+        return soup, tab_info

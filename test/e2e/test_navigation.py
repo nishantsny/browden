@@ -16,4 +16,4 @@ def test_new_blank_tab_and_list(backend):
     page = backend.navigate(DATA_URL)
     assert page.url == DATA_URL
     pages = backend.list_tabs()
-    assert any(p.per_session_id == page.per_session_id for p in pages)
+    assert any(p.handle == page.handle for p in pages)

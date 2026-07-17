@@ -26,7 +26,7 @@ def test_tab_entry_point_docs_warn_about_concurrency():
 def test_no_backend_or_session_at_import():
     """Importing server must not construct a backend, a BrowserSessionManager, or a reaper task."""
     with patch("browden.mcp.server.SeleniumChromeBackend") as mock_backend, \
-         patch("browden.mcp.session_management.BrowserSessionStore.BrowserSessionManager") as mock_session:
+         patch("browden.mcp.session_management.browser_session_store.BrowserSessionManager") as mock_session:
         import browden.mcp.server as server
         importlib.reload(server)
         assert mock_backend.call_count == 0
@@ -35,10 +35,10 @@ def test_no_backend_or_session_at_import():
 
 
 def test_shutdown_registered_once_and_closes_every_session():
-    import browden.mcp.session_management.BrowserSessionStore as store_mod
+    import browden.mcp.session_management.browser_session_store as store_mod
     from browden.web_navigator.selenium_chrome import SeleniumChromeBackend
     with patch.object(store_mod, "atexit") as mock_atexit, \
-         patch("browden.mcp.session_management.BrowserSessionStore.BrowserSessionManager",
+         patch("browden.mcp.session_management.browser_session_store.BrowserSessionManager",
                side_effect=lambda *a, **k: MagicMock()):
         store = store_mod.BrowserSessionStore()
         # Building three profiles' sessions registers the atexit hook exactly once.
@@ -54,7 +54,7 @@ def test_shutdown_registered_once_and_closes_every_session():
 
 
 def test_shutdown_continues_after_one_session_fails():
-    import browden.mcp.session_management.BrowserSessionStore as store_mod
+    import browden.mcp.session_management.browser_session_store as store_mod
     store = store_mod.BrowserSessionStore()
     bad, good = MagicMock(), MagicMock()
     bad.close.side_effect = RuntimeError("driver already dead")
@@ -69,7 +69,7 @@ def test_get_session_is_lazy_and_cached():
     importlib.reload(server)
     # Two backends for the same (default) profile map to one cached session;
     # the store never launches Chrome — building a backend is side-effect-free.
-    with patch("browden.mcp.session_management.BrowserSessionStore.BrowserSessionManager") as mock_session_cls:
+    with patch("browden.mcp.session_management.browser_session_store.BrowserSessionManager") as mock_session_cls:
         s1 = server._store.get_or_create_session(server._backend_for(None), max_sessions=10)
         s2 = server._store.get_or_create_session(server._backend_for(None), max_sessions=10)
         assert s1 is s2
@@ -80,7 +80,7 @@ def test_distinct_profile_dirs_get_distinct_sessions(tmp_path):
     import browden.mcp.server as server
     importlib.reload(server)
     a, b = tmp_path / "a", tmp_path / "b"
-    with patch("browden.mcp.session_management.BrowserSessionStore.BrowserSessionManager",
+    with patch("browden.mcp.session_management.browser_session_store.BrowserSessionManager",
                side_effect=lambda *a, **k: MagicMock()) as mock_mgr:
         sa1 = server._store.get_or_create_session(server._backend_for(str(a)), max_sessions=10)
         sa2 = server._store.get_or_create_session(server._backend_for(str(a)), max_sessions=10)
@@ -95,9 +95,9 @@ def test_distinct_profile_dirs_get_distinct_sessions(tmp_path):
 
 def test_get_or_create_session_raises_at_the_session_cap(tmp_path):
     """A new profile beyond max_browser_sessions is refused, not launched."""
-    import browden.mcp.session_management.BrowserSessionStore as store_mod
+    import browden.mcp.session_management.browser_session_store as store_mod
     from browden.web_navigator.selenium_chrome import SeleniumChromeBackend
-    with patch("browden.mcp.session_management.BrowserSessionStore.BrowserSessionManager",
+    with patch("browden.mcp.session_management.browser_session_store.BrowserSessionManager",
                side_effect=lambda *a, **k: MagicMock()):
         store = store_mod.BrowserSessionStore()
         store.get_or_create_session(SeleniumChromeBackend(str(tmp_path / "a")), max_sessions=2)
@@ -111,10 +111,10 @@ def test_session_cap_counts_distinct_profiles_not_repeat_requests(tmp_path):
     """The cap counts live sessions, not requests: re-requesting a profile that
     already has a session returns the cached one and never raises — even at the
     cap. Only a genuinely new profile beyond the cap is refused."""
-    import browden.mcp.session_management.BrowserSessionStore as store_mod
+    import browden.mcp.session_management.browser_session_store as store_mod
     from browden.web_navigator.selenium_chrome import SeleniumChromeBackend
     a, b, c = (str(tmp_path / p) for p in "abc")
-    with patch("browden.mcp.session_management.BrowserSessionStore.BrowserSessionManager",
+    with patch("browden.mcp.session_management.browser_session_store.BrowserSessionManager",
                side_effect=lambda *a, **k: MagicMock()):
         store = store_mod.BrowserSessionStore()
         sa = store.get_or_create_session(SeleniumChromeBackend(a), max_sessions=2)
@@ -377,7 +377,7 @@ async def test_dom_tool_requires_page_id():
     import browden.mcp.server as server
     importlib.reload(server)
     with pytest.raises(TypeError):
-        await server.query_selector(".a")  # tab_id is required, no "active tab" default
+        await server.query_selector(".a")  # handle is required, no "active tab" default
 
 
 @pytest.mark.asyncio
@@ -413,7 +413,7 @@ async def test_screenshot_tool_requires_page_id():
     import browden.mcp.server as server
     importlib.reload(server)
     with pytest.raises(TypeError):
-        await server.screenshot()  # tab_id is required, no "active tab" default
+        await server.screenshot()  # handle is required, no "active tab" default
 
 
 def test_route_unknown_page_id_raises():

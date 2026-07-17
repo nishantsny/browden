@@ -11,7 +11,7 @@ import urllib.parse
 
 import pytest
 
-from browden.mcp.session_management.BrowserSessionManager import BrowserSessionManager
+from browden.mcp.session_management.browser_session_manager import BrowserSessionManager
 
 HTML = """<html><body>
   <input id="tip" type="number" value="5" placeholder="Grocery Tip">

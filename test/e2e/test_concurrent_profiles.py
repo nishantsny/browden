@@ -15,7 +15,7 @@ import urllib.parse
 
 import pytest
 
-from browden.mcp.session_management.BrowserSessionManager import BrowserSessionManager
+from browden.mcp.session_management.browser_session_manager import BrowserSessionManager
 
 N = 5
 

@@ -24,16 +24,16 @@ from ..interface import TabNotFoundError, WebNavigatorBackend
 from ..utils.network_utils import get_free_port
 
 
-def _switch(drv, tab_id: str) -> None:
+def _switch(drv, handle: str) -> None:
     """Focus a tab by id, translating Selenium's missing-window error.
 
     Selenium's NoSuchWindowException stringifies to a multi-line driver stack
     trace; TabNotFoundError carries a clean, actionable message instead.
     """
     try:
-        drv.switch_to.window(tab_id)
+        drv.switch_to.window(handle)
     except NoSuchWindowException:
-        raise TabNotFoundError(f"tab {tab_id!r} is not open") from None
+        raise TabNotFoundError(f"tab {handle!r} is not open") from None
 
 
 def _headless_enabled() -> bool:
@@ -250,7 +250,7 @@ def _launch_chrome(profile_dir: Path) -> tuple[subprocess.Popen, int]:
 def _wait_for_title(drv, timeout: float = TITLE_WAIT_SECONDS) -> None:
     """Wait briefly for the page title to populate after navigation.
 
-    drv.get() returns when the load event fires, but many pages set their
+    drv.get() returns when the load event fires, but many tabs set their
     final title via JavaScript after that. Best-effort: don't raise if the
     title never appears.
     """
@@ -287,7 +287,7 @@ class SeleniumChromeBackend(WebNavigatorBackend):
     don't share the per-dir ``SingletonLock``, so two backends on two profiles
     run concurrently without clobbering each other's window focus.
 
-    Page ids are raw Selenium window handles: the backend has no notion of the
+    Tab handles are raw Selenium window handles: the backend has no notion of the
     server's composite ``<profile>-<handle>`` id (see ``WebNavigatorBackend``).
     """
 
@@ -382,7 +382,7 @@ class SeleniumChromeBackend(WebNavigatorBackend):
         ``selected`` — so callers switch to the window they mean, then ask here.
         """
         return TabInfo(
-            per_session_id=drv.current_window_handle,
+            handle=drv.current_window_handle,
             url=drv.current_url,
             title=drv.title,
             selected=selected,
@@ -414,14 +414,14 @@ class SeleniumChromeBackend(WebNavigatorBackend):
     def list_tabs(self) -> list[TabInfo]:
         drv = self._drv()
         current_handle = drv.current_window_handle
-        pages = []
+        tabs = []
         for handle in drv.window_handles:
             drv.switch_to.window(handle)
-            pages.append(self._tabinfo(drv, selected=(handle == current_handle)))
+            tabs.append(self._tabinfo(drv, selected=(handle == current_handle)))
         drv.switch_to.window(current_handle)
-        return pages
+        return tabs
 
-    def list_tab_ids(self) -> list[str]:
+    def list_handles(self) -> list[str]:
         return list(self._drv().window_handles)
 
     def new_blank_tab(self) -> TabInfo:
@@ -429,11 +429,11 @@ class SeleniumChromeBackend(WebNavigatorBackend):
         drv.switch_to.new_window("tab")
         return self._tabinfo(drv, selected=True)
 
-    def close_tab(self, tab_id: str) -> None:
+    def close_tab(self, handle: str) -> None:
         drv = self._drv()
         if len(drv.window_handles) == 1:
             raise ValueError("Cannot close the last tab")
-        _switch(drv, tab_id)
+        _switch(drv, handle)
         drv.close()
         # drv.close() leaves the driver focused on the now-dead handle. The next
         # command — or _drv()'s health check, which reads current_window_handle —
@@ -444,8 +444,8 @@ class SeleniumChromeBackend(WebNavigatorBackend):
         if remaining:
             drv.switch_to.window(remaining[0])
 
-    def select_tab(self, tab_id: str) -> None:
-        _switch(self._drv(), tab_id)
+    def select_tab(self, handle: str) -> None:
+        _switch(self._drv(), handle)
 
     def navigate(self, url: str) -> TabInfo:
         drv = self._drv()
@@ -456,16 +456,16 @@ class SeleniumChromeBackend(WebNavigatorBackend):
         _wait_for_title(drv)
         return self._tabinfo(drv, selected=True)
 
-    def get_page_source(self, tab_id: str | None = None) -> str:
+    def get_tab_html(self, handle: str | None = None) -> str:
         drv = self._drv()
-        if tab_id:
-            _switch(drv, tab_id)
+        if handle:
+            _switch(drv, handle)
         return drv.page_source
 
-    def reload(self, tab_id: str | None = None) -> TabInfo:
+    def reload(self, handle: str | None = None) -> TabInfo:
         drv = self._drv()
-        if tab_id:
-            _switch(drv, tab_id)
+        if handle:
+            _switch(drv, handle)
         drv.refresh()
         _wait_for_title(drv)
         return self._tabinfo(drv, selected=True)
@@ -476,10 +476,10 @@ class SeleniumChromeBackend(WebNavigatorBackend):
         except NoSuchWindowException:
             raise TabNotFoundError("there is no active tab") from None
 
-    def screenshot(self, tab_id: str | None = None) -> bytes:
+    def screenshot(self, handle: str | None = None) -> bytes:
         drv = self._drv()
-        if tab_id:
-            _switch(drv, tab_id)
+        if handle:
+            _switch(drv, handle)
         try:
             return drv.get_screenshot_as_png()
         except NoSuchWindowException:
@@ -496,7 +496,7 @@ class SeleniumChromeBackend(WebNavigatorBackend):
         _wait_for_title(drv)
         return {
             "clicked": True,
-            "tab_id": drv.current_window_handle,
+            "handle": drv.current_window_handle,
             "url_before": url_before,
             "url": drv.current_url,
             "title": drv.title,
@@ -518,7 +518,7 @@ class SeleniumChromeBackend(WebNavigatorBackend):
         return {
             "inserted": True,
             "value": value,
-            "tab_id": drv.current_window_handle,
+            "handle": drv.current_window_handle,
             "url": drv.current_url,
             "title": drv.title,
         }

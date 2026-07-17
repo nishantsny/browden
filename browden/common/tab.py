@@ -5,11 +5,11 @@ from dataclasses import dataclass
 class TabInfo:
     """Information about an open browser tab.
 
-    ``per_session_id`` is the backend's raw, per-session tab handle. The
+    ``handle`` is the backend's raw, per-session tab handle. The
     server's cross-profile identifier — the customer-facing ``id`` — is composed
     from this plus the tab's profile namespace.
     """
-    per_session_id: str
+    handle: str
     url: str
     title: str
     selected: bool
@@ -19,7 +19,7 @@ class TabInfo:
         """The wire shape for a tab.
 
         ``id`` is the customer-facing tab id (the server's cross-profile
-        identifier); the raw ``per_session_id`` is internal and deliberately
+        identifier); the raw ``handle`` is internal and deliberately
         not surfaced.
         """
         return {

@@ -28,7 +28,7 @@ def test_screenshot_returns_png_bytes(backend):
     backend.new_blank_tab()
     page = backend.navigate(DATA_URL)
 
-    png = backend.screenshot(page.per_session_id)
+    png = backend.screenshot(page.handle)
 
     assert isinstance(png, bytes)
     assert png.startswith(PNG_MAGIC)
@@ -39,6 +39,6 @@ def test_screenshot_defaults_to_active_tab(backend):
     backend.new_blank_tab()
     backend.navigate(DATA_URL)
 
-    png = backend.screenshot()  # no tab_id -> active tab
+    png = backend.screenshot()  # no handle -> active tab
 
     assert png.startswith(PNG_MAGIC)
