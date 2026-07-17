@@ -2,8 +2,10 @@
 
 Tranco (https://tranco-list.eu) is a research-grade ranking of the most-visited
 domains, hardened against the day-to-day churn and manipulation that skew raw
-popularity lists. We keep an offline snapshot of the top 500 000 registrable
-domains as ``tranco-top-400k.txt.gz`` *next to the allowlist config* — fetched
+popularity lists. We keep an offline snapshot of the top-N registrable domains
+(1 million by default; see ``DEFAULT_TOP_N``) as ``tranco-top-400k.txt.gz`` — a
+historical filename, kept stable so existing installs keep working — *next to
+the allowlist config*, fetched
 there by ``setup`` on first run (``setup/fetch_tranco.py``), never committed —
 and treat membership as a coarse "this is an established site" signal for the
 read gate. Popularity is a proxy for *established*, never a guarantee of *safe*
