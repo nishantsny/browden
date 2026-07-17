@@ -16,9 +16,11 @@ exercise a *fresh* PSL place their own ``public_suffix_list.dat`` next to a
 snapshot and construct against that path.
 """
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
+from browden.mcp.session_management import browser_session_store
 from browden.mcp.validator import popularity, tranco
 from browden.mcp.validator.popularity import PopularityAllowlist
 
@@ -39,3 +41,19 @@ def _tranco_fixture(monkeypatch):
     tranco._load.cache_clear()
     popularity._psl.cache_clear()
     PopularityAllowlist.contains.cache_clear()
+
+
+@pytest.fixture(autouse=True)
+def _no_store_atexit(monkeypatch):
+    """Keep unit-test session stores from registering real atexit hooks.
+
+    ``BrowserSessionStore.get_or_create_session`` registers an interpreter-exit
+    shutdown for the sessions it creates. In unit tests those sessions wrap fake
+    backends — there is no Chrome to tear down — so the hooks only fire after
+    pytest's summary and log "MCP Server shutting down" lines into the terminal.
+    Stub the registration (in the store module's namespace only); the real
+    atexit path is covered by the e2e suite, which drives real browsers.
+    """
+    monkeypatch.setattr(
+        browser_session_store, "atexit",
+        SimpleNamespace(register=lambda *a, **k: None))
