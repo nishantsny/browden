@@ -5,7 +5,7 @@ import pytest
 
 from browden.common.tab import TabInfo
 from browden.web_navigator.interface import TabNotFoundError
-from browden.mcp.session_management.BrowserSessionManager import IDLE_TTL_SECONDS, BrowserSessionManager
+from browden.mcp.session_management.browser_session_manager import IDLE_TTL_SECONDS, BrowserSessionManager
 
 PAGE_HTML = """
 <html><body>
@@ -31,13 +31,13 @@ class FakeBackend:
         self.calls = []
         self.closed = []
         self.missing: set[str] = set()
-        self.live: set[str] | None = {"h1", "h2"}  # ids list_tab_ids reports; None -> it raises
+        self.live: set[str] | None = {"h1", "h2"}  # ids list_handles reports; None -> it raises
         self.close_raises = None  # set to an exception instance to simulate failure
         self.running = True  # what is_running reports
 
-    def _check(self, tab_id):
-        if tab_id in self.missing:
-            raise TabNotFoundError(f"tab {tab_id!r} is not open")
+    def _check(self, handle):
+        if handle in self.missing:
+            raise TabNotFoundError(f"tab {handle!r} is not open")
 
     def get_profile_dir(self):
         return self.profile_dir
@@ -51,46 +51,46 @@ class FakeBackend:
 
     def list_tabs(self):
         self.calls.append("list_tabs")
-        return [TabInfo(per_session_id="h1", url="u1", title="t1", selected=True, profile_dir=self.profile_dir),
-                TabInfo(per_session_id="h2", url="u2", title="t2", selected=False, profile_dir=self.profile_dir)]
+        return [TabInfo(handle="h1", url="u1", title="t1", selected=True, profile_dir=self.profile_dir),
+                TabInfo(handle="h2", url="u2", title="t2", selected=False, profile_dir=self.profile_dir)]
 
-    def list_tab_ids(self):
-        self.calls.append("list_tab_ids")
+    def list_handles(self):
+        self.calls.append("list_handles")
         if self.live is None:
-            raise RuntimeError("list_tab_ids unavailable")
+            raise RuntimeError("list_handles unavailable")
         return list(self.live)
 
     def new_blank_tab(self):
         self.calls.append("new_blank_tab")
-        return TabInfo(per_session_id="h2", url="about:blank", title="t", selected=True, profile_dir=self.profile_dir)
+        return TabInfo(handle="h2", url="about:blank", title="t", selected=True, profile_dir=self.profile_dir)
 
-    def close_tab(self, tab_id):
-        self.calls.append(("close_tab", tab_id))
+    def close_tab(self, handle):
+        self.calls.append(("close_tab", handle))
         if self.close_raises is not None:
             raise self.close_raises
-        self._check(tab_id)
-        self.closed.append(tab_id)
+        self._check(handle)
+        self.closed.append(handle)
 
-    def select_tab(self, tab_id):
-        self.calls.append(("select_tab", tab_id))
-        self._check(tab_id)
+    def select_tab(self, handle):
+        self.calls.append(("select_tab", handle))
+        self._check(handle)
 
     def navigate(self, url):
         self.calls.append(("navigate", url))
-        return TabInfo(per_session_id="h1", url=url, title="t", selected=True, profile_dir=self.profile_dir)
+        return TabInfo(handle="h1", url=url, title="t", selected=True, profile_dir=self.profile_dir)
 
-    def get_page_source(self, tab_id=None):
-        self.calls.append(("get_page_source", tab_id))
-        self._check(tab_id)
+    def get_tab_html(self, handle=None):
+        self.calls.append(("get_tab_html", handle))
+        self._check(handle)
         return self.source
 
-    def reload(self, tab_id=None):
-        self.calls.append(("reload", tab_id))
-        self._check(tab_id)
-        return TabInfo(per_session_id=tab_id or self.active, url="reloaded-url", title="reloaded-title", selected=True, profile_dir=self.profile_dir)
+    def reload(self, handle=None):
+        self.calls.append(("reload", handle))
+        self._check(handle)
+        return TabInfo(handle=handle or self.active, url="reloaded-url", title="reloaded-title", selected=True, profile_dir=self.profile_dir)
 
-    def screenshot(self, tab_id=None):
-        self.calls.append(("screenshot", tab_id))
+    def screenshot(self, handle=None):
+        self.calls.append(("screenshot", handle))
         return b"\x89PNG\r\n\x1a\nfakepng"
 
 
@@ -303,28 +303,28 @@ async def test_force_reload_on_dead_page_returns_error():
 
 @pytest.mark.asyncio
 async def test_force_reload_partial_failure_drops_supplied_page_id():
-    """reload(pid) succeeds but the subsequent get_page_source(pid) fails — the tab
-    died between the two backend calls. The supplied tab_id must be dropped from
+    """reload(pid) succeeds but the subsequent get_tab_html(pid) fails — the tab
+    died between the two backend calls. The supplied handle must be dropped from
     cache + registry, and a structured error returned. Regression: an earlier
-    implementation defaulted tab_id from current_tab_id() but caught the
+    implementation defaulted handle from current_handle() but caught the
     exception with the *original* (None) argument, leaving the live id leaked."""
     backend = FakeBackend()
     s = make_session(backend)
     s._registry.touch("h2")
     s._cache._entries["h2"] = object()  # type: ignore[assignment]
 
-    # Make get_page_source raise for h2, but leave reload working.
-    def get_page_source(tab_id=None):
-        backend.calls.append(("get_page_source", tab_id))
-        raise TabNotFoundError(f"tab {tab_id!r} disappeared mid-reload")
-    backend.get_page_source = get_page_source
+    # Make get_tab_html raise for h2, but leave reload working.
+    def get_tab_html(handle=None):
+        backend.calls.append(("get_tab_html", handle))
+        raise TabNotFoundError(f"tab {handle!r} disappeared mid-reload")
+    backend.get_tab_html = get_tab_html
 
     res = await s.force_reload_tab(id="ns-h2")
 
     assert res == {"id": "ns-h2",
                    "error": "tab ns-h2 is no longer open — call list_tabs for current tabs"}
     assert ("reload", "h2") in backend.calls  # the partial succeeded
-    assert ("get_page_source", "h2") in backend.calls  # …and the second call failed
+    assert ("get_tab_html", "h2") in backend.calls  # …and the second call failed
     assert "h2" not in s._cache._entries  # old entry dropped
     assert "h2" not in s._registry._last_access  # tracking dropped
 
@@ -415,7 +415,7 @@ def test_sweep_idle_is_noop_while_driver_busy(fake_clock):
     s.sweep_idle()
 
     assert backend.closed == []
-    assert "list_tab_ids" not in backend.calls  # didn't even reconcile
+    assert "list_handles" not in backend.calls  # didn't even reconcile
     assert "old" in s._registry._last_access  # left for the next tick
 
 
@@ -438,7 +438,7 @@ def test_sweep_idle_reconciles_against_live_tabs(fake_clock):
 
 def test_sweep_idle_skips_reconcile_when_enumeration_fails():
     backend = FakeBackend()
-    backend.live = None  # list_tab_ids raises
+    backend.live = None  # list_handles raises
     s = make_session(backend)
     s._registry.touch("h1")
 
@@ -451,7 +451,7 @@ def test_sweep_idle_skips_reconcile_when_enumeration_fails():
 
 class LiveCountBackend(FakeBackend):
     """FakeBackend whose new_blank_tab/close_tab actually move the live tab set,
-    so the tab-cap check (which reads ``list_tab_ids()``) sees a count that rises
+    so the tab-cap check (which reads ``list_handles()``) sees a count that rises
     and falls exactly like the real backend's does."""
 
     def __init__(self):
@@ -464,12 +464,12 @@ class LiveCountBackend(FakeBackend):
         self._next += 1
         handle = f"h{self._next}"
         self.live.add(handle)
-        return TabInfo(per_session_id=handle, url="about:blank", title="t",
+        return TabInfo(handle=handle, url="about:blank", title="t",
                        selected=True, profile_dir=self.profile_dir)
 
-    def close_tab(self, tab_id):
-        super().close_tab(tab_id)
-        self.live.discard(tab_id)
+    def close_tab(self, handle):
+        super().close_tab(handle)
+        self.live.discard(handle)
 
 
 @pytest.mark.asyncio

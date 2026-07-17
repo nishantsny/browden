@@ -65,7 +65,7 @@ def _text(res) -> str:
     return "".join(c.text for c in (res.content or []) if getattr(c, "type", None) == "text")
 
 
-async def _navigate_refused(mcp, url, tab_id) -> bool:
+async def _navigate_refused(mcp, url, handle) -> bool:
     """True iff the READ GATE refused ``url``.
 
     The gate's signature is the ``... not on allowlist ...`` ValidationError (in
@@ -74,7 +74,7 @@ async def _navigate_refused(mcp, url, tab_id) -> bool:
     also sets ``isError`` but carries a network message, so we key on the
     ``allowlist`` signature, never ``isError`` alone."""
     try:
-        res = await mcp.call_tool("navigate", {"url": url, "id": tab_id})
+        res = await mcp.call_tool("navigate", {"url": url, "id": handle})
         return "allowlist" in _text(res).lower()
     except Exception as e:  # SDK may raise on a server-side ValidationError
         return "allowlist" in str(e).lower()
@@ -83,20 +83,20 @@ async def _navigate_refused(mcp, url, tab_id) -> bool:
 @pytest.mark.asyncio
 async def test_psl_refuses_public_suffix_and_lookalike_subdomains(psl_mcp_server, mcp_client_session):
     async with mcp_client_session(psl_mcp_server) as mcp:
-        tab_id = await _new_tab_id(mcp)
+        handle = await _new_tab_id(mcp)
         # github.io is a PUBLIC SUFFIX in Tranco; an arbitrary Pages subdomain
         # reduces to itself (not github.io) and is unlisted -> refused.
-        assert await _navigate_refused(mcp, "https://nope-xyz-987.github.io/", tab_id)
+        assert await _navigate_refused(mcp, "https://nope-xyz-987.github.io/", handle)
         # A suffix-spoof lookalike reduces to evil-xyz.test, not google.com.
-        assert await _navigate_refused(mcp, "https://google.com.evil-xyz.test/", tab_id)
+        assert await _navigate_refused(mcp, "https://google.com.evil-xyz.test/", handle)
 
 
 @pytest.mark.asyncio
 async def test_psl_allows_subdomain_of_listed_registrable_domain(psl_mcp_server, mcp_client_session):
     async with mcp_client_session(psl_mcp_server) as mcp:
-        tab_id = await _new_tab_id(mcp)
+        handle = await _new_tab_id(mcp)
         # sub.example-listed-xyz.com reduces (via the PSL) to the listed
         # example-listed-xyz.com, so the gate must NOT refuse it. The load itself
         # fails (the domain doesn't resolve) — that is a navigation outcome, not a
         # read-gate refusal, which is all we assert.
-        assert not await _navigate_refused(mcp, "https://sub.example-listed-xyz.com/", tab_id)
+        assert not await _navigate_refused(mcp, "https://sub.example-listed-xyz.com/", handle)

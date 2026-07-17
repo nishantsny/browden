@@ -36,7 +36,7 @@ from ...common.logger import logger
 from ...dom import query, serialize
 from ..validator.errors import tab_gone_envelope
 from ...web_navigator.interface import TabNotFoundError
-from ...web_navigator.page_id import format_page_id, split_page_id
+from ...web_navigator.tab_id import format_tab_id, split_tab_id
 from ...web_navigator.registry import TabRegistry
 from ...web_navigator.soup_cache import SoupCache
 
@@ -67,12 +67,12 @@ class BrowserSessionManager:
 
     def _id(self, handle: str) -> str:
         """The customer-facing composite id for one of this session's tab handles."""
-        return format_page_id(self._namespace, handle)
+        return format_tab_id(self._namespace, handle)
 
     @staticmethod
     def _handle(id: str) -> str:
         """The raw backend handle inside a customer id (routed here by the store)."""
-        return split_page_id(id)[1]
+        return split_tab_id(id)[1]
 
     def close(self) -> None:
         """Stop the reaper and tear down this profile's browser.
@@ -153,21 +153,21 @@ class BrowserSessionManager:
         logger.info(f"Listed {len(tabs)} tabs")
         result = []
         for t in tabs:
-            self._registry.touch(t.per_session_id)
-            result.append(t.as_dict(id=self._id(t.per_session_id)))
+            self._registry.touch(t.handle)
+            result.append(t.as_dict(id=self._id(t.handle)))
         return result
 
     async def new_blank_tab(self, max_tabs: int) -> dict:
         self.sweep_idle()
         def work():
-            if len(self._backend.list_tab_ids()) >= max_tabs:
+            if len(self._backend.list_handles()) >= max_tabs:
                 raise RuntimeError(f"session limit of {max_tabs} tabs reached")
             return self._backend.new_blank_tab()
         tab = await self._run_driver(work)
-        logger.info(f"Created new tab: {tab.per_session_id}")
-        self._cache.invalidate(tab.per_session_id)
-        self._registry.touch(tab.per_session_id)
-        return tab.as_dict(id=self._id(tab.per_session_id))
+        logger.info(f"Created new tab: {tab.handle}")
+        self._cache.invalidate(tab.handle)
+        self._registry.touch(tab.handle)
+        return tab.as_dict(id=self._id(tab.handle))
 
     async def close_tab(self, id: str) -> None:
         self.sweep_idle()
@@ -201,7 +201,7 @@ class BrowserSessionManager:
             self._backend.select_tab(handle)
             tab = self._backend.navigate(url)
             logger.info(f"Navigated tab {id} to {url!r}")
-            return tab.as_dict(id=self._id(tab.per_session_id))
+            return tab.as_dict(id=self._id(tab.handle))
         return await self._with_tab(id, work, invalidate=True)
 
     async def current_url(self, *, id: str) -> str | None:
@@ -241,7 +241,7 @@ class BrowserSessionManager:
             self._backend.select_tab(handle)
             result = self._backend.click_element(css_selector)
             logger.info(f"click: activated {css_selector!r} on tab {id}")
-            result.pop("tab_id", None)
+            result.pop("handle", None)
             result["id"] = id
             return result
         return await self._with_tab(id, work, invalidate=True)
@@ -260,7 +260,7 @@ class BrowserSessionManager:
             self._backend.select_tab(handle)
             result = self._backend.insert_text_element(css_selector, value)
             logger.info(f"insert_text: set {css_selector!r} on tab {id}")
-            result.pop("tab_id", None)
+            result.pop("handle", None)
             result["id"] = id
             return result
         return await self._with_tab(id, work, invalidate=True)
@@ -385,13 +385,13 @@ class BrowserSessionManager:
 
         Short-circuits while a driver op is in flight (``_driver_busy``): the next
         tick (or the next tool's lazy sweep) catches everything. The driver calls
-        here (``list_tab_ids``, ``close_tab``) are synchronous and briefly block
-        the loop — bounded and rare, acceptable; ``list_tab_ids`` is cheap (no
+        here (``list_handles``, ``close_tab``) are synchronous and briefly block
+        the loop — bounded and rare, acceptable; ``list_handles`` is cheap (no
         per-tab focus changes). The last remaining tab is left open (closing the
         only window would quit the driver) but is still dropped from the
         cache/registry so it stops being tracked until touched again.
 
-        Everything here is keyed by raw backend handles (what ``list_tab_ids``
+        Everything here is keyed by raw backend handles (what ``list_handles``
         reports and the registry stores), so no id composition is involved.
         """
         if self._driver_busy:
@@ -400,7 +400,7 @@ class BrowserSessionManager:
         # touched again) is gone — drop it from tracking now rather than waiting
         # for its idle TTL to elapse and the close_tab below to no-op on it.
         try:
-            live = set(self._backend.list_tab_ids())
+            live = set(self._backend.list_handles())
         except Exception:
             live = None  # couldn't enumerate; skip reconciliation this tick
         if live is not None:

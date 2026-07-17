@@ -33,7 +33,7 @@ def test_navigate_changes_active_tab_url(backend):
 
     info = backend.navigate(URL_B)
 
-    assert info.per_session_id == page.per_session_id  # navigate stays on the same (active) tab
+    assert info.handle == page.handle  # navigate stays on the same (active) tab
     assert "PAGE_BETA" in info.url
     assert "PAGE_BETA" in backend.current_url()
     assert "PAGE_ALPHA" not in backend.current_url()
@@ -46,13 +46,13 @@ def test_select_page_switches_active_tab(backend):
     b = backend.navigate(URL_B)
 
     def selected_id():
-        return next(t.per_session_id for t in backend.list_tabs() if t.selected)
+        return next(t.handle for t in backend.list_tabs() if t.selected)
 
-    backend.select_tab(a.per_session_id)
-    assert selected_id() == a.per_session_id
+    backend.select_tab(a.handle)
+    assert selected_id() == a.handle
 
-    backend.select_tab(b.per_session_id)
-    assert selected_id() == b.per_session_id
+    backend.select_tab(b.handle)
+    assert selected_id() == b.handle
 
 
 def test_list_pages_marks_exactly_one_selected(backend):
@@ -60,14 +60,14 @@ def test_list_pages_marks_exactly_one_selected(backend):
     a = backend.navigate(URL_A)
     backend.new_blank_tab()
     b = backend.navigate(URL_B)
-    backend.select_tab(a.per_session_id)
+    backend.select_tab(a.handle)
 
     pages = backend.list_tabs()
 
-    assert {a.per_session_id, b.per_session_id} <= {p.per_session_id for p in pages}
+    assert {a.handle, b.handle} <= {p.handle for p in pages}
     selected = [p for p in pages if p.selected]
     assert len(selected) == 1
-    assert selected[0].per_session_id == a.per_session_id
+    assert selected[0].handle == a.handle
 
 
 def test_close_page_removes_only_that_tab(backend):
@@ -75,10 +75,10 @@ def test_close_page_removes_only_that_tab(backend):
     a = backend.navigate(URL_A)
     backend.new_blank_tab()
     b = backend.navigate(URL_B)
-    assert {a.per_session_id, b.per_session_id} <= {p.per_session_id for p in backend.list_tabs()}
+    assert {a.handle, b.handle} <= {p.handle for p in backend.list_tabs()}
 
-    backend.close_tab(b.per_session_id)
+    backend.close_tab(b.handle)
 
-    remaining = {p.per_session_id for p in backend.list_tabs()}
-    assert b.per_session_id not in remaining
-    assert a.per_session_id in remaining
+    remaining = {p.handle for p in backend.list_tabs()}
+    assert b.handle not in remaining
+    assert a.handle in remaining

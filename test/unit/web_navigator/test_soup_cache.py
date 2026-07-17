@@ -8,13 +8,13 @@ class FakeBackend:
         self.get_calls = 0
         self.reload_calls = 0
 
-    def get_page_source(self, tab_id=None):
+    def get_tab_html(self, handle=None):
         self.get_calls += 1
         return self.source
 
-    def reload(self, tab_id=None):
+    def reload(self, handle=None):
         self.reload_calls += 1
-        return TabInfo(per_session_id=tab_id or "active", url="https://www.amazon.com/", title="T", selected=True, profile_dir="/p")
+        return TabInfo(handle=handle or "active", url="https://www.amazon.com/", title="T", selected=True, profile_dir="/p")
 
 
 def test_first_get_parses_without_reloading(fake_clock):
@@ -66,10 +66,10 @@ def test_force_reload_reloads_browser_and_returns_page_info(fake_clock):
     cache = SoupCache(clock=fake_clock())
     cache.get_soup("p1", backend)
     backend.source = "<html><body><p id='z'>fresh</p></body></html>"
-    soup, page_info = cache.force_reload("p1", backend)
+    soup, tab_info = cache.force_reload("p1", backend)
     assert backend.reload_calls == 1
     assert soup.find(id="z").text == "fresh"
-    assert page_info.url == "https://www.amazon.com/"
+    assert tab_info.url == "https://www.amazon.com/"
     # and the cache now holds the fresh soup
     again, reloaded = cache.get_soup("p1", backend)
     assert reloaded is False

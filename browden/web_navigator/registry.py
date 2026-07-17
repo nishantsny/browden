@@ -17,11 +17,11 @@ class TabRegistry:
         self._clock = clock
         self._last_access: dict[str, float] = {}
 
-    def touch(self, tab_id: str, now: float | None = None) -> None:
-        self._last_access[tab_id] = self._clock() if now is None else now
+    def touch(self, handle: str, now: float | None = None) -> None:
+        self._last_access[handle] = self._clock() if now is None else now
 
-    def forget(self, tab_id: str) -> None:
-        self._last_access.pop(tab_id, None)
+    def forget(self, handle: str) -> None:
+        self._last_access.pop(handle, None)
 
     def tracked_ids(self) -> list[str]:
         return list(self._last_access)

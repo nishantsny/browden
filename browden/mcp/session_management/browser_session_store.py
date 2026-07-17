@@ -18,8 +18,8 @@ import hashlib
 
 from ...common.logger import logger
 from ...web_navigator.interface import WebNavigatorBackend
-from ...web_navigator.page_id import split_page_id
-from .BrowserSessionManager import BrowserSessionManager
+from ...web_navigator.tab_id import split_tab_id
+from .browser_session_manager import BrowserSessionManager
 
 
 class UnknownTabError(LookupError):
@@ -117,7 +117,7 @@ class BrowserSessionStore:
         owns the id from there — it splits off its own handle and composes its
         tabs' ids itself.
         """
-        namespace = split_page_id(id)[0]
+        namespace = split_tab_id(id)[0]
         session = self._sessions.get(namespace)
         if session is None:
             raise UnknownTabError(id)

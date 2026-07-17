@@ -1,7 +1,7 @@
 """End-to-end: the DOM-query + force_reload tools against a real (headless) Chrome.
 
 These go through ``BrowserSessionManager`` — the same path the MCP tools take — so they
-exercise the full chain: live Selenium ``get_page_source`` -> soup cache ->
+exercise the full chain: live Selenium ``get_tab_html`` -> soup cache ->
 ``dom.query`` -> ``dom.serialize`` node. The page is an inline ``data:``
 document, so the run is deterministic and offline.
 """
@@ -9,7 +9,7 @@ import urllib.parse
 
 import pytest
 
-from browden.mcp.session_management.BrowserSessionManager import BrowserSessionManager
+from browden.mcp.session_management.browser_session_manager import BrowserSessionManager
 
 HTML = """<html><body>
   <div id="logo" class="brand mark">BG</div>

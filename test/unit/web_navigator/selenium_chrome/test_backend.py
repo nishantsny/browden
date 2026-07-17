@@ -300,7 +300,7 @@ def test_switch_failure_becomes_page_not_found():
     # page_ids are raw Selenium handles; a handle Selenium rejects must surface
     # as a clean TabNotFoundError, not the driver's stack-trace exception.
     for call in (lambda: backend.select_tab("dead"),
-                 lambda: backend.get_page_source("dead"),
+                 lambda: backend.get_tab_html("dead"),
                  lambda: backend.reload("dead"),
                  lambda: backend.close_tab("dead")):
         with pytest.raises(TabNotFoundError) as exc:
@@ -340,7 +340,7 @@ def test_drv_restarts_when_current_window_is_gone(mock_webdriver, mock_launch):
     backend = _backend_with_driver(dead_drv)
 
     # Any driving call goes through _drv(), whose health check restarts the session.
-    assert backend.list_tab_ids() == ["new_h1"]
+    assert backend.list_handles() == ["new_h1"]
     dead_drv.quit.assert_called_once()
     assert mock_webdriver.Chrome.call_count == 1
 
@@ -405,5 +405,5 @@ def test_list_tab_ids_returns_handles_without_switching(mock_webdriver, mock_lau
     mock_webdriver.Chrome.return_value = drv
     backend = _backend()
 
-    assert backend.list_tab_ids() == ["h1", "h2", "h3"]
+    assert backend.list_handles() == ["h1", "h2", "h3"]
     drv.switch_to.window.assert_not_called()  # cheap: no per-tab focus changes

@@ -19,7 +19,7 @@ from ..configs.loader import (
 )
 from ..dependencies.mcp import FastMCP, Image
 from ..web_navigator.selenium_chrome import SeleniumChromeBackend
-from .session_management.BrowserSessionStore import BrowserSessionStore, UnknownTabError
+from .session_management.browser_session_store import BrowserSessionStore, UnknownTabError
 
 from .validator import (
     ActionAllowlist,
@@ -72,7 +72,7 @@ _refresher = AllowlistRefresher.static(
 logger.info("Browden MCP module initialized")
 
 # All per-profile session state and the customer<->backend id mapping live in
-# the store (see session_management/BrowserSessionStore.py).
+# the store (see session_management/browser_session_store.py).
 _store = BrowserSessionStore()
 
 
@@ -355,7 +355,7 @@ async def insert_text(css_selector: str, value: str, id: str) -> dict:
 # -- DOM-query tools --------------------------------------------------------
 #
 # These take a REQUIRED id (the id from new_blank_tab / navigate / list_tabs).
-# Like navigate / select_page / force_reload_page, they never default to "the
+# Like navigate / select_tab / force_reload_tab, they never default to "the
 # active tab": the active tab is shared state the human also controls, so an
 # implicit default would silently act on whichever tab happens to be focused.
 # A id that no longer names an open tab comes back as
@@ -464,7 +464,7 @@ async def screenshot(id: str):  # -> dict | Image; unannotated: FastMCP can't sc
 @_tool
 async def force_reload_tab(id: str) -> dict:
     """Reload the named tab and refresh its cached DOM."""
-    logger.info(f"Tool called: force_reload_page (id={id!r})")
+    logger.info(f"Tool called: force_reload_tab (id={id!r})")
     session = _store.route(id)
     url = await session.current_url(id=id)
     if url is None:
@@ -473,7 +473,7 @@ async def force_reload_tab(id: str) -> dict:
         raise ValidationError(f"URL not on the read allowlist: {url}")
     result = await session.force_reload_tab(id=id)
     result = await _guard_landing(session, id, result)  # a reload can 302 off-list too
-    logger.info("Tool finished: force_reload_page")
+    logger.info("Tool finished: force_reload_tab")
     return result
 
 
