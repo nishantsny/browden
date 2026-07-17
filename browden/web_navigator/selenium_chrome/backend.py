@@ -331,35 +331,42 @@ class SeleniumChromeBackend(WebNavigatorBackend):
         _terminate(self._chrome_proc)
         self._chrome_proc = None
 
-    def is_running(self) -> bool:
-        """True if a live Chrome is currently attached. Probes without launching.
+    def _session_alive(self, check_current: bool) -> bool:
+        """Whether the attached driver is live; tears it down (no relaunch) on failure.
 
-        The observing counterpart to ``_drv()``'s heal-by-relaunch: callers that
-        only want to look (list_tabs across profiles) must not spawn a browser
-        as a side effect.
+        The single liveness probe both ``is_running`` and ``_drv`` share. Always
+        checks ``window_handles`` (the session is up); with ``check_current`` also
+        checks ``current_window_handle`` (the focused-window context later commands
+        need — a "no such window" here is what would otherwise blow up mid-op).
+        A failing probe tears the dead session down and returns False, so callers
+        decide what next without a browser being spawned here: ``is_running``
+        reports it, ``_drv`` relaunches.
         """
         if self._driver is None:
             return False
         try:
             _ = self._driver.window_handles
+            if check_current:
+                _ = self._driver.current_window_handle
             return True
         except Exception:
             self._teardown()
             return False
 
-    def _drv(self):
-        if self._driver is not None:
-            try:
-                # 1. Check if the driver session is alive
-                _ = self._driver.window_handles
+    def is_running(self) -> bool:
+        """True if a live Chrome is currently attached. Probes without launching.
 
-                # 2. Check if the CURRENT window context is still valid
-                # This is specifically what causes the "no such window" error later
-                _ = self._driver.current_window_handle
-            except Exception:
-                # If either check fails, the state is bad; clean up and restart
-                self._teardown()
-        if self._driver is None:
+        The observing counterpart to ``_drv()``'s heal-by-relaunch: callers that
+        only want to look (list_tabs across profiles) must not spawn a browser
+        as a side effect. Only the session-level probe — a valid *current window*
+        is ``_drv``'s concern (it can heal one), not this look-only check.
+        """
+        return self._session_alive(False)
+
+    def _drv(self):
+        # Health-check the attached driver (session AND current-window context);
+        # a failed probe has already torn it down, so (re)launch a fresh one.
+        if not self._session_alive(True):
             profile = self._profile_dir
             logger.info(f"Starting new Chrome session (profile={profile})")
             self._chrome_proc, port = _launch_chrome(profile)
