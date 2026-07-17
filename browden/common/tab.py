@@ -15,17 +15,18 @@ class TabInfo:
     selected: bool
     profile_dir: str
 
-    def as_dict(self, id: str) -> dict[str, str]:
+    def as_dict(self, id: str) -> dict[str, str | bool]:
         """The wire shape for a tab.
 
         ``id`` is the customer-facing tab id (the server's cross-profile
         identifier); the raw ``handle`` is internal and deliberately
-        not surfaced.
+        not surfaced. ``selected`` is a real JSON boolean — never a
+        stringified ``"True"``.
         """
         return {
             "id": id,
             "url": self.url,
             "title": self.title,
-            "selected": str(self.selected),
+            "selected": self.selected,
             "profile_dir": self.profile_dir,
         }

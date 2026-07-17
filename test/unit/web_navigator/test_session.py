@@ -358,13 +358,16 @@ async def test_close_dead_page_is_a_noop_success():
 
 
 @pytest.mark.asyncio
-async def test_select_dead_page_raises_and_drops_it():
+async def test_select_dead_page_returns_envelope_and_drops_it():
+    # Like every other per-tab op, selecting a gone tab returns the standard
+    # tab-gone envelope (with the composite id, never the raw backend handle).
     backend = FakeBackend()
     backend.missing.add("h4")
     s = make_session(backend)
     s._registry.touch("h4")
-    with pytest.raises(TabNotFoundError):
-        await s.select_tab("ns-h4")
+    result = await s.select_tab("ns-h4")
+    assert result["id"] == "ns-h4"
+    assert "no longer open" in result["error"]
     assert "h4" not in s._registry._last_access
 
 
