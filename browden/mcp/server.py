@@ -12,6 +12,7 @@ from ..common.logger import logger
 from ..configs.loader import (
     AllowlistRefresher,
     ConfigError,
+    DEFAULT_RELOAD_INTERVAL_SECONDS,
     SAMPLE_ALLOWLIST,
     load_allowlist,
     resolve_allowlist_path,
@@ -496,8 +497,13 @@ def main(argv: list[str] | None = None) -> None:
     path = resolve_allowlist_path(args.allowlist)
     if path is None:
         parser.error("no allowlist config found — run setup/onetime_setup.py or pass --allowlist")
+    # BROWDEN_RELOAD_INTERVAL shortens the hot-reload poll tick — the e2e suite
+    # sets it so a config edit is picked up in fractions of a second instead of
+    # the operator-friendly 10s default.
+    interval = float(os.environ.get(
+        "BROWDEN_RELOAD_INTERVAL", DEFAULT_RELOAD_INTERVAL_SECONDS))
     try:
-        _refresher = AllowlistRefresher.from_path(path)
+        _refresher = AllowlistRefresher.from_path(path, interval=interval)
     except ConfigError as e:
         parser.error(str(e))
     logger.info(f"Loaded allowlist config from {path}")

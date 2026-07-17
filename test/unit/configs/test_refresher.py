@@ -5,10 +5,12 @@ atomic attribute rebind — RCU) when the backing file changes. These exercise t
 pure decision (maybe_reload) plus the async poller that drives it.
 """
 import asyncio
+import gzip
 
 import pytest
 
 from browden.configs.loader.refresher import AllowlistRefresher, _stat_signature
+from browden.mcp.validator.tranco import TRANCO_FILENAME
 
 
 def _write(path, *, top_n: int) -> None:
@@ -47,6 +49,27 @@ def test_reload_swaps_in_edited_config(config):
     assert r.allowlist is not before                          # atomic swap happened
     assert r.allowlist.read_policy.override_has_host("specific.test")
     assert not r.allowlist.read_policy.override_has_host("anything.test")  # "*" gone
+
+
+def test_reload_to_disallowed_wins_over_the_contains_memo(tmp_path):
+    """website.com is allowed via Tranco, then the config is tightened so it isn't.
+
+    The first is_allowed populates the old policy's per-instance ``contains``
+    memo with True for website.com. After ``maybe_reload()`` the *fresh*
+    ``PopularityAllowlist`` must answer for itself: the gate now denies
+    website.com — a stale memoized allow must never survive the RCU swap.
+    """
+    with gzip.open(tmp_path / TRANCO_FILENAME, "wt", encoding="utf-8") as fh:
+        fh.write("popular-anchor.com\nwebsite.com\n")
+    cfg = tmp_path / "allowlist.yaml"
+    cfg.write_text("read:\n  tranco: {enabled: true, top_n: 10}\n")
+    r = AllowlistRefresher.from_path(cfg)
+    assert r.allowlist.read_policy.is_allowed("website.com", "/")  # memo holds True
+    # Tighten top_n to 1: the snapshot's second line (website.com) falls out.
+    cfg.write_text("read:\n  tranco: {enabled: true, top_n: 1}\n# tightened\n")
+    assert r.maybe_reload() is True
+    assert not r.allowlist.read_policy.is_allowed("website.com", "/")
+    assert r.allowlist.read_policy.is_allowed("popular-anchor.com", "/")  # still listed
 
 
 def test_unchanged_file_is_a_noop(config):
