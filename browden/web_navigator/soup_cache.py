@@ -44,12 +44,14 @@ class SoupCache:
         current = self._clock() if now is None else now
         entry = self._entries.get(handle)
         if entry is None:
-            soup = self._parse(backend.get_tab_html(handle))
+            backend.select_tab(handle)  # focus first: backend ops act on the focused tab
+            soup = self._parse(backend.get_tab_html())
             self._entries[handle] = CacheEntry(soup=soup, fetched_at=current)
             return soup, False
         if current - entry.fetched_at >= TTL_SECONDS:
-            backend.reload(handle)
-            soup = self._parse(backend.get_tab_html(handle))
+            backend.select_tab(handle)  # focus first: reload + re-fetch act on the focused tab
+            backend.reload()
+            soup = self._parse(backend.get_tab_html())
             self._entries[handle] = CacheEntry(soup=soup, fetched_at=current)
             return soup, True
         return entry.soup, False
@@ -60,7 +62,8 @@ class SoupCache:
     def force_reload(self, handle: str, backend, now: float | None = None):
         """Reload the tab in the browser, re-parse, store fresh. Returns ``(soup, tab_info)``."""
         current = self._clock() if now is None else now
-        tab_info = backend.reload(handle)
-        soup = self._parse(backend.get_tab_html(handle))
+        backend.select_tab(handle)  # focus first: reload + re-fetch act on the focused tab
+        tab_info = backend.reload()
+        soup = self._parse(backend.get_tab_html())
         self._entries[handle] = CacheEntry(soup=soup, fetched_at=current)
         return soup, tab_info

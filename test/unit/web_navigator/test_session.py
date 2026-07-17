@@ -74,23 +74,24 @@ class FakeBackend:
     def select_tab(self, handle):
         self.calls.append(("select_tab", handle))
         self._check(handle)
+        self.active = handle  # focus: subsequent focus-free ops act on this tab
 
     def navigate(self, url):
         self.calls.append(("navigate", url))
         return TabInfo(handle="h1", url=url, title="t", selected=True, profile_dir=self.profile_dir)
 
-    def get_tab_html(self, handle=None):
-        self.calls.append(("get_tab_html", handle))
-        self._check(handle)
+    # get_tab_html / reload / screenshot take no handle: they act on the
+    # currently focused tab (self.active), which the caller select_tab's first.
+    def get_tab_html(self):
+        self.calls.append(("get_tab_html", self.active))
         return self.source
 
-    def reload(self, handle=None):
-        self.calls.append(("reload", handle))
-        self._check(handle)
-        return TabInfo(handle=handle or self.active, url="reloaded-url", title="reloaded-title", selected=True, profile_dir=self.profile_dir)
+    def reload(self):
+        self.calls.append(("reload", self.active))
+        return TabInfo(handle=self.active, url="reloaded-url", title="reloaded-title", selected=True, profile_dir=self.profile_dir)
 
-    def screenshot(self, handle=None):
-        self.calls.append(("screenshot", handle))
+    def screenshot(self):
+        self.calls.append(("screenshot", self.active))
         return b"\x89PNG\r\n\x1a\nfakepng"
 
 
@@ -251,8 +252,8 @@ async def test_screenshot_returns_png_bytes_and_touches_registry():
     png = await s.screenshot(id="ns-h1")
 
     assert png == b"\x89PNG\r\n\x1a\nfakepng"
-    assert ("select_tab", "h1") in backend.calls
-    assert ("screenshot", None) in backend.calls
+    assert ("select_tab", "h1") in backend.calls  # focused first
+    assert ("screenshot", "h1") in backend.calls   # ...then screenshot the focused tab
     assert "h1" in s._registry._last_access
     assert s._cache._entries["h1"] is sentinel  # cache not invalidated
 
@@ -303,7 +304,7 @@ async def test_force_reload_on_dead_page_returns_error():
 
 @pytest.mark.asyncio
 async def test_force_reload_partial_failure_drops_supplied_page_id():
-    """reload(pid) succeeds but the subsequent get_tab_html(pid) fails — the tab
+    """reload() succeeds but the subsequent get_tab_html() fails — the tab
     died between the two backend calls. The supplied handle must be dropped from
     cache + registry, and a structured error returned. Regression: an earlier
     implementation defaulted handle from current_handle() but caught the
@@ -313,10 +314,10 @@ async def test_force_reload_partial_failure_drops_supplied_page_id():
     s._registry.touch("h2")
     s._cache._entries["h2"] = object()  # type: ignore[assignment]
 
-    # Make get_tab_html raise for h2, but leave reload working.
-    def get_tab_html(handle=None):
-        backend.calls.append(("get_tab_html", handle))
-        raise TabNotFoundError(f"tab {handle!r} disappeared mid-reload")
+    # Make get_tab_html raise (post-select_tab focus, mid-reload), but leave reload working.
+    def get_tab_html():
+        backend.calls.append(("get_tab_html", backend.active))
+        raise TabNotFoundError(f"tab {backend.active!r} disappeared mid-reload")
     backend.get_tab_html = get_tab_html
 
     res = await s.force_reload_tab(id="ns-h2")

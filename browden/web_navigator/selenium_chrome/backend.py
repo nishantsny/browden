@@ -456,16 +456,13 @@ class SeleniumChromeBackend(WebNavigatorBackend):
         _wait_for_title(drv)
         return self._tabinfo(drv, selected=True)
 
-    def get_tab_html(self, handle: str | None = None) -> str:
-        drv = self._drv()
-        if handle:
-            _switch(drv, handle)
-        return drv.page_source
+    def get_tab_html(self) -> str:
+        # Operates on the focused tab; the caller select_tab's first (uniform
+        # tab-targeting contract — no method self-focuses from a handle).
+        return self._drv().page_source
 
-    def reload(self, handle: str | None = None) -> TabInfo:
+    def reload(self) -> TabInfo:
         drv = self._drv()
-        if handle:
-            _switch(drv, handle)
         drv.refresh()
         _wait_for_title(drv)
         return self._tabinfo(drv, selected=True)
@@ -476,12 +473,9 @@ class SeleniumChromeBackend(WebNavigatorBackend):
         except NoSuchWindowException:
             raise TabNotFoundError("there is no active tab") from None
 
-    def screenshot(self, handle: str | None = None) -> bytes:
-        drv = self._drv()
-        if handle:
-            _switch(drv, handle)
+    def screenshot(self) -> bytes:
         try:
-            return drv.get_screenshot_as_png()
+            return self._drv().get_screenshot_as_png()
         except NoSuchWindowException:
             raise TabNotFoundError("there is no active tab to screenshot") from None
 
