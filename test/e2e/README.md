@@ -37,21 +37,6 @@ DNS (a navigation outcome, never a gate refusal).
 | `test_read_scheme_gate.py` | MCP server | **https-only** default; **file://** opt-in read; **localhost** dev-server read; **about:blank** readable under deny-all; **denylist** veto |
 | `test_hot_reload.py` | MCP server | **live reload**: an allowlist edit takes effect with no restart; a broken edit keeps the last-good policy |
 
-## Allowlist changes (last 7 days) → e2e coverage
-
-| Feature (PR) | E2e coverage |
-| --- | --- |
-| Live allowlist reload, ~10s (#88) | `test_hot_reload.py` ✅ |
-| https-only URL scheme gate (#70 M2) | `test_read_scheme_gate.py::test_wildcard_https_does_not_reopen_nonhttps_schemes` ✅ |
-| `file://` opt-in (empty-host key) (#70 M2) | `test_read_scheme_gate.py::test_file_scheme_opt_in_*` / `test_file_scheme_refused_without_opt_in` ✅ |
-| localhost / plaintext-http opt-in (#70 M2) | `test_read_scheme_gate.py::test_localhost_opt_in_*` ✅ |
-| `about:blank` / new-tab always allowed | `test_read_scheme_gate.py::test_about_blank_is_readable_and_kept_under_deny_all` ✅ |
-| PSL-based Tranco matching (#85, H1/H3) | `test_psl_read_gate.py` ✅ (pre-existing) |
-| denylist veto over the allowlist | `test_read_scheme_gate.py::test_denylist_vetoes_wildcard_allowed_host` ✅ |
-| Gate DOM reads on the tab's live URL (#84, H2) | Touched e2e (list_tabs keeps about:blank; hot-reload flips reads); primarily unit-tested (`test/unit/mcp/test_server.py`, `test_read_gates.py`) |
-| Re-validate post-redirect landing URL (#74, M3) | Unit-only (`test_server.py`): reproducing a real 3xx→off-list redirect offline is not deterministic |
-| Host-key canonicalization / path fullmatch (#79, #81) | Unit-only (`test_allowlist.py`, `test_read_gates.py`): pure validator behavior with no distinct runtime surface |
-
 ## Notes on duplication
 
 - `test_navigation.py` is a strict subset of `test_tabs.py`; kept deliberately
