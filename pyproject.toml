@@ -19,10 +19,16 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=8", "pytest-asyncio>=0.23"]
+dev = ["pytest>=8", "pytest-asyncio>=0.23", "ruff>=0.8"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
+
+# Ruff's default rule set (pyflakes + a pycodestyle core) — deliberately
+# minimal: it catches real defects (unused/undefined names, syntax-level
+# mistakes) without imposing formatting churn on the existing style.
+[tool.ruff]
+target-version = "py311"
 
 [project.scripts]
 browden = "browden.mcp.server:main"

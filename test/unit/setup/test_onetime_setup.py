@@ -6,7 +6,6 @@ import json
 import sys
 from pathlib import Path
 
-import pytest
 
 SETUP_DIR = Path(__file__).resolve().parents[3] / "setup"
 sys.path.insert(0, str(SETUP_DIR))
