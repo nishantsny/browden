@@ -182,17 +182,14 @@ class BrowserSessionManager:
         self._cache.invalidate(handle)
         self._registry.forget(handle)
 
-    async def select_tab(self, id: str) -> None:
+    async def select_tab(self, id: str) -> dict:
         self.sweep_idle()
-        handle = self._handle(id)
-        try:
-            await self._run_driver(self._backend.select_tab, handle)
+
+        def work(handle):
+            self._backend.select_tab(handle)
             logger.info(f"Selected tab: {id}")
-        except TabNotFoundError:
-            logger.warning(f"Attempted to select missing tab: {id}")
-            self._drop(handle)
-            raise
-        self._registry.touch(handle)
+            return {"selected": id}
+        return await self._with_tab(id, work)
 
     async def navigate(self, url: str, *, id: str) -> dict:
         self.sweep_idle()

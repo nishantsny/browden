@@ -206,9 +206,9 @@ async def select_tab(id: str) -> dict:
     """Switch the active tab."""
     logger.info(f"Tool called: select_tab (id={id!r})")
     session = _store.route(id)
-    await session.select_tab(id)
+    result = await session.select_tab(id)  # {"selected": id}, or the tab-gone envelope
     logger.info("Tool finished: select_tab")
-    return {"selected": id}
+    return result
 
 
 async def _guard_landing(session, id: str, result: dict) -> dict:
