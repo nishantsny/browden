@@ -64,3 +64,44 @@ def test_resolve_list_id_reads_token(monkeypatch):
     monkeypatch.setattr(ft.urllib.request, "urlopen",
                         lambda url, timeout=None: io.BytesIO(b"XN2NN\n"))
     assert ft._resolve_list_id() == "XN2NN"
+
+
+# -- _list_id_from_url: id recorded for a pinned permalink --------------------
+
+def test_list_id_from_download_permalink():
+    assert ft._list_id_from_url("https://tranco-list.eu/download/ABCDE/1000000") == "ABCDE"
+
+
+def test_list_id_from_url_falls_back_to_whole_url():
+    # Not a /download/<id>/<n> permalink — record the URL itself, still auditable.
+    assert ft._list_id_from_url("https://example.com/my-list.csv") == \
+        "https://example.com/my-list.csv"
+
+
+# -- fetch: records provenance (list id + content checksum) into the allowlist -
+
+def test_fetch_records_provenance(monkeypatch, tmp_path):
+    import hashlib
+    monkeypatch.setattr(ft.urllib.request, "urlopen",
+                        lambda url, timeout=None: io.BytesIO(_fixture_text().encode("utf-8")))
+    allow = tmp_path / "allowlist.yaml"
+    allow.write_text("read: {}\n", encoding="utf-8")
+    out = tmp_path / ft.TRANCO_FILENAME
+    # Pin an explicit permalink so no id-resolution round-trip is needed.
+    ft.fetch(1_000_000, out, url="https://tranco-list.eu/download/ABCDE/1000000",
+             allowlist_path=allow)
+
+    import checkpoints as cp
+    _, _, vals = cp._parse_existing(allow.read_text(encoding="utf-8").splitlines())
+    domains = ft._domains_from_csv(_fixture_text(), 1_000_000, truncated=False)
+    expected = hashlib.sha256(("\n".join(domains) + "\n").encode("utf-8")).hexdigest()
+    assert vals["tranco_id"] == "ABCDE"
+    assert vals["tranco_checksum_sha256"] == expected
+
+
+def test_fetch_without_allowlist_path_skips_provenance(monkeypatch, tmp_path):
+    monkeypatch.setattr(ft.urllib.request, "urlopen",
+                        lambda url, timeout=None: io.BytesIO(_fixture_text().encode("utf-8")))
+    out = tmp_path / ft.TRANCO_FILENAME
+    n = ft.fetch(1_000_000, out, url="https://tranco-list.eu/download/ABCDE/1000000")
+    assert n == 50 and out.exists()   # snapshot still written; no allowlist touched

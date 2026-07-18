@@ -35,8 +35,11 @@ See the README's Attribution section.
 import argparse
 import csv
 import gzip
+import re
 import urllib.request
 from pathlib import Path
+
+from checkpoints import ALLOWLIST_FILENAME, sha256_hex, update_checkpoints
 
 # stdlib-only on purpose: this runs with any Python, before the venv exists.
 # These must match browden.mcp.validator.tranco (the read gate that consumes
@@ -97,17 +100,33 @@ def _resolve_list_id(url: str = TRANCO_ID_URL) -> str:
     return list_id
 
 
-def fetch(top_n: int, out_path: Path, url: str | None = None) -> int:
+def _list_id_from_url(url: str) -> str:
+    """The list id recorded for a permalink ``.../download/<id>/<count>``.
+
+    Falls back to the whole URL when it isn't a recognizable download permalink,
+    so provenance still points at *something* reproducible for a custom ``--url``.
+    """
+    m = re.search(r"/download/([^/]+)/\d+", url)
+    return m.group(1) if m else url
+
+
+def fetch(top_n: int, out_path: Path, url: str | None = None,
+          allowlist_path: Path | None = None) -> int:
     """Write the first ``top_n`` Tranco domains to ``out_path`` (gzipped, one per line).
 
     With no ``url`` the current list id is resolved from ``/top-1m-id`` and the
     CSV is pulled from ``/download/<id>/<top_n>``; pass an explicit ``url`` to pin
     a specific list permalink instead. The response body is read under a
     size cap (:func:`_read_cap_bytes`).
+
+    When ``allowlist_path`` is given, records the resolved list id and a sha256
+    of the domain-list content into that file's provenance block (best-effort).
     """
     if url is None:
         list_id = _resolve_list_id()
         url = TRANCO_DOWNLOAD_TEMPLATE.format(list_id=list_id, count=top_n)
+    else:
+        list_id = _list_id_from_url(url)
     cap = _read_cap_bytes(top_n)
     print(f"Downloading {url} (up to {cap} bytes) ...")
     with urllib.request.urlopen(url, timeout=120) as resp:
@@ -118,10 +137,19 @@ def fetch(top_n: int, out_path: Path, url: str | None = None) -> int:
     domains = _domains_from_csv(blob.decode("utf-8", errors="replace"), top_n, truncated=truncated)
     if not domains:
         raise RuntimeError(f"no domains parsed from {url} — unexpected response format")
+    # Checksum the uncompressed content, not the .gz: gzip stamps an mtime, so
+    # identical domains would hash differently run-to-run. The content is the
+    # perimeter — hashing it is what makes the checkpoint reproducible.
+    content = "\n".join(domains) + "\n"
     out_path.parent.mkdir(parents=True, exist_ok=True)
     with gzip.open(out_path, "wt", encoding="utf-8", compresslevel=9) as fh:
-        fh.write("\n".join(domains) + "\n")
+        fh.write(content)
     print(f"Wrote {len(domains)} domains to {out_path} ({out_path.stat().st_size} bytes)")
+    if allowlist_path is not None:
+        update_checkpoints(allowlist_path, {
+            "tranco_id": list_id,
+            "tranco_checksum_sha256": sha256_hex(content.encode("utf-8")),
+        })
     return len(domains)
 
 
@@ -139,7 +167,8 @@ def main() -> None:
                          "default resolves the current daily list id automatically")
     args = ap.parse_args()
     out = args.out if args.out is not None else snapshot_path(args.config_dir)
-    fetch(args.top_n, out, args.url)
+    allowlist = args.config_dir.expanduser() / ALLOWLIST_FILENAME
+    fetch(args.top_n, out, args.url, allowlist_path=allowlist)
 
 
 if __name__ == "__main__":

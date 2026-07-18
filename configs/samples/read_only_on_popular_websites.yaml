@@ -57,3 +57,14 @@ read:
 infra:
   max_browser_sessions: 10
   max_tabs_per_session: 20
+
+# >>> browden provenance — auto-written by setup; do not edit by hand >>>
+# Fingerprints the exact data snapshots that define this read perimeter, so
+# a given install is auditable and reproducible. tranco_id is the Tranco
+# daily list id — pin it with: fetch_tranco.py --url .../download/<id>/<n>.
+# The checksums are sha256 over the fetched snapshot contents.
+# checkpoints:
+#   tranco_id:
+#   tranco_checksum_sha256:
+#   pal_checksum_sha256:
+# <<< browden provenance <<<
