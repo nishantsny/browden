@@ -2,11 +2,15 @@
 
 All notable changes to browden are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow
-[Semantic Versioning](https://semver.org/) with the usual pre-1.0 caveat that
-minor versions may break compatibility. Only the latest release is supported
+[Semantic Versioning](https://semver.org/). Only the latest release is supported
 (see [SECURITY.md](./SECURITY.md)).
 
 ## [Unreleased]
+
+## [1.0.0] — 2026-07-18
+
+First stable release: hardens the safety perimeter across the board and pins the
+install to a reproducible, locked dependency set.
 
 ### Security
 - Gate DOM reads, screenshots, and reloads on the tab's **live** URL, and close
@@ -37,6 +41,17 @@ minor versions may break compatibility. Only the latest release is supported
 ### Changed
 - Uniform tab-targeting in the backend (callers always focus first) and a
   single per-tab op skeleton in the session manager (#93, #89, #91).
+- Reproducible installs: commit `uv.lock` and adopt the `uv sync` flow — the
+  one-time installer and CI install the exact locked set with `--frozen`, while
+  local development stays free to re-resolve (#107).
+- Memoize `PopularityAllowlist.contains` per instance so repeated allowlist
+  lookups skip the redundant registrable-domain work (#110).
+
+### Fixed
+- `select_tab` serializes `selected` as a real boolean and returns the tab-gone
+  envelope when the target tab has disappeared (#108).
+- Logging resolves `stderr` at emit time and no longer emits atexit teardown
+  noise after unit runs (#109).
 
 ## [0.1.0] — 2026-07-07
 
@@ -62,5 +77,6 @@ Initial public release.
   service manager (systemd / launchd / Task Scheduler).
 - Apache-2.0.
 
-[Unreleased]: https://github.com/nishantsny/browden/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/nishantsny/browden/compare/v1.0.0...HEAD
+[1.0.0]: https://github.com/nishantsny/browden/compare/v0.1.0...v1.0.0
 [0.1.0]: https://github.com/nishantsny/browden/releases/tag/v0.1.0
