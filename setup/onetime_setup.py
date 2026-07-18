@@ -95,40 +95,42 @@ def copy_config(config_dir: Path) -> Path:
     return dest
 
 
-def ensure_tranco(config_dir: Path, top_n: int) -> Path:
+def ensure_tranco(config_dir: Path, top_n: int, allowlist: Path) -> Path:
     """Download the Tranco snapshot next to the allowlist, unless it's there.
 
     Best-effort: a failed download (offline, Tranco unreachable) warns and moves
     on rather than aborting setup — the read gate degrades to "Tranco matches
     nothing" until you re-run setup/fetch_tranco.py, and the denylist plus any
-    website_overrides still apply.
+    website_overrides still apply. On success, records the list id + checksum in
+    ``allowlist``'s provenance block.
     """
     dest = snapshot_path(config_dir)
     if dest.exists():
         print(f"[skip] {dest} already exists — leaving it untouched")
         return dest
     try:
-        fetch(top_n, dest)
+        fetch(top_n, dest, allowlist_path=allowlist)
     except Exception as e:  # network error, bad zip, etc. — never fatal to setup
         print(f"[warn] could not fetch Tranco snapshot ({e}); Tranco read-allowlisting "
               f"is inert until you run: python3 setup/fetch_tranco.py")
     return dest
 
 
-def ensure_psl(config_dir: Path) -> Path:
+def ensure_psl(config_dir: Path, allowlist: Path) -> Path:
     """Download the Public Suffix List next to the allowlist, unless it's there.
 
     The read gate reduces a host to its registrable domain with the PSL before
     testing Tranco, so shared-hosting subdomains can't inherit a provider's rank.
     Best-effort: a failed download warns and moves on — the gate falls back to
-    publicsuffix2's (older) bundled list until you run setup/fetch_psl.py.
+    publicsuffix2's (older) bundled list until you run setup/fetch_psl.py. On
+    success, records the list checksum in ``allowlist``'s provenance block.
     """
     dest = psl_snapshot_path(config_dir)
     if dest.exists():
         print(f"[skip] {dest} already exists — leaving it untouched")
         return dest
     try:
-        fetch_psl(dest)
+        fetch_psl(dest, allowlist_path=allowlist)
     except Exception as e:  # network error, bad body — never fatal to setup
         print(f"[warn] could not fetch the Public Suffix List ({e}); the read gate "
               f"falls back to publicsuffix2's bundled list until you run: python3 setup/fetch_psl.py")
@@ -186,8 +188,8 @@ def main(argv: list[str] | None = None) -> None:
 
     config_dir = Path(args.config_dir).expanduser().resolve()
     allowlist = copy_config(config_dir)
-    ensure_tranco(config_dir, args.tranco_top_n)
-    ensure_psl(config_dir)
+    ensure_tranco(config_dir, args.tranco_top_n, allowlist)
+    ensure_psl(config_dir, allowlist)
 
     if args.python:
         service_python = args.python

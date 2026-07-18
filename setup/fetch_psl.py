@@ -19,6 +19,8 @@ import argparse
 import urllib.request
 from pathlib import Path
 
+from checkpoints import ALLOWLIST_FILENAME, sha256_hex, update_checkpoints
+
 # stdlib-only on purpose: this runs with any Python, before the venv exists.
 # Keep PSL_FILENAME in sync with browden.mcp.validator.popularity (the consumer).
 PSL_FILENAME = "public_suffix_list.dat"
@@ -31,8 +33,13 @@ def snapshot_path(config_dir: Path) -> Path:
     return config_dir.expanduser() / PSL_FILENAME
 
 
-def fetch(out_path: Path, url: str = PSL_URL) -> int:
-    """Download the Public Suffix List to ``out_path``. Returns bytes written."""
+def fetch(out_path: Path, url: str = PSL_URL,
+          allowlist_path: Path | None = None) -> int:
+    """Download the Public Suffix List to ``out_path``. Returns bytes written.
+
+    When ``allowlist_path`` is given, records a sha256 of the downloaded list
+    into that file's provenance block (best-effort).
+    """
     print(f"Downloading {url} ...")
     with urllib.request.urlopen(url, timeout=60) as resp:
         blob = resp.read()
@@ -43,6 +50,8 @@ def fetch(out_path: Path, url: str = PSL_URL) -> int:
     out_path.parent.mkdir(parents=True, exist_ok=True)
     out_path.write_bytes(blob)
     print(f"Wrote {out_path} ({len(blob)} bytes)")
+    if allowlist_path is not None:
+        update_checkpoints(allowlist_path, {"pal_checksum_sha256": sha256_hex(blob)})
     return len(blob)
 
 
@@ -56,7 +65,8 @@ def main() -> None:
                     help="Public Suffix List URL (default: publicsuffix.org)")
     args = ap.parse_args()
     out = args.out if args.out is not None else snapshot_path(args.config_dir)
-    fetch(out, args.url)
+    allowlist = args.config_dir.expanduser() / ALLOWLIST_FILENAME
+    fetch(out, args.url, allowlist_path=allowlist)
 
 
 if __name__ == "__main__":
