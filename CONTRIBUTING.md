@@ -54,6 +54,22 @@ model: small, audited, allowlist-and-label gated. Features that turn browden int
 a general "drive the browser" automation tool are out of scope by design — the
 README's "When NOT to use browden" table points to better tools for that.
 
+## Maintaining dependencies (maintainers)
+
+`uv.lock` pins the resolved dependency set. The lockfile is *enforced* only at
+the two edges that should reproduce it rather than re-resolve; everywhere else
+stays free to change:
+
+- **Bump a package** — edit `pyproject.toml`, run `uv sync` (re-resolves and
+  rewrites `uv.lock`) or `uv lock --upgrade` (bumps within existing ranges),
+  then commit `uv.lock`. Local dev is never `--frozen`, so this always works.
+- **`--frozen` lives in exactly two places** — CI (`uv sync --frozen`, so a
+  `pyproject.toml` change without a committed `uv lock` fails the build instead
+  of drifting) and the end-user installer in `setup/onetime_setup.py` (so users
+  get the exact tested set). Re-lock and commit before merging, or CI stays red.
+- **uv itself is unpinned** — CI installs the latest uv each run and setup uses
+  whatever `uv` is on PATH. `uv.lock` pins packages, not uv; nothing to bump.
+
 ## Questions
 
 Open a [discussion or issue](https://github.com/nishantsny/browden/issues) — all
