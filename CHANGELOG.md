@@ -37,6 +37,9 @@ install to a reproducible, locked dependency set.
   keeps the last-good policy (#88).
 - Fetch the Tranco snapshot by resolving the current daily list id, under a
   bounded read cap (#94); default read-allowlist `top_n` raised to 1M (#77).
+- Setup records perimeter provenance in `allowlist.yaml`: the Tranco list id
+  and sha256 checksums of the fetched Tranco/PSL snapshots, written as a
+  greppable comment block, so an install is auditable and reproducible (#112).
 
 ### Changed
 - Uniform tab-targeting in the backend (callers always focus first) and a
