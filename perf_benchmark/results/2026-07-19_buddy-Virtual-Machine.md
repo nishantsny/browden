@@ -14,7 +14,7 @@ Python-server process only; Chrome/chromedriver excluded. Regenerate with `perf_
 | Cores (physical / logical) | 2 / 4 |
 | Max CPU frequency | n/a |
 | Total memory | 13.3 GiB |
-| Memory type | unavailable (needs root: `sudo dmidecode -t memory`) |
+| Memory type | Unknown — Hyper-V VM; `dmidecode` reports Type/Speed as Unknown even with root (2 slots, ~13.7 GB) |
 
 ## Run
 
