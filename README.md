@@ -54,6 +54,7 @@ Defer to richer automation tools when you need to *drive* the browser rather tha
 - **Platform-agnostic.** The same setup script and tool surface run on Linux,
   macOS, and Windows, each using the OS's native service manager (systemd /
   launchd / Task Scheduler).
+- **Low resource usage.** The server process holds to ~150 MB — see [perf_benchmark](perf_benchmark/).
 
 ## Quick start
 
