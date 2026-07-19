@@ -28,7 +28,15 @@ any `~/.browden` config.
   and session is closed — a large positive residual points at Python-side
   retention.
 - `perf_benchmark/mem_samples.csv`: every raw sample (`t, phase, uss_mb, rss_mb,
-  cpu_pct, threads, fds, conns`) for your own plotting.
+  cpu_pct, threads, fds, conns`) for your own plotting. Gitignored (per-run).
+- `perf_benchmark/results/<UTC-date>_<hostname>.md`: a **committed**, human-readable
+  results file — the run date, the machine's characteristics (processor, arch,
+  core count, total memory, and memory type when `dmidecode` is available), the
+  run config, the workload self-check, and the per-phase table. One file per
+  date+host, so results from different machines sit side by side and stay
+  comparable over time. Memory type and CPU max-frequency are best-effort:
+  they read `dmidecode` (needs root) and `psutil.cpu_freq()`, and print a clear
+  "unavailable/n-a" on hosts (e.g. VMs) that don't expose them.
 
 ## Phases
 

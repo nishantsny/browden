@@ -26,8 +26,14 @@ from __future__ import annotations
 import argparse
 import asyncio
 import csv
+import datetime
 import json
+import os
+import platform
+import re
+import socket
 import statistics
+import subprocess
 import sys
 import tempfile
 import threading
@@ -87,6 +93,72 @@ class _Handler(BaseHTTPRequestHandler):
 
 
 # --------------------------------------------------------------------------- #
+# Machine characteristics (checked into the results file so runs are comparable)
+# --------------------------------------------------------------------------- #
+def _cpu_model() -> str:
+    """Human CPU name, best-effort across platforms."""
+    if sys.platform.startswith("linux"):
+        try:
+            for line in Path("/proc/cpuinfo").read_text().splitlines():
+                if line.lower().startswith("model name"):
+                    return line.split(":", 1)[1].strip()
+        except OSError:
+            pass
+    elif sys.platform == "darwin":
+        try:
+            return subprocess.run(["sysctl", "-n", "machdep.cpu.brand_string"],
+                                  capture_output=True, text=True, timeout=5).stdout.strip()
+        except (OSError, subprocess.SubprocessError):
+            pass
+    return platform.processor() or "unknown"
+
+
+def _mem_type() -> str:
+    """DRAM type/speed (e.g. 'DDR4 @ 3200 MT/s'). Needs root (dmidecode); many
+    hosts — VMs especially — can't report it, so this is best-effort."""
+    try:
+        out = subprocess.run(["dmidecode", "-t", "memory"],
+                             capture_output=True, text=True, timeout=5)
+        if out.returncode != 0:
+            return "unavailable (needs root: `sudo dmidecode -t memory`)"
+        dtype = speed = None
+        for line in out.stdout.splitlines():
+            line = line.strip()
+            m = re.match(r"Type:\s*(\S+)", line)
+            if m and m.group(1) not in ("Unknown", "Other", "None") and dtype is None:
+                dtype = m.group(1)
+            m = re.match(r"Speed:\s*(\d+\s*MT/s|\d+\s*MHz)", line)
+            if m and speed is None:
+                speed = m.group(1)
+        if dtype:
+            return f"{dtype} @ {speed}" if speed else dtype
+        return "unavailable (populated modules not reported)"
+    except FileNotFoundError:
+        return "unavailable (dmidecode not installed)"
+    except (OSError, subprocess.SubprocessError):
+        return "unavailable"
+
+
+def machine_info() -> dict:
+    vm = psutil.virtual_memory()
+    freq = psutil.cpu_freq()
+    return {
+        "generated_utc": datetime.datetime.now(datetime.timezone.utc)
+                                 .strftime("%Y-%m-%d %H:%M:%S UTC"),
+        "hostname": socket.gethostname(),
+        "os": f"{platform.system()} {platform.release()}",
+        "python": platform.python_version(),
+        "cpu_model": _cpu_model(),
+        "arch": platform.machine(),
+        "cores_physical": psutil.cpu_count(logical=False),
+        "cores_logical": psutil.cpu_count(logical=True),
+        "cpu_max_mhz": round(freq.max) if freq and freq.max else None,
+        "mem_total_gib": round(vm.total / 2**30, 1),
+        "mem_type": _mem_type(),
+    }
+
+
+# --------------------------------------------------------------------------- #
 # Sampler
 # --------------------------------------------------------------------------- #
 @dataclass
@@ -138,7 +210,9 @@ class Sampler:
             w.writeheader()
             w.writerows(self._rows)
 
-    def summarize(self, phase_order: list[str]) -> None:
+    def summarize(self, phase_order: list[str]) -> dict:
+        """Compute per-phase medians; print the table and return the structured
+        result (rows + teardown residual) for the checked-in results file."""
         def med(rows, key):
             return statistics.median(r[key] for r in rows) if rows else float("nan")
 
@@ -146,25 +220,36 @@ class Sampler:
         idle = by_phase.get("idle") or []
         idle_uss = med(idle, "uss_mb") if idle else float("nan")
 
-        print(f"\n{'phase':<16}{'n':>4}{'uss_mb':>9}{'Δidle':>8}"
-              f"{'rss_mb':>9}{'fds':>6}{'thr':>5}{'cpu_max':>9}")
-        print("-" * 66)
+        table = []
         for p in phase_order:
             rows = by_phase.get(p) or []
             if not rows:
                 continue
             uss = med(rows, "uss_mb")
-            print(f"{p:<16}{len(rows):>4}{uss:>9.1f}{uss - idle_uss:>+8.1f}"
-                  f"{med(rows, 'rss_mb'):>9.1f}{med(rows, 'fds'):>6.0f}"
-                  f"{med(rows, 'threads'):>5.0f}"
-                  f"{max(r['cpu_pct'] for r in rows):>9.1f}")
+            table.append({
+                "phase": p, "n": len(rows), "uss_mb": uss,
+                "delta_idle_mb": uss - idle_uss, "rss_mb": med(rows, "rss_mb"),
+                "fds": med(rows, "fds"), "threads": med(rows, "threads"),
+                "cpu_max": max(r["cpu_pct"] for r in rows),
+            })
+
+        print(f"\n{'phase':<16}{'n':>4}{'uss_mb':>9}{'Δidle':>8}"
+              f"{'rss_mb':>9}{'fds':>6}{'thr':>5}{'cpu_max':>9}")
         print("-" * 66)
+        for r in table:
+            print(f"{r['phase']:<16}{r['n']:>4}{r['uss_mb']:>9.1f}{r['delta_idle_mb']:>+8.1f}"
+                  f"{r['rss_mb']:>9.1f}{r['fds']:>6.0f}{r['threads']:>5.0f}{r['cpu_max']:>9.1f}")
+        print("-" * 66)
+
+        residual = None
         settle = by_phase.get("settle") or []
         if settle and idle:
-            residual = med(settle, "uss_mb") - idle_uss
-            fd_res = med(settle, "fds") - med(idle, "fds")
-            print(f"teardown residual vs idle:  USS {residual:+.1f} MB   FDs {fd_res:+.0f}")
+            residual = {"uss_mb": med(settle, "uss_mb") - idle_uss,
+                        "fds": med(settle, "fds") - med(idle, "fds")}
+            print(f"teardown residual vs idle:  USS {residual['uss_mb']:+.1f} MB   "
+                  f"FDs {residual['fds']:+.0f}")
             print("(a large positive residual = Python-side retention worth a memray look)")
+        return {"table": table, "residual": residual}
 
 
 # --------------------------------------------------------------------------- #
@@ -253,9 +338,65 @@ async def drive(url: str, page_url: str, sampler: Sampler, args) -> None:
                     await s.call_tool("close_tab", {"id": tid})
                 await _hold(sampler, "churn_settle", args.hold)
 
+            return {"tabs": len(ids), "nav_errors": nav_errors,
+                    "dom_found": dom_found, "dom_expect": 40 * len(ids)}
+
 
 PHASE_ORDER = ["idle", "sessions", "tabs", "navigate", "screenshot",
                "dom", "close", "settle", "churn", "churn_settle"]
+
+
+def write_results_md(path: Path, mach: dict, args, workload: dict, summary: dict) -> None:
+    """Render a committed, human-readable results file for one run/machine."""
+    freq = f"{mach['cpu_max_mhz']} MHz" if mach["cpu_max_mhz"] else "n/a"
+    L = [
+        "# browden MCP server — resource benchmark results",
+        "",
+        "Python-server process only; Chrome/chromedriver excluded. "
+        "Regenerate with `perf_benchmark/mem_profile.py` (see the README).",
+        "",
+        f"- **Generated:** {mach['generated_utc']}",
+        f"- **Host:** {mach['hostname']}  ·  {mach['os']}  ·  Python {mach['python']}",
+        "",
+        "## Machine",
+        "",
+        "| characteristic | value |",
+        "| --- | --- |",
+        f"| Processor | {mach['cpu_model']} |",
+        f"| Architecture | {mach['arch']} |",
+        f"| Cores (physical / logical) | {mach['cores_physical']} / {mach['cores_logical']} |",
+        f"| Max CPU frequency | {freq} |",
+        f"| Total memory | {mach['mem_total_gib']} GiB |",
+        f"| Memory type | {mach['mem_type']} |",
+        "",
+        "## Run",
+        "",
+        f"Policy: allow-all, Tranco off. Config: `--sessions {args.sessions} "
+        f"--tabs {args.tabs} --churn {args.churn} --hold {args.hold}s "
+        f"--interval {args.interval}s`.",
+        "",
+        f"Workload check: {workload['tabs']} tabs open, "
+        f"nav_errors={workload['nav_errors']}, "
+        f"dom_elements_found={workload['dom_found']} (expected ~{workload['dom_expect']}).",
+        "",
+        "## Results (median per phase)",
+        "",
+        "| phase | n | USS MB | Δ idle MB | RSS MB | FDs | threads | CPU max % |",
+        "| --- | --: | --: | --: | --: | --: | --: | --: |",
+    ]
+    for r in summary["table"]:
+        L.append(f"| {r['phase']} | {r['n']} | {r['uss_mb']:.1f} | "
+                 f"{r['delta_idle_mb']:+.1f} | {r['rss_mb']:.1f} | {r['fds']:.0f} | "
+                 f"{r['threads']:.0f} | {r['cpu_max']:.1f} |")
+    if summary["residual"]:
+        res = summary["residual"]
+        L += ["",
+              f"**Teardown residual vs idle:** USS {res['uss_mb']:+.1f} MB, "
+              f"FDs {res['fds']:+.0f} — a large positive residual points at "
+              "Python-side retention (session bookkeeping / soup cache / sockets), "
+              "worth a `memray` look. See the README's Limitations."]
+    L.append("")
+    path.write_text("\n".join(L), encoding="utf-8")
 
 
 def main() -> None:
@@ -266,7 +407,11 @@ def main() -> None:
     ap.add_argument("--hold", type=float, default=6.0, help="seconds to hold each phase")
     ap.add_argument("--interval", type=float, default=0.5, help="sampler interval seconds")
     ap.add_argument("--csv", default=str(Path(__file__).parent / "mem_samples.csv"))
+    ap.add_argument("--results-dir", default=str(Path(__file__).parent / "results"),
+                    help="directory for the checked-in machine-tagged results markdown")
     args = ap.parse_args()
+
+    mach = machine_info()
 
     # Local hermetic page server.
     httpd = ThreadingHTTPServer(("127.0.0.1", 0), _Handler)
@@ -281,7 +426,6 @@ def main() -> None:
 
     harness = McpServerHarness(tmp, allowlist_path=allowlist)
     # Silence the refresher's poll so idle CPU reflects only the server at rest.
-    import os
     os.environ["BROWDEN_RELOAD_INTERVAL"] = "3600"
     harness.start()
     pid = harness._proc.pid
@@ -292,15 +436,23 @@ def main() -> None:
     sampler = Sampler(pid=pid, interval=args.interval)
     sampler.start()
     try:
-        asyncio.run(drive(harness.url, page_url, sampler, args))
+        workload = asyncio.run(drive(harness.url, page_url, sampler, args))
     finally:
         sampler.stop()
         harness.stop()
         httpd.shutdown()
 
     sampler.write_csv(Path(args.csv))
-    sampler.summarize(PHASE_ORDER)
+    summary = sampler.summarize(PHASE_ORDER)
+
+    results_dir = Path(args.results_dir)
+    results_dir.mkdir(parents=True, exist_ok=True)
+    date = mach["generated_utc"][:10]
+    safe_host = re.sub(r"[^A-Za-z0-9._-]", "_", mach["hostname"])
+    results_path = results_dir / f"{date}_{safe_host}.md"
+    write_results_md(results_path, mach, args, workload, summary)
     print(f"\nraw samples -> {args.csv}")
+    print(f"results file -> {results_path}")
 
 
 if __name__ == "__main__":
