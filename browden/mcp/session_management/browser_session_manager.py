@@ -262,6 +262,63 @@ class BrowserSessionManager:
             return result
         return await self._with_tab(id, work, invalidate=True)
 
+    # -- frame navigation ---------------------------------------------------
+
+    async def frame_src(self, css_selector: str, *, id: str) -> dict:
+        """Resolve the iframe at ``css_selector`` on ``id``; return its src (no switch).
+
+        Read-only pre-flight for ``switch_to_frame``: lets the caller gate the
+        frame's declared target before the driver ever enters it.
+        """
+        self.sweep_idle()
+
+        def work(handle):
+            self._backend.select_tab(handle)
+            result = self._backend.get_frame_src(css_selector)
+            result["id"] = id
+            return result
+        return await self._with_tab(id, work, invalidate=False)
+
+    async def enter_frame(self, css_selector: str, *, id: str) -> dict:
+        """Switch ``id`` into the iframe at ``css_selector``; invalidates the soup cache.
+
+        The active document changes, so the cached top-document soup is dropped
+        (``invalidate=True``): the next DOM read re-fetches the *frame's*
+        ``page_source``. Returns the frame's ``document.URL`` and the tab's top URL
+        for the caller's post-switch allowlist + same-origin gate.
+        """
+        self.sweep_idle()
+
+        def work(handle):
+            self._backend.select_tab(handle)
+            result = self._backend.enter_frame(css_selector)
+            logger.info(f"enter_frame: {css_selector!r} on tab {id}")
+            result["id"] = id
+            return result
+        return await self._with_tab(id, work, invalidate=True)
+
+    async def switch_to_parent_frame(self, *, id: str) -> dict:
+        self.sweep_idle()
+
+        def work(handle):
+            self._backend.select_tab(handle)
+            result = self._backend.switch_to_parent_frame()
+            logger.info(f"switch_to_parent_frame on tab {id}")
+            result["id"] = id
+            return result
+        return await self._with_tab(id, work, invalidate=True)
+
+    async def switch_to_default_content(self, *, id: str) -> dict:
+        self.sweep_idle()
+
+        def work(handle):
+            self._backend.select_tab(handle)
+            result = self._backend.switch_to_default_content()
+            logger.info(f"switch_to_default_content on tab {id}")
+            result["id"] = id
+            return result
+        return await self._with_tab(id, work, invalidate=True)
+
     # -- DOM-query tools ----------------------------------------------------
 
     async def get_element_by_id(self, element_id: str, *, id: str,

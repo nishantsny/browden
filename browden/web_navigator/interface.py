@@ -128,3 +128,30 @@ class WebNavigatorBackend(ABC):
         then clears it and types ``value``. Policy — which hosts, which fields,
         what value — is enforced by the caller (the ``insert_text`` tool), never here.
         """
+
+    @abstractmethod
+    def get_frame_src(self, css_selector: str) -> dict:
+        """Resolve the single visible iframe at ``css_selector``; return ``{"src": ...}``.
+
+        Does NOT switch context — lets the caller gate the frame's declared target
+        before entering. ``src`` is the absolute URL, or ``None`` for a src-less
+        (e.g. ``srcdoc``) frame. Refuses a non-frame or ambiguous selector.
+        """
+
+    @abstractmethod
+    def enter_frame(self, css_selector: str) -> dict:
+        """Switch the focused tab into the iframe at ``css_selector``.
+
+        Returns ``{"frame_url": <the frame's document.URL>, "top_url": <top-level
+        URL>}`` so the caller can gate the landed document and check same-origin.
+        Records the selector so the focus survives later window-refocus. Policy —
+        which frames may be entered — is enforced by the caller, never here.
+        """
+
+    @abstractmethod
+    def switch_to_parent_frame(self) -> dict:
+        """Move the focused tab up one frame level; return ``{"frame_url": ...}``."""
+
+    @abstractmethod
+    def switch_to_default_content(self) -> dict:
+        """Return the focused tab to its top document; return ``{"frame_url": ...}``."""
