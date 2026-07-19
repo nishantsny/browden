@@ -381,6 +381,12 @@ def write_results_md(path: Path, mach: dict, args, workload: dict, summary: dict
         "",
         "## Results (median per phase)",
         "",
+        "**USS** (Unique Set Size) is the memory *private* to the server "
+        "process — pages not shared with any other process — so it is the "
+        "truest measure of the server's own cost and the headline column here. "
+        "**RSS** additionally counts shared pages (libc, the Python runtime), so "
+        "it overcounts. **Δ idle MB** is each phase's USS above the idle baseline.",
+        "",
         "| phase | n | USS MB | Δ idle MB | RSS MB | FDs | threads | CPU max % |",
         "| --- | --: | --: | --: | --: | --: | --: | --: |",
     ]

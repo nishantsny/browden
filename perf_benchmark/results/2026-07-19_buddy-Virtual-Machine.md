@@ -24,6 +24,8 @@ Workload check: 5 tabs open, nav_errors=0, dom_elements_found=200 (expected ~200
 
 ## Results (median per phase)
 
+**USS** (Unique Set Size) is the memory *private* to the server process — pages not shared with any other process — so it is the truest measure of the server's own cost and the headline column here. **RSS** additionally counts shared pages (libc, the Python runtime), so it overcounts. **Δ idle MB** is each phase's USS above the idle baseline.
+
 | phase | n | USS MB | Δ idle MB | RSS MB | FDs | threads | CPU max % |
 | --- | --: | --: | --: | --: | --: | --: | --: |
 | idle | 6 | 152.8 | +0.0 | 169.7 | 9 | 1 | 2.0 |
