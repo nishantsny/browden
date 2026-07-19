@@ -40,9 +40,11 @@ host) and stands the real MCP server up on an ephemeral port.
    fields over optional-with-`None` defaults.
 4. **Add or update tests.** New behavior needs a unit test at minimum; anything
    touching the browser path should have e2e coverage.
-5. Run `pytest test/unit` (and `test/e2e` if you touched the browser path)
+5. For a user-visible change (behavior, config, tools), add a line under
+   `[Unreleased]` in `CHANGELOG.md`.
+6. Run `pytest test/unit` (and `test/e2e` if you touched the browser path)
    locally before pushing.
-6. Open a PR against `main`. CI runs unit tests on Linux/macOS/Windows and the
+7. Open a PR against `main`. CI runs unit tests on Linux/macOS/Windows and the
    e2e suite on headless Chrome — both must pass.
 
 ## Scope: what browden is (and isn't)
@@ -69,6 +71,21 @@ stays free to change:
   get the exact tested set). Re-lock and commit before merging, or CI stays red.
 - **uv itself is unpinned** — CI installs the latest uv each run and setup uses
   whatever `uv` is on PATH. `uv.lock` pins packages, not uv; nothing to bump.
+
+## Releasing (maintainers)
+
+browden ships from `main`; only the latest release is supported
+(see [SECURITY.md](./SECURITY.md)). To cut a release:
+
+1. Land all changes on `main`; make sure CI is green.
+2. Bump `version` in `pyproject.toml`, and in `CHANGELOG.md` move the
+   `[Unreleased]` notes under the new `[X.Y.Z] — YYYY-MM-DD` heading (update
+   the compare links at the bottom).
+3. Tag and push: `git tag vX.Y.Z && git push origin vX.Y.Z`.
+4. Create the GitHub release from the tag, pasting that changelog section.
+
+Security fixes land on `main` and the latest release only — no backports to
+older tags.
 
 ## Questions
 
