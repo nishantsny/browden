@@ -26,14 +26,9 @@ Defer to richer automation tools when you need to *drive* the browser rather tha
 
 - Let an agent read and navigate your **logged-in** pages while it stays
   structurally unable to click "Buy", send mail, or delete anything.
-- Put a **prompt-injection perimeter** around the agent — reads are allowlisted, so
-  it can't be hijacked by a page it was never allowed to open.
-- Run **fully local** — no cloud, no account, no API key; nothing about your
-  browsing leaves the host.
-- Drive the browser **like a human** (please see [disclaimer](#disclaimer)).
+- You need a **prompt-injection perimeter** around the agent.
 
 ## When NOT to use browden
-**Reach for something else when you need:**
 
 | If you need… | Consider |
 | --- | --- |
