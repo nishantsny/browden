@@ -13,7 +13,7 @@ Python-server process only; Chrome/chromedriver excluded. Regenerate with `perf_
 | Architecture | x86_64 |
 | Cores (physical / logical) | 2 / 4 |
 | Max CPU frequency | n/a |
-| Total memory | 13.3 GiB |
+| Total memory | 8 GB |
 | Memory type | DDR4 @ 1.2224 GHz |
 
 ## Run
