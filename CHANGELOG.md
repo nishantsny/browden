@@ -26,6 +26,12 @@ All notable changes to browden are documented here. The format follows
   — the existing click/write host gate keys off the tab's top URL, so it cannot
   govern a different-origin document (that needs a frame-aware write gate, deferred).
   On any failure the driver returns to the top document and nothing is inspected.
+- `switch_to_parent_frame` / `switch_to_default_content` **re-verify the landed
+  document on every call**, not just on entry: another process may have navigated an
+  ancestor (or the top page) to an untrusted URL while we were deeper in the tree, so
+  the document returned to is re-gated (read-allowed + same-origin). On refusal the
+  driver retreats to the top document and the call raises — mirroring how the read
+  tools re-check the live URL on every call, not only on navigate.
 
 ## [1.0.0] — 2026-07-18
 

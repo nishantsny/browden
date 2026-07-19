@@ -414,12 +414,22 @@ async def switch_to_frame(css_selector: str, id: str) -> dict:
 async def switch_to_parent_frame(id: str) -> dict:
     """Switch a tab's focus up one frame level, toward the top document.
 
-    Moves de-escalating (toward the already-read-allowed top page), so it carries no
-    URL gate of its own.
+    Re-gated like every other tool call, not just on entry: an ancestor frame may
+    have been navigated to an untrusted page by another process while we were deeper
+    in the tree, so the landed document must be read-allowed AND same-origin with the
+    top page. On refusal the driver retreats to the top document and the call raises.
     """
     logger.info(f"Tool called: switch_to_parent_frame (id={id!r})")
     session = _store.route(id)
     result = await session.switch_to_parent_frame(id=id)
+    if "error" in result:
+        return result
+    try:
+        validate_and_ensure_same_origin(result["top_url"], result["frame_url"],
+                                        _refresher.allowlist.read_policy)
+    except ValidationError:
+        await session.switch_to_default_content(id=id)  # retreat to the top document
+        raise
     logger.info("Tool finished: switch_to_parent_frame")
     return result
 
@@ -427,10 +437,22 @@ async def switch_to_parent_frame(id: str) -> dict:
 @mcp.tool()
 @_tool
 async def switch_to_default_content(id: str) -> dict:
-    """Switch a tab's focus back to its top-level document, exiting all iframes."""
+    """Switch a tab's focus back to its top-level document, exiting all iframes.
+
+    Re-gated like every other tool call: another process may have moved the top page
+    to an untrusted URL since we descended, so the landed top document is re-checked
+    against the read allowlist. On refusal the call raises — the driver is already at
+    the top document (there is nowhere safer to retreat to), and the read tools
+    likewise refuse to read it.
+    """
     logger.info(f"Tool called: switch_to_default_content (id={id!r})")
     session = _store.route(id)
     result = await session.switch_to_default_content(id=id)
+    if "error" in result:
+        return result
+    # frame_url == top_url here (the top document); this reduces to a read-allowed check.
+    validate_and_ensure_same_origin(result["top_url"], result["frame_url"],
+                                    _refresher.allowlist.read_policy)
     logger.info("Tool finished: switch_to_default_content")
     return result
 

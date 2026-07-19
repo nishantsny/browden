@@ -561,20 +561,29 @@ class SeleniumChromeBackend(WebNavigatorBackend):
         return {"frame_url": drv.execute_script("return document.URL"), "top_url": top_url}
 
     def switch_to_parent_frame(self) -> dict:
-        """Move the focused tab up one frame level (toward the top document)."""
+        """Move the focused tab up one frame level (toward the top document).
+
+        Returns the landed frame's ``document.URL`` and the tab's top-level URL so
+        the caller can re-gate the ancestor — it may have been navigated to an
+        untrusted page since we descended.
+        """
         drv = self._drv()
         drv.switch_to.parent_frame()
         path = self._frame_paths.get(self._focused)
         if path:
             path.pop()
-        return {"frame_url": drv.execute_script("return document.URL")}
+        return {"frame_url": drv.execute_script("return document.URL"), "top_url": drv.current_url}
 
     def switch_to_default_content(self) -> dict:
-        """Return the focused tab to its top document, forgetting the frame path."""
+        """Return the focused tab to its top document, forgetting the frame path.
+
+        Returns the top document's ``document.URL`` (== ``top_url``) so the caller
+        can re-gate it — another process may have moved the top page meanwhile.
+        """
         drv = self._drv()
         drv.switch_to.default_content()
         self._frame_paths[self._focused] = []
-        return {"frame_url": drv.execute_script("return document.URL")}
+        return {"frame_url": drv.execute_script("return document.URL"), "top_url": drv.current_url}
 
     def current_url(self) -> str:
         try:
