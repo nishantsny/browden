@@ -38,12 +38,37 @@ any `~/.browden` config.
 `tabs` adds tabs to the first session (per-tab cost); `churn` repeats
 open→navigate→screenshot→close to expose FD/USS drift across session lifecycles.
 
-## What this is and isn't
+## Coverage — what it measures
 
-- **Is:** a single-PID sampling profiler for *how much* the server process costs
-  under a scripted workload, and whether it returns to baseline after teardown.
-- **Isn't:** allocation attribution (use `memray run -m browden.mcp.server …`
-  for *what* allocates), and not a throughput/latency load-test rig.
+- **Server-process footprint, Chrome excluded:** single-PID USS (headline), RSS,
+  CPU%, thread count, FD count, inet connection count.
+- **Scaling coefficients:** Δ USS/FDs **per Chrome session** (distinct
+  `profile_dir`) and **per tab**.
+- **Per-operation cost:** navigate, screenshot (image bytes transit Python), and
+  DOM query (`query_selector_all`) payloads.
+- **Leak signal:** a churn loop (open→navigate→screenshot→close ×N) to expose
+  USS/FD drift across session lifecycles, plus a `settle` phase measuring
+  residual USS/FDs after every tab is closed vs. the idle baseline.
+- **Real transport path:** load goes through `sse_client` +
+  `ClientSession.call_tool`, not a mock.
+- **Workload self-check:** prints `nav_errors` and DOM elements found, so a
+  silently-erroring run can't masquerade as a low-memory result.
 
-Sampling at ~2 Hz can miss sub-second spikes; treat USS deltas under ~3 MB as
-noise (USS is a coarse `/proc/smaps` snapshot).
+## Limitations — read before trusting a number
+
+- **Sampling, not accounting.** ~2 Hz psutil can miss sub-second allocation
+  spikes. This tells you *how much*, not *what line* — use
+  `memray run -m browden.mcp.server …` for allocation attribution.
+- **USS is a coarse `/proc/smaps` snapshot;** treat deltas under ~3 MB as noise.
+- **Allocator retention ≠ leak.** Python/glibc may hold freed pages, so a
+  non-zero teardown residual is a signal to investigate (ideally via memray),
+  not proof of a bug.
+- **"Python only" still includes selenium's client objects + urllib3 socket
+  pool** per session — legitimately the server's cost, but coupled to the
+  selenium version, not just browden's code.
+- **Single host, single run.** No cross-run percentiles, no sustained-RPS or
+  latency load testing — it's a profiler, not a load-test rig.
+- **Idle CPU floor** is suppressed here by setting `BROWDEN_RELOAD_INTERVAL=3600`
+  (the allowlist refresher poll); real deployments tick every 10s.
+- **Requires headless Chrome** (same prerequisites as the e2e suite) and
+  `psutil`.
