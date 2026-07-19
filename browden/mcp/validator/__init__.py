@@ -17,7 +17,7 @@ from .intent import (
 from .popularity import PopularityAllowlist
 from .runtime_configuration import BrowdenRuntimeConfiguration
 from .tranco import TrancoList
-from .read_gates import ReadGate, ensure_url_allowed, read_gate, validate_url
+from .read_gates import ReadGate, ensure_url_allowed, read_gate, validate_frame_entry, validate_url
 from .write_gates import (
     MAX_UPLOAD_BYTES,
     AdmittedFile,
@@ -69,6 +69,7 @@ __all__ = [
     "tab_gone_envelope",
     "upload_file_gate",
     "validate_click_target",
+    "validate_frame_entry",
     "validate_press_key_target",
     "validate_upload_path",
     "validate_upload_target",

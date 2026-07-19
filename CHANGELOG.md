@@ -221,6 +221,13 @@ All notable changes to browden are documented here. The format follows
   `allow_all`: additive rules, the unioned denylist, inherited `read` settings,
   canonical keys, `infra` staying global, and what `allow_all` keeps (the
   Tranco net and the scheme gate) (#145).
+- **iframe inspection (#117).** New `switch_to_frame`, `switch_to_parent_frame`
+  and `switch_to_default_content` tools focus a tab on an `<iframe>`, so the
+  existing DOM-read tools (`query_selector`, `get_element_by_id`, `screenshot`,
+  …) can inspect its contents, which were previously invisible (the tools only
+  ever saw the top document). The frame focus is replayed across the
+  window-refocus that nearly every op performs, and reset on `navigate` /
+  reload (#118).
 
 ### Changed
 - **Unknown top-level config sections are refused.** A section that is not
@@ -301,6 +308,16 @@ All notable changes to browden are documented here. The format follows
   dependency to its newest release, so the post-deploy e2e tested a set of
   packages nothing else runs. It now uses `uv sync --locked --extra dev`, the
   same install CI uses, and fails if the lock is stale.
+
+### Security
+- **`switch_to_frame` is same-origin only and gates the frame as its own
+  document.** The iframe's declared `src` is checked against the read allowlist
+  *before* switching, and the frame's actual `document.URL` must be read-allowed
+  **and** same-origin with the top page *after* switching. Cross-origin frames
+  are refused: the click/write host gate keys off the tab's top URL, so it can't
+  govern a different-origin document (a frame-aware write gate is deferred). On
+  any failure the driver returns to the top document and nothing is inspected.
+  Every frame tool judges against the tab's own profile's rules (#118).
 
 ## [1.2.1] — 2026-07-29
 
