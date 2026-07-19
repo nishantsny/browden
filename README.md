@@ -14,10 +14,7 @@ _Short demo video: https://youtu.be/q-W3Z9nlj58_
 
 ## Disclaimer
 
-`browden` drives a **real, undetected** Chrome, making the user eerily similar to a human. 
-
-**With great power comes great responsibility**: only point this to sites whose Terms of Service permit automated access.
-
+**With great power comes great responsibility**: Only point this MCP to sites whose Terms of Service permit automated access.
 
 ## When to use browden
 
