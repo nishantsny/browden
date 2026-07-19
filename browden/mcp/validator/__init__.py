@@ -15,7 +15,7 @@ from .intent import (
 from .popularity import PopularityAllowlist
 from .runtime_configuration import BrowdenRuntimeConfiguration
 from .tranco import TrancoList
-from .read_gates import ensure_url_allowed, validate_frame_entry, validate_url
+from .read_gates import ensure_url_allowed, validate_and_ensure_same_origin, validate_url
 from .write_gates import (
     check_action_host,
     validate_click_target,
@@ -43,8 +43,8 @@ __all__ = [
     "is_focusable_control",
     "label_matches",
     "tab_gone_envelope",
+    "validate_and_ensure_same_origin",
     "validate_click_target",
-    "validate_frame_entry",
     "validate_press_key_target",
     "validate_write_text_target",
     "validate_url",
