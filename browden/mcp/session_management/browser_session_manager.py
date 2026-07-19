@@ -201,35 +201,18 @@ class BrowserSessionManager:
             return tab.as_dict(id=self._id(tab.handle))
         return await self._with_tab(id, work, invalidate=True)
 
-    async def current_url(self, *, id: str) -> str | None:
-        """Return ``id``'s live URL (for the per-action host gate), or None if the tab is gone.
-
-        The one op that doesn't return a wire envelope, so it can't share
-        ``_with_tab`` (which renders the tab-gone envelope): a gone tab is None
-        here, which the caller — the per-action host gate — turns into the envelope.
-        """
-        self.sweep_idle()
-        handle = self._handle(id)
-
-        def work():
-            self._backend.select_tab(handle)
-            return self._backend.current_url()
-        try:
-            url = await self._run_driver(work)
-        except TabNotFoundError:
-            self._drop(handle)
-            return None
-        self._registry.touch(handle)
-        return url
-
     async def document_url(self, *, id: str) -> str | None:
-        """Return ``id``'s FOCUSED-document URL (``document.URL``), or None if gone.
+        """Return ``id``'s FOCUSED-document URL (``document.URL``), or None if the tab is gone.
 
-        Like :meth:`current_url` but reports the document the driver is focused on —
-        the iframe's own URL when focus is inside a frame — so the read/write gates
-        validate what is actually being read/written, not just the top page. Focuses
-        the tab first (``select_tab``), which the frame-navigation tools use to replay
-        the tab's frame focus, so this reflects the current frame.
+        Reports the document the driver is focused on — the iframe's own URL when focus
+        is inside a frame — so the read/write gates validate what is actually being
+        read/written, not just the top page. Focuses the tab first (``select_tab``),
+        which the frame-navigation tools use to replay the tab's frame focus, so this
+        reflects the current frame.
+
+        The one op that doesn't return a wire envelope, so it can't share ``_with_tab``
+        (which renders the tab-gone envelope): a gone tab is None here, which the
+        caller — the per-action gate — turns into the envelope.
         """
         self.sweep_idle()
         handle = self._handle(id)

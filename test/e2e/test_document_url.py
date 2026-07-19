@@ -28,12 +28,11 @@ async def test_document_url_equals_top_url_when_not_in_a_frame(session):
     page = await session.navigate(DATA_URL, id=blank["id"])
 
     doc = await session.document_url(id=page["id"])
-    top = await session.current_url(id=page["id"])
 
-    # At the top document the two accessors agree — this is the invariant that makes
-    # switching the gates from current_url to document_url a no-op until frame focus
-    # exists.
-    assert doc == top
+    # page["url"] is the tab's top-level URL (from TabInfo / driver.current_url). With
+    # no frame focus, the focused-document URL must match it exactly — the invariant
+    # that makes switching the gates to document_url a no-op until frame focus exists.
+    assert doc == page["url"]
     assert doc.startswith("data:text/html")
 
 
