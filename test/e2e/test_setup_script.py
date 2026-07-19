@@ -2,6 +2,7 @@
 name and port, so an existing browden service is untouched. Skipped on
 hosts without a systemd user session (e.g. some CI runners / macOS)."""
 import gzip
+import re
 import shutil
 import socket
 import subprocess
@@ -12,6 +13,11 @@ from pathlib import Path
 import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
+
+# Opening sentinel of the auto-written provenance block (setup/checkpoints.py).
+# Everything above it is a verbatim copy of the sample; the block itself carries
+# per-install snapshot checksums and so diverges from the committed placeholders.
+_PROVENANCE_MARKER = "# >>> browden provenance"
 SCRIPT = REPO_ROOT / "setup" / "onetime_setup.py"
 
 
@@ -56,9 +62,25 @@ def test_onetime_setup_installs_config_and_service(tmp_path):
         res = _run_setup(args)
         assert res.returncode == 0, f"setup failed:\n{res.stdout}\n{res.stderr}"
 
-        # Config copied; unit written; service active.
-        assert (config_dir / "allowlist.yaml").read_text() == \
-            (REPO_ROOT / "configs" / "samples" / "read_only_on_popular_websites.yaml").read_text()
+        # Config copied; unit written; service active. The body above the
+        # auto-written provenance block matches the sample byte-for-byte — setup
+        # only rewrites the block itself, filling in checksums for the snapshots
+        # it fetched (asserted just below), so don't compare that tail.
+        installed = (config_dir / "allowlist.yaml").read_text()
+        sample = (REPO_ROOT / "configs" / "samples"
+                  / "read_only_on_popular_websites.yaml").read_text()
+        assert installed.split(_PROVENANCE_MARKER, 1)[0] == \
+            sample.split(_PROVENANCE_MARKER, 1)[0]
+
+        # setup fetched the PSL (its snapshot wasn't pre-seeded) and recorded its
+        # checksum in the provenance block; the Tranco snapshot WAS pre-seeded so
+        # its fetch was skipped and those fields stay empty placeholders.
+        provenance = _PROVENANCE_MARKER + installed.split(_PROVENANCE_MARKER, 1)[1]
+        assert re.search(r"^#\s*pal_checksum_sha256: [0-9a-f]{64}$",
+                         provenance, re.MULTILINE)
+        assert re.search(r"^#\s*tranco_checksum_sha256:\s*$",
+                         provenance, re.MULTILINE)
+
         assert unit_path.exists()
         assert f"--allowlist {config_dir / 'allowlist.yaml'}" in unit_path.read_text()
 
