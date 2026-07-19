@@ -14,7 +14,7 @@ Python-server process only; Chrome/chromedriver excluded. Regenerate with `perf_
 | Cores (physical / logical) | 2 / 4 |
 | Max CPU frequency | n/a |
 | Total memory | 8 GB |
-| Memory type | DDR4 @ 1.2224 GHz |
+| Memory type | DDR4 @ 1.2 GHz |
 
 ## Run
 
