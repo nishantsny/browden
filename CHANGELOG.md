@@ -7,6 +7,15 @@ All notable changes to browden are documented here. The format follows
 
 ## [Unreleased]
 
+### Security
+- The read/write tools now gate on the **focused document's URL** (`document.URL`,
+  via the new `backend.document_url()`) instead of the top-level `current_url`.
+  These are identical today — nothing shifts the driver off the top document — so
+  this is behavior-preserving; the point is that every read/write validation is now
+  keyed on the document actually being acted on, so once frame focus exists the gates
+  validate the frame's own URL rather than the top page's. Navigations still validate
+  the target URL, and `list_tabs` still gates each tab's top URL.
+
 ## [1.0.0] — 2026-07-18
 
 First stable release: hardens the safety perimeter across the board and pins the

@@ -289,7 +289,7 @@ async def click(css_selector: str, id: str) -> dict:
 
     # Gate 1: per-action host allowlist (denylist veto + the click section),
     # checked against the tab's live URL before the element is ever queried.
-    url = await session.current_url(id=id)
+    url = await session.document_url(id=id)
     if url is None:
         return tab_gone_envelope(id)
     check_action_host(_refresher.allowlist, "click", url)  # raises if denied / host not allowed
@@ -335,7 +335,7 @@ async def insert_text(css_selector: str, value: str, id: str) -> dict:
 
     # Gate 1: per-action host allowlist ('write-text'; denylist vetoes first),
     # checked against the tab's live URL before the element is ever queried.
-    url = await session.current_url(id=id)
+    url = await session.document_url(id=id)
     if url is None:
         return tab_gone_envelope(id)
     check_action_host(_refresher.allowlist, "write-text", url)  # raises if denied / host not allowed
@@ -368,7 +368,7 @@ async def get_element_by_id(element_id: str, id: str,
     """document.getElementById on a tab — one element node, or found=false (not an error) if absent."""
     logger.info(f"Tool called: get_element_by_id (element_id={element_id!r}, id={id!r})")
     session = _store.route(id)
-    url = await session.current_url(id=id)
+    url = await session.document_url(id=id)
     if url is None:
         return tab_gone_envelope(id)
     if not ensure_url_allowed(_refresher.allowlist, url):  # H2: gate the tab's live url before reading
@@ -387,7 +387,7 @@ async def get_elements_by_class_name(class_names: str, id: str,
     """document.getElementsByClassName on a tab — space-separated names, element must have ALL. Paginated."""
     logger.info(f"Tool called: get_elements_by_class_name (class_names={class_names!r}, id={id!r})")
     session = _store.route(id)
-    url = await session.current_url(id=id)
+    url = await session.document_url(id=id)
     if url is None:
         return tab_gone_envelope(id)
     if not ensure_url_allowed(_refresher.allowlist, url):  # H2: gate the tab's live url before reading
@@ -406,7 +406,7 @@ async def query_selector(css_selector: str, id: str,
     """document.querySelector on a tab — one element node, or found=false if no match. Invalid CSS → error."""
     logger.info(f"Tool called: query_selector (css_selector={css_selector!r}, id={id!r})")
     session = _store.route(id)
-    url = await session.current_url(id=id)
+    url = await session.document_url(id=id)
     if url is None:
         return tab_gone_envelope(id)
     if not ensure_url_allowed(_refresher.allowlist, url):  # H2: gate the tab's live url before reading
@@ -425,7 +425,7 @@ async def query_selector_all(css_selector: str, id: str,
     """document.querySelectorAll on a tab — paginated list of element nodes. Invalid CSS → error."""
     logger.info(f"Tool called: query_selector_all (css_selector={css_selector!r}, id={id!r})")
     session = _store.route(id)
-    url = await session.current_url(id=id)
+    url = await session.document_url(id=id)
     if url is None:
         return tab_gone_envelope(id)
     if not ensure_url_allowed(_refresher.allowlist, url):  # H2: gate the tab's live url before reading
@@ -448,7 +448,7 @@ async def screenshot(id: str):  # -> dict | Image; unannotated: FastMCP can't sc
     """
     logger.info(f"Tool called: screenshot (id={id!r})")
     session = _store.route(id)
-    url = await session.current_url(id=id)
+    url = await session.document_url(id=id)
     if url is None:
         return tab_gone_envelope(id)
     if not ensure_url_allowed(_refresher.allowlist, url):  # H2: gate the tab's live url before reading
@@ -466,7 +466,7 @@ async def force_reload_tab(id: str) -> dict:
     """Reload the named tab and refresh its cached DOM."""
     logger.info(f"Tool called: force_reload_tab (id={id!r})")
     session = _store.route(id)
-    url = await session.current_url(id=id)
+    url = await session.document_url(id=id)
     if url is None:
         return tab_gone_envelope(id)
     if not ensure_url_allowed(_refresher.allowlist, url):  # H2: gate the tab's live url before reading

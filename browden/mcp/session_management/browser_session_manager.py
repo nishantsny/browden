@@ -222,6 +222,29 @@ class BrowserSessionManager:
         self._registry.touch(handle)
         return url
 
+    async def document_url(self, *, id: str) -> str | None:
+        """Return ``id``'s FOCUSED-document URL (``document.URL``), or None if gone.
+
+        Like :meth:`current_url` but reports the document the driver is focused on —
+        the iframe's own URL when focus is inside a frame — so the read/write gates
+        validate what is actually being read/written, not just the top page. Focuses
+        the tab first (``select_tab``), which the frame-navigation tools use to replay
+        the tab's frame focus, so this reflects the current frame.
+        """
+        self.sweep_idle()
+        handle = self._handle(id)
+
+        def work():
+            self._backend.select_tab(handle)
+            return self._backend.document_url()
+        try:
+            url = await self._run_driver(work)
+        except TabNotFoundError:
+            self._drop(handle)
+            return None
+        self._registry.touch(handle)
+        return url
+
     # -- write tools --------------------------------------------------------
 
     async def click(self, css_selector: str, *, id: str) -> dict:
