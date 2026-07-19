@@ -34,7 +34,7 @@ from .validator import (
     read_gate,
     tab_gone_envelope,
     upload_file_gate,
-    validate_frame_entry,
+    validate_and_ensure_same_origin,
     validate_url,
     write_text_gate,
 )
@@ -507,7 +507,7 @@ async def switch_to_frame(css_selector: str, id: str) -> dict:
     if "error" in entered:
         return entered
     try:
-        validate_frame_entry(entered["top_url"], entered["frame_url"], access_rules.read_policy)
+        validate_and_ensure_same_origin(entered["top_url"], entered["frame_url"], access_rules.read_policy)
     except ValidationError:
         await session.switch_to_default_content(id=id)  # back out; take no action inside
         raise

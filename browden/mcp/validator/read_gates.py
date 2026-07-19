@@ -126,8 +126,9 @@ def read_gate(access_rules: BrowdenAccessRuleSet) -> ReadGate:
     return ReadGate(check_page=check_page)
 
 
-def validate_frame_entry(top_url: str, frame_url: str,
-                         gate: "HostRuleMatcher | ReadPolicy") -> None:
+def validate_and_ensure_same_origin(
+    top_url: str, frame_url: str, gate: "HostRuleMatcher | ReadPolicy",
+) -> None:
     """Gate entering an iframe (v1: same-origin only). Raises on refusal.
 
     Called AFTER the driver has switched into the frame, with the frame's *actual*
