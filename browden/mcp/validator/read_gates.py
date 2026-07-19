@@ -14,6 +14,7 @@ from ...common.logger import logger
 from .allowlist import Allowlist, ReadPolicy
 from .access_rule_set import BrowdenAccessRuleSet
 from .errors import ValidationError
+from .tranco import canonical_host
 
 # Browser-internal "blank" / new-tab URLs a not-yet-navigated tab reports. Always
 # allowed: there is no site to gate, and the agent can't navigate to one
@@ -98,3 +99,31 @@ def ensure_url_allowed(access_rules: BrowdenAccessRuleSet, url: str) -> bool:
         return True
     except ValidationError:
         return False
+
+
+def validate_frame_entry(top_url: str, frame_url: str,
+                         gate: "Allowlist | ReadPolicy") -> None:
+    """Gate entering an iframe (v1: same-origin only). Raises on refusal.
+
+    Called AFTER the driver has switched into the frame, with the frame's *actual*
+    ``document.URL`` and the tab's top-level URL. Two conditions, both required:
+
+    1. ``frame_url`` must be admitted by the read policy (``validate_url``) — a frame
+       is a distinct document and must itself be readable to be inspected.
+    2. The frame's host must equal the top page's host (**same-origin**). Cross-origin
+       frames are refused in v1 because the click/write host gate keys off the tab's
+       top URL (``driver.current_url`` stays top-level inside a frame), so it cannot
+       correctly govern a different-origin document — enabling that safely needs a
+       frame-aware write gate (a future v2).
+
+    The caller runs this post-switch and, on a raise, returns the driver to the top
+    document (no action is taken inside a refused frame). ``top_url`` is trusted here:
+    the caller has already gated it via the read policy before switching.
+    """
+    validate_url(frame_url, gate)  # the landed document must itself be read-allowed
+    frame_host = canonical_host(urlparse(frame_url).hostname or "")
+    top_host = canonical_host(urlparse(top_url).hostname or "")
+    if frame_host != top_host:
+        raise ValidationError(
+            f"cross-origin frame refused (same-origin only): frame host {frame_host!r} "
+            f"!= page host {top_host!r}")
