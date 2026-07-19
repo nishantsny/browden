@@ -100,8 +100,9 @@ def ensure_url_allowed(allowlist: ActionAllowlist, url: str) -> bool:
         return False
 
 
-def validate_frame_entry(top_url: str, frame_url: str,
-                         gate: "Allowlist | ReadPolicy") -> None:
+def validate_and_ensure_same_origin(
+    top_url: str, frame_url: str, gate: "Allowlist | ReadPolicy",
+) -> None:
     """Gate entering an iframe (v1: same-origin only). Raises on refusal.
 
     Called AFTER the driver has switched into the frame, with the frame's *actual*

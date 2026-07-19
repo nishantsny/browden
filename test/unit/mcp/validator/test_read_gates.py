@@ -6,7 +6,7 @@ from browden.mcp.validator import (
     ReadPolicy,
     ValidationError,
     ensure_url_allowed,
-    validate_frame_entry,
+    validate_and_ensure_same_origin,
     validate_url,
 )
 
@@ -189,11 +189,11 @@ def test_wildcard_override_does_not_re_enable_non_https():
         validate_url("file:///home/me/notes.txt", rp)
 
 
-# -- validate_frame_entry (v1 same-origin iframe gate) ------------------------
+# -- validate_and_ensure_same_origin (v1 same-origin iframe gate) ------------------------
 
 def test_frame_entry_allows_same_origin_read_allowed():
     rp = _read_policy({"*": [".*"]})
-    assert validate_frame_entry("https://app.example.com/page",
+    assert validate_and_ensure_same_origin("https://app.example.com/page",
                                 "https://app.example.com/api/widget", rp) is None
 
 
@@ -201,7 +201,7 @@ def test_frame_entry_treats_www_as_same_origin():
     # canonical_host drops a leading www., so www.example.com and example.com are
     # the same origin for the gate.
     rp = _read_policy({"*": [".*"]})
-    assert validate_frame_entry("https://example.com/p",
+    assert validate_and_ensure_same_origin("https://example.com/p",
                                 "https://www.example.com/inner", rp) is None
 
 
@@ -209,7 +209,7 @@ def test_frame_entry_refuses_cross_origin_even_when_read_allowed():
     rp = _read_policy({"*": [".*"]})  # the whole (https) web is readable...
     with pytest.raises(ValidationError, match="cross-origin"):
         # ...but a different-host frame is still refused in v1.
-        validate_frame_entry("https://app.example.com/p",
+        validate_and_ensure_same_origin("https://app.example.com/p",
                              "https://ads.other.com/frame", rp)
 
 
@@ -218,12 +218,12 @@ def test_frame_entry_refuses_frame_document_not_read_allowed():
     # read gate fails before same-origin can admit it.
     rp = _read_policy({"app.example.com": ["^/ok"]})
     with pytest.raises(ValidationError, match="not on allowlist"):
-        validate_frame_entry("https://app.example.com/ok",
+        validate_and_ensure_same_origin("https://app.example.com/ok",
                              "https://app.example.com/blocked", rp)
 
 
 def test_frame_entry_refuses_non_https_frame_document():
     rp = _read_policy({"*": [".*"]})
     with pytest.raises(ValidationError, match="scheme not allowed"):
-        validate_frame_entry("https://app.example.com/p",
+        validate_and_ensure_same_origin("https://app.example.com/p",
                              "http://app.example.com/inner", rp)

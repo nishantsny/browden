@@ -28,7 +28,7 @@ from .validator import (
     ensure_url_allowed,
     tab_gone_envelope,
     validate_click_target,
-    validate_frame_entry,
+    validate_and_ensure_same_origin,
     validate_url,
     validate_write_text_target,
 )
@@ -401,7 +401,7 @@ async def switch_to_frame(css_selector: str, id: str) -> dict:
     if "error" in entered:
         return entered
     try:
-        validate_frame_entry(top, entered["frame_url"], _refresher.allowlist.read_policy)
+        validate_and_ensure_same_origin(top, entered["frame_url"], _refresher.allowlist.read_policy)
     except ValidationError:
         await session.switch_to_default_content(id=id)  # back out; take no action inside
         raise
