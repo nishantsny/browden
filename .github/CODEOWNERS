@@ -1,0 +1,9 @@
+# Code owners for browden.
+#
+# Every file is owned by the repository owner. Combined with the main
+# ruleset's "Require review from Code Owners" + 1 required approval, this
+# means every pull request needs @nishantsny's approval before a
+# non-bypass actor can merge it.
+#
+# Docs: https://docs.github.com/articles/about-code-owners
+* @nishantsny
