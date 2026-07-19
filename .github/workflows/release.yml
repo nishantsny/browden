@@ -1,0 +1,60 @@
+name: release
+
+# Promote the `stable` release channel when a version tag is pushed.
+#
+# `stable` is the branch consumers install from (`git clone --branch stable`). It
+# only ever fast-forwards to a tagged, on-`main` release commit — so it always
+# points at a real, released version and never at mid-flight `main`. This workflow
+# is the ONLY thing that advances it: pushing a `vX.Y.Z` tag is the whole release
+# action; `stable` and the GitHub Release follow automatically.
+on:
+  push:
+    tags:
+      - "v[0-9]+.[0-9]+.[0-9]+"
+
+# Least privilege: just enough to push the stable branch and create the release.
+permissions:
+  contents: write
+
+jobs:
+  promote:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0 # full history — we check the tag's ancestry against main
+
+      - name: Refuse a tag that isn't on main
+        # stable ⊆ main is the invariant. A tag on some other branch would break it,
+        # so promotion only proceeds when the tagged commit is an ancestor of main.
+        run: |
+          git fetch --quiet origin main
+          if ! git merge-base --is-ancestor "${{ github.sha }}" origin/main; then
+            echo "::error::tag ${{ github.ref_name }} (${{ github.sha }}) is not on origin/main — refusing to promote"
+            exit 1
+          fi
+
+      - name: Refuse a tag that disagrees with pyproject version
+        # The tag and the code's own version must match, or the release would ship
+        # under a number the package doesn't claim.
+        run: |
+          v="$(sed -nE 's/^version = "([^"]+)"/\1/p' pyproject.toml | head -1)"
+          if [ "v$v" != "${{ github.ref_name }}" ]; then
+            echo "::error::tag ${{ github.ref_name }} != pyproject version v$v"
+            exit 1
+          fi
+
+      - name: Fast-forward stable to the tag
+        # A plain (non-force) push is REJECTED on a non-fast-forward, so this can only
+        # ADVANCE stable along main's line — never rewind or diverge it. Creates the
+        # branch on the first release.
+        run: git push origin "${{ github.sha }}:refs/heads/stable"
+
+      - name: Cut the GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${{ github.ref_name }}" \
+            --verify-tag \
+            --title "${{ github.ref_name }}" \
+            --generate-notes
