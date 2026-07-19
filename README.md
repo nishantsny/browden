@@ -14,10 +14,7 @@ _Short demo video: https://youtu.be/q-W3Z9nlj58_
 
 ## Disclaimer
 
-`browden` drives a **real, undetected** Chrome, making the user eerily similar to a human. 
-
-**With great power comes great responsibility**: only point this to sites whose Terms of Service permit automated access.
-
+**With great power comes great responsibility**: Only point this MCP to sites whose Terms of Service permit automated access.
 
 ## When to use browden
 
@@ -29,14 +26,9 @@ Defer to richer automation tools when you need to *drive* the browser rather tha
 
 - Let an agent read and navigate your **logged-in** pages while it stays
   structurally unable to click "Buy", send mail, or delete anything.
-- Put a **prompt-injection perimeter** around the agent — reads are allowlisted, so
-  it can't be hijacked by a page it was never allowed to open.
-- Run **fully local** — no cloud, no account, no API key; nothing about your
-  browsing leaves the host.
-- Drive the browser **like a human** (please see [disclaimer](#disclaimer)).
+- You need a **prompt-injection perimeter** around the agent.
 
 ## When NOT to use browden
-**Reach for something else when you need:**
 
 | If you need… | Consider |
 | --- | --- |
