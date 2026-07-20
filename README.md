@@ -59,10 +59,15 @@ Defer to richer automation tools when you need to *drive* the browser rather tha
 ## Quick start
 
 ```bash
-git clone https://github.com/nishantsny/browden.git
+git clone --branch stable https://github.com/nishantsny/browden.git
 cd browden
 python3 setup/onetime_setup.py
 ```
+
+> `--branch stable` installs the **latest release** — the `stable` channel only ever
+> advances to tagged releases, never mid-flight `main`. To track development instead,
+> clone without `--branch stable` (that follows `main`). To update later:
+> `git -C browden pull --ff-only`.
 
 The setup script will print a MCP config (sample below), paste that into your agent's MCP config (e.g. `~/.claude.json`)
 
@@ -294,7 +299,7 @@ session stays warm across agent restarts, serving SSE on port **22001** pinned t
 the venv.
 
 ```bash
-git clone https://github.com/nishantsny/browden.git
+git clone --branch stable https://github.com/nishantsny/browden.git
 cd browden
 python3 setup/onetime_setup.py --mode service
 ```

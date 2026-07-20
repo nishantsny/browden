@@ -74,15 +74,27 @@ stays free to change:
 
 ## Releasing (maintainers)
 
-browden ships from `main`; only the latest release is supported
-(see [SECURITY.md](./SECURITY.md)). To cut a release:
+`main` is the development branch; consumers install from the **`stable`** channel
+(`git clone --branch stable`), which only ever fast-forwards to a tagged release
+commit — so it always points at a real release, never mid-flight `main`. Only the
+latest release is supported (see [SECURITY.md](./SECURITY.md)). To cut a release:
 
 1. Land all changes on `main`; make sure CI is green.
 2. Bump `version` in `pyproject.toml`, and in `CHANGELOG.md` move the
    `[Unreleased]` notes under the new `[X.Y.Z] — YYYY-MM-DD` heading (update
    the compare links at the bottom).
-3. Tag and push: `git tag vX.Y.Z && git push origin vX.Y.Z`.
-4. Create the GitHub release from the tag, pasting that changelog section.
+3. Tag and push the release commit:
+   `git tag -a vX.Y.Z -m vX.Y.Z && git push origin vX.Y.Z`.
+
+Pushing the tag is the whole release action. It triggers
+[`.github/workflows/release.yml`](./.github/workflows/release.yml), which
+fast-forwards `stable` to the tagged commit and cuts the GitHub Release — no manual
+branch push, no manual release. The workflow refuses a tag that isn't on `main` or
+whose name disagrees with `pyproject.toml`'s version, and the `stable` push is
+non-force, so it can only ever *advance* the channel, never rewind it.
+
+Manual fallback (if Actions is unavailable): `git push origin vX.Y.Z^{}:stable`,
+then create the release by hand from the tag.
 
 Security fixes land on `main` and the latest release only — no backports to
 older tags.
