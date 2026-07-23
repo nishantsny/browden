@@ -28,6 +28,7 @@ from .validator import (
     ensure_url_allowed,
     tab_gone_envelope,
     validate_click_target,
+    validate_press_key_target,
     validate_url,
     validate_write_text_target,
 )
@@ -349,6 +350,51 @@ async def insert_text(css_selector: str, value: str, id: str) -> dict:
 
     result = await session.insert_text(css_selector, value, id=id)
     logger.info("Tool finished: insert_text")
+    return result
+
+
+@mcp.tool()
+@_tool
+async def press_key(css_selector: str, key: str, id: str) -> dict:
+    """Focus an element on a tab and press a single control key — the press-key action.
+
+    The keyboard counterpart of ``click``, for controls a coordinate click can't
+    reach: elements the page made keyboard-operable (a ``tabindex`` list row, an
+    ARIA widget) rather than a ``<button>``/``<a>``. Four server-side gates, all
+    default-deny, must pass:
+      1. The tab's host must be listed under the ``press-key`` section of the
+         allowlist (and not on the denylist) — a section separate from ``click``
+         and ``write-text``.
+      2. ``css_selector`` must resolve to exactly one element that is a real,
+         visible, non-decoy *focusable* control (natively focusable, or carrying
+         ``tabindex``). A bare ``<div onclick>`` with no ``tabindex`` is refused —
+         it isn't focusable. Integrity, not intent.
+      3. ``key`` must be a control key (Enter/Space/Tab/Escape/arrows/Home/End/
+         Page{Up,Down}) — never a character key; typing text is ``insert_text``'s
+         job, gated separately by field label.
+      4. Some page rule matching this URL must admit the control (its visible text
+         matches the rule ``label``) AND list ``key`` in that rule's ``keys``.
+    Any gate failing raises a ValidationError and nothing is pressed.
+    """
+    logger.info(f"Tool called: press_key (css_selector={css_selector!r}, key={key!r}, id={id!r})")
+    session = _store.route(id)
+
+    # Gate 1: per-action host allowlist ('press-key'; denylist vetoes first),
+    # checked against the tab's live URL before the element is ever queried.
+    url = await session.document_url(id=id)
+    if url is None:
+        return tab_gone_envelope(id)
+    check_action_host(_refresher.allowlist, "press-key", url)  # raises if denied / host not allowed
+
+    # Gates 2-4: fetch the element (limit=2 so ambiguity is detectable), then let
+    # the validator judge focusability, the control-key rule, and the page label+key.
+    found = await session.query_selector_all(css_selector, id=id, limit=2)
+    if "error" in found:
+        return found
+    validate_press_key_target(_refresher.allowlist, url, css_selector, found, key)  # raises on any failed gate
+
+    result = await session.press_key(css_selector, key, id=id)
+    logger.info("Tool finished: press_key")
     return result
 
 

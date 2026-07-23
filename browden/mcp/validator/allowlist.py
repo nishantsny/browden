@@ -90,6 +90,10 @@ class PageRule:
     match_on: str
     label: "re.Pattern[str] | None" = None
     field_ids: "frozenset[str]" = frozenset()
+    # `press-key` only: the control keys this rule authorizes on its pages (W3C
+    # `key` values, e.g. {"Enter", "ArrowDown"}). Empty for every other action —
+    # and a press-key rule with an empty set authorizes nothing (fail-closed).
+    keys: "frozenset[str]" = frozenset()
 
     def matches_page(self, path: str, query: str = "", fragment: str = "",
                      *, full_match: bool) -> bool:
@@ -134,8 +138,12 @@ def _page_rule_from_mapping(rule: dict, *, want_label: bool, where: str) -> Page
     elif "label" in rule:
         raise ValueError(f"{where}: 'label' is only meaningful for a write action")
     field_ids = frozenset(str(x) for x in (rule.get("field_ids") or []))
+    # `keys` is only meaningful for the press-key action; other actions never set
+    # it. Parsed generically here (kept as authored strings) — the press-key gate
+    # is what enforces "must be a control key" and "must authorize the pressed key".
+    keys = frozenset(str(k) for k in (rule.get("keys") or []))
     return PageRule(patterns=_as_pattern_tuple(raw), match_on=match_on,
-                    label=label, field_ids=field_ids)
+                    label=label, field_ids=field_ids, keys=keys)
 
 
 def _coerce_page_rules(spec: object, *, want_label: bool, where: str) -> list[PageRule]:

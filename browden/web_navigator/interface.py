@@ -134,3 +134,15 @@ class WebNavigatorBackend(ABC):
         then clears it and types ``value``. Policy — which hosts, which fields,
         what value — is enforced by the caller (the ``insert_text`` tool), never here.
         """
+
+    @abstractmethod
+    def press_key_element(self, css_selector: str, key: str) -> dict:
+        """Find one element by CSS selector on the active tab, focus it, press ``key``.
+
+        The press-key primitive. Like :meth:`click_element`, re-finds the element
+        *live* and refuses unless it is the sole match and is displayed + enabled;
+        then focuses it and dispatches a single control key (``key`` is a W3C
+        ``key`` value such as ``"Enter"`` / ``"ArrowDown"``). Policy — which hosts,
+        which elements, which keys — is enforced by the caller (the ``press_key``
+        tool), never here.
+        """

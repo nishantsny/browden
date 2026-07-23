@@ -37,6 +37,21 @@ _CLICKABLE_INPUT_TYPES = ("submit", "button")
 # those are manipulated by clicking, not typing.
 _TEXT_INPUT_TYPES = ("text", "search", "email", "tel", "url", "number", "password")
 
+# Tags the browser makes focusable without a tabindex — the ones that natively sit
+# in the tab order and take keyboard input (an <a> needs an href, handled below).
+_NATIVELY_FOCUSABLE = ("input", "button", "select", "textarea")
+
+# The only keys the `press-key` action may ever send: activation + navigation
+# keys, NEVER character keys. Typing text is `write-text`'s job (gated by field
+# label); routing characters through press-key would be a text-entry channel that
+# skips that gate, so the gate refuses any key outside this set. Names are the
+# W3C UI Events `key` values the operator writes in the allowlist `keys:` list.
+ACTIVATION_KEYS = frozenset({
+    "Enter", "Space", "Tab", "Escape",
+    "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight",
+    "Home", "End", "PageUp", "PageDown",
+})
+
 
 def _fails_integrity(attrs: dict) -> bool:
     """Shared anti-injection + statically-hidden/disabled rejection for any write target.
@@ -128,6 +143,42 @@ def is_clickable_control(node: dict) -> bool:
     is_submit = tag == "input" and attrs.get("type", "submit") in _CLICKABLE_INPUT_TYPES
     is_anchor = tag == "a"
     return is_button or is_submit or is_anchor
+
+
+def is_focusable_control(node: dict) -> bool:
+    """True iff ``node`` is a real, visible, non-decoy *focusable* element.
+
+    The integrity counterpart for the ``press-key`` action, the way
+    :func:`is_clickable_control` is for ``click``. It is deliberately looser about
+    *tag* (a keyboard-operable control is often a `<tr>`/`<div>` a11y widget, not a
+    `<button>`) but strictly narrower about *reachability*: an element can only be
+    focused if the browser considers it focusable — natively focusable
+    (`<input>`/`<button>`/`<select>`/`<textarea>`, or an `<a>` with an ``href``) or
+    made focusable by the page author with ``tabindex``. A bare ``<div onclick>``
+    with no ``tabindex`` is **not** focusable, so it is refused here even though a
+    coordinate click could hit it.
+
+    This does not judge intent, and passing it is not sufficient to act — the
+    ``press-key`` gate still requires the operator's page ``label`` to match and the
+    key to be one the rule authorizes (and a control key at that). Same integrity
+    caveat as the siblings: real visibility/enabled-state is re-verified live by the
+    backend at action time; the static checks here are defence in depth.
+
+    Default-deny. ``node`` is a serialized element dict or ``None``.
+    """
+    if not node:
+        return False
+    attrs = node.get("attributes", {})
+    if _fails_integrity(attrs):
+        return False
+    tag = node.get("tag")
+    if tag in _NATIVELY_FOCUSABLE:
+        return True
+    if tag == "a" and "href" in attrs:
+        return True
+    # tabindex (any value: "0" tab-order, "-1" programmatic-only, or n) is the
+    # page author explicitly marking the element keyboard-focusable.
+    return "tabindex" in attrs
 
 
 def classify_anchor_target(node: dict, current_url: str) -> "tuple[str, str | None]":

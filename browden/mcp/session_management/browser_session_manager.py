@@ -268,6 +268,26 @@ class BrowserSessionManager:
             return result
         return await self._with_tab(id, work, invalidate=True)
 
+    async def press_key(self, css_selector: str, key: str, *, id: str) -> dict:
+        """Press ``key`` on the (already policy-validated) focused element on ``id``.
+
+        The caller (the ``press_key`` MCP tool) has gated the host, verified the
+        element is a focusable control, matched the page label, and checked the key
+        is one the rule authorizes. Here we re-find it live, focus it and dispatch
+        the key; the soup cache is invalidated because the key may have changed the
+        DOM (activated a control, moved a selection).
+        """
+        self.sweep_idle()
+
+        def work(handle):
+            self._backend.select_tab(handle)
+            result = self._backend.press_key_element(css_selector, key)
+            logger.info(f"press_key: sent {key!r} to {css_selector!r} on tab {id}")
+            result.pop("handle", None)
+            result["id"] = id
+            return result
+        return await self._with_tab(id, work, invalidate=True)
+
     # -- DOM-query tools ----------------------------------------------------
 
     async def get_element_by_id(self, element_id: str, *, id: str,

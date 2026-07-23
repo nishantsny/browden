@@ -7,6 +7,19 @@ All notable changes to browden are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+- **`press-key` write action.** A new tool/section that focuses an element and
+  sends a single **control key** (Enter/Space/Tab/Escape/arrows/Home/End/
+  Page{Up,Down}) — keyboard activation for controls a coordinate `click` can't
+  reach, e.g. `tabindex` list rows or ARIA widgets that aren't `<button>`/`<a>`.
+  Default-deny, gated in parallel to `click`: the element must be a real, visible,
+  non-decoy **focusable** control (`is_focusable_control` — natively focusable or
+  carrying `tabindex`; a bare `<div onclick>` is refused), the key must be a
+  control key (never a character — typing stays `write-text`'s job), and some
+  page rule matching the URL must admit the control by `label` **and** list the
+  key in a new per-rule `keys:` set. Not hit-tested, so it also isn't blocked by
+  overlays. Sample: `configs/samples/allow_press_key_activation.yaml` (#126).
+
 ## [1.1.0] — 2026-07-22
 
 ### Added

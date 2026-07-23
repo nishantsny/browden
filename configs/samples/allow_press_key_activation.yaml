@@ -1,0 +1,64 @@
+# browden access policy — keyboard activation (`press-key`).
+#
+# LIVE RELOAD: browden re-reads this file about every 10s while it runs, so edits
+# take effect without a restart. A save that doesn't parse (mid-edit, bad YAML) is
+# ignored and the last valid version stays in force.
+#
+# A worked example that ENABLES the `press-key` write action. `press-key` focuses
+# an element and sends one CONTROL key (Enter/Space/Tab/Escape/arrows/…) — it is
+# how an agent operates controls a coordinate `click` can't reach: elements the
+# page made keyboard-operable with `tabindex` (list rows, ARIA widgets) rather
+# than a real <button>/<a>. The motivating case is a food-search result list whose
+# rows are `<tr tabindex="0">` picked with Enter (e.g. cronometer.com).
+#
+# Four independent layers, evaluated in this order for every URL/action:
+#   1. denylist        — always wins; a matching URL is refused outright.
+#   2. read allowlist  — a URL may be READ / navigated only if it matches here.
+#   3. write actions   — `press-key` (below); default-deny, gated per host.
+#
+# See configs/samples/allowlist-read-deny.yaml for a fully-commented tour of the
+# read/deny system, and allow_grocery_cart_manipulation.yaml for `click`.
+
+# ---- denylist: always denied, checked first -------------------------------
+denylist: {}
+
+# ---- read allowlist -------------------------------------------------------
+read:
+  enabled: true
+  # Tranco top-sites snapshot (offline; fetched next to this file by setup).
+  tranco:
+    enabled: true
+    top_n: 1000000
+  # cronometer.com is within the Tranco top-1m, so it is already navigable and
+  # needs no override here. (Add an override only for a host Tranco doesn't rank.)
+  website_overrides: {}
+
+# ---- write actions --------------------------------------------------------
+# `press-key`: focus + send one control key. Default-deny; every gate must pass:
+#   1. host+page — the host is listed here and some rule's `path` matches the page.
+#   2. focusable — the target is a real, visible, non-decoy element that is
+#      focusable (natively, or has `tabindex`). A bare <div onclick> is refused.
+#   3. control key — the pressed key is one of Enter / Space / Tab / Escape /
+#      ArrowUp|Down|Left|Right / Home / End / PageUp / PageDown. Character keys are
+#      NEVER allowed here (type text with `write-text`, gated by field label).
+#   4. label + key — a matching rule's `label` regex fully matches the control's
+#      visible text AND the pressed key is listed in that rule's `keys`.
+#
+# `keys` is REQUIRED for a press-key rule: a rule with no `keys` authorizes
+# nothing (fail-closed). Authority is per page AND per key — allowing Enter on a
+# page does not also allow Escape.
+press-key:
+  cronometer.com:
+    # Cronometer is a hash-routed SPA: every logged-in view (diary, custom
+    # recipes, the "Add Ingredient / Add Food" search modal) shares the path '/'.
+    # The food-search result rows are <tr tabindex="0"> whose visible text is the
+    # food name — allow focusing a row and pressing Enter to pick it, and the up/
+    # down arrows to move the roving-tabindex highlight between rows.
+    - path: ['^/$']
+      label: '.*'                       # each row's text is a different food name
+      keys: ['Enter', 'ArrowDown', 'ArrowUp']
+
+# Note: `press-key` is independent of `click` and `write-text`. Enabling it here
+# does NOT permit clicking or typing on cronometer.com — add those sections
+# separately if a workflow needs them (e.g. `write-text` for the search box, a
+# `click` rule for real <button> controls like SEARCH / CREATE RECIPE).
