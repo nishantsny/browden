@@ -75,7 +75,7 @@ def validate_url(url: str, gate: "Allowlist | ReadPolicy") -> str:
     if scheme != "file" and not p.netloc:
         logger.warning(f"URL validation failed: no host in {url!r}")
         raise ValidationError(f"Invalid URL (no host): {url}")
-    if not gate.is_allowed(host, p.path):
+    if not gate.is_allowed(host, p.path, p.query, p.fragment):
         logger.warning(f"URL blocked by allowlist: {p.hostname}{p.path}")
         raise ValidationError(f"URL not on allowlist: {p.hostname}{p.path}")
     logger.info(f"URL allowed: {url!r}")

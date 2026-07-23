@@ -1,0 +1,57 @@
+# browden access policy — PAGE-scoped read + write rules.
+#
+# LIVE RELOAD: browden re-reads this file about every 10s while it runs, so
+# edits take effect without a restart. A save that doesn't parse is ignored and
+# the last valid version stays in force.
+#
+# Shows the page-rule form: instead of one host-wide rule, a host maps to an
+# ordered LIST of rules, each governing only the pages its `path` selector
+# matches. This scopes authority to a page, not a whole registrable domain.
+#
+# Layers, evaluated in this order for every URL:
+#   1. denylist        — always wins; a matching URL is refused outright.
+#   2. read allowlist  — Tranco (whole registrable domain) OR page rules.
+#                        Listing a host under website_overrides DEMOTES it from
+#                        Tranco's blanket grant to exactly the pages it matches.
+#   3. write actions   — default-deny, gated per (page, label).
+#
+# A rule's `path` regexes FULLMATCH the target, so `^/cart` does not admit
+# `/cart-secret`; spell a prefix rule `^/cart/.*`. `match_on: path` (default)
+# matches the URL path only; `match_on: url` matches path + query + fragment —
+# needed for hash-routed SPAs, where every page shares the path `/`.
+
+denylist: {}
+
+read:
+  enabled: true
+  tranco:
+    enabled: true
+    top_n: 1000000
+  website_overrides:
+    # A hash-routed SPA: only the reports view is readable. `match_on: url` is
+    # the only way to tell it from every other `#/...` view (all share path `/`).
+    app.example.com:
+      - path: ['^/#/reports/\d+$']
+        match_on: url
+
+click:
+  amazon.com:
+    # Product page: put things in the basket, nothing else.
+    - path: ['^/(dp|gp/product)/.*']
+      label: '(?i)add to cart'
+    # Checkout pipeline only: the irreversible control lives here and nowhere
+    # else, so "place your order" can never fire from a product page.
+    - path: ['^/gp/buy/.*']
+      label: '(?i)(continue|place your order)'
+
+write-text:
+  amazon.com:
+    # The Fresh grocery-tip box carries no visible label; its id is authorized
+    # ONLY on the order pages that render it, never host-wide.
+    - path: ['^/gp/(css/order-history|your-account/order-details).*']
+      label: '(?i)grocery tip.*'
+      field_ids: [tip-widget--edit-form--amount-input]
+
+infra:
+  max_browser_sessions: 10
+  max_tabs_per_session: 20

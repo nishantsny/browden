@@ -231,17 +231,20 @@ def test_unknown_action_default_denies(al):
     assert not al.section("delete_account").is_allowed("amazon.com", "/")
 
 
-def test_label_pattern_lookup(al):
-    pat = al.label_pattern("click", "amazon.com")
-    assert pat is not None and pat.search("Add to Cart")
-    assert al.label_pattern("click", "www.amazon.com") is not None  # canonicalized
-    assert al.label_pattern("click", "evil.example.com") is None
-    assert al.label_pattern("read", "amazon.com") is None  # read is not a write section
+def test_rules_for_lookup(al):
+    rules = al.rules_for("click", "amazon.com", "/dp/x")
+    assert len(rules) == 1 and rules[0].label.search("Add to Cart")
+    assert al.rules_for("click", "www.amazon.com", "/")           # canonicalized
+    assert al.rules_for("click", "evil.example.com", "/") == []
+    assert al.rules_for("read", "amazon.com", "/") == []          # read is not a write section
+    # amazon.in only scopes /dp/* — a non-matching page yields no rules.
+    assert al.rules_for("click", "amazon.in", "/gp/cart") == []
+    assert al.rules_for("click", "amazon.in", "/dp/x")
 
 
 def test_ebay_label_allows_basket(al):
-    pat = al.label_pattern("click", "ebay.com")
-    assert pat.search("Add to basket") and pat.search("Add to cart")
+    (rule,) = al.rules_for("click", "ebay.com", "/anything")
+    assert rule.label.search("Add to basket") and rule.label.search("Add to cart")
 
 
 # -- YAML loading -------------------------------------------------------------
@@ -262,8 +265,8 @@ def test_from_file_parses_yaml(tmp_path):
     assert al.read_policy.is_allowed("anything.example.com", "/whatever")  # via overrides
     assert al.read_policy.is_allowed("google.com", "/")                    # via Tranco
     assert al.section("click").is_allowed("www.amazon.com", "/dp/X")
-    pat = al.label_pattern("click", "amazon.com")
-    assert pat is not None and pat.search("Add to Cart") and not pat.search("Buy Now")
+    (rule,) = al.rules_for("click", "amazon.com", "/dp/X")
+    assert rule.label.search("Add to Cart") and not rule.label.search("Buy Now")
 
 
 def test_from_file_all_comments_is_deny_all(tmp_path):
@@ -302,6 +305,87 @@ def test_override_matches_trailing_dot_and_www():
     assert al.read_policy.is_allowed("example.com", "/")
     assert al.read_policy.is_allowed("example.com.", "/")
     assert al.read_policy.is_allowed("www.example.com", "/")
+
+
+# -- page-scoped rules (write) ------------------------------------------------
+
+def test_write_label_is_scoped_per_page():
+    # amazon.com authorizes different controls on different pages: "add to cart"
+    # on a product page, "place your order" only in the checkout pipeline.
+    al = ActionAllowlist({"click": {"amazon.com": [
+        {"path": ["^/(dp|gp/product)/.*"], "label": "(?i)add to cart"},
+        {"path": ["^/gp/buy/.*"], "label": "(?i)place your order"},
+    ]}})
+
+    def labels(path):
+        return {r.label.pattern for r in al.rules_for("click", "amazon.com", path)}
+
+    assert labels("/dp/B0X") == {"(?i)add to cart"}
+    assert labels("/gp/buy/spc") == {"(?i)place your order"}
+    # A page matched by no rule authorizes nothing — the whole point.
+    assert labels("/gp/css/account/close") == set()
+
+
+def test_field_ids_are_page_scoped():
+    # A label-less field id is typable only on the page whose rule lists it.
+    al = ActionAllowlist({"write-text": {"amazon.com": [
+        {"path": ["^/gp/css/order-history.*"], "label": "(?i)tip",
+         "field_ids": ["tip-input"]},
+    ]}})
+    (rule,) = al.rules_for("write-text", "amazon.com", "/gp/css/order-history")
+    assert rule.field_ids == frozenset({"tip-input"})
+    assert al.rules_for("write-text", "amazon.com", "/dp/B0X") == []  # no id here
+
+
+def test_match_on_url_scopes_a_hash_router_spa():
+    # Every SPA page shares path "/"; only match_on: url can tell them apart.
+    al = ActionAllowlist({"click": {"secure.splitwise.com": [
+        {"path": [r"^/#/friends/\d+$"], "match_on": "url", "label": "(?i)save"},
+    ]}})
+    friend = al.rules_for("click", "secure.splitwise.com", "/", fragment="/friends/42")
+    assert len(friend) == 1
+    # The group page (same path "/") is NOT authorized.
+    assert al.rules_for("click", "secure.splitwise.com", "/", fragment="/groups/7") == []
+    # A path-only match (fragment dropped) would wrongly see them as identical.
+    assert al.rules_for("click", "secure.splitwise.com", "/") == []
+
+
+def test_match_on_url_read_override_scopes_spa_pages():
+    al = ActionAllowlist({"read": {"website_overrides": {"app.example.com": [
+        {"path": [r"^/#/reports/\d+$"], "match_on": "url"},
+    ]}}})
+    assert al.read_policy.is_allowed("app.example.com", "/", fragment="/reports/9")
+    assert not al.read_policy.is_allowed("app.example.com", "/", fragment="/admin")
+    # Listing the host demotes it from any Tranco grant to just these pages.
+    assert not al.read_policy.is_allowed("app.example.com", "/other")
+
+
+def test_page_rule_requires_label_for_write_actions():
+    with pytest.raises(ValueError, match="requires a 'label'"):
+        ActionAllowlist({"click": {"amazon.com": [{"path": ["^/dp/.*"]}]}})
+
+
+def test_page_rule_rejects_label_on_read_override():
+    with pytest.raises(ValueError, match="only meaningful for a write action"):
+        ActionAllowlist({"read": {"website_overrides": {
+            "x.com": [{"path": [".*"], "label": ".*"}]}}})
+
+
+def test_page_rule_rejects_unknown_match_on():
+    with pytest.raises(ValueError, match="match_on must be"):
+        ActionAllowlist({"click": {"amazon.com": [
+            {"path": [".*"], "match_on": "host", "label": ".*"}]}})
+
+
+def test_legacy_and_page_rule_forms_coexist():
+    # Legacy host-wide dict and the new page-rule list load side by side.
+    al = ActionAllowlist({"click": {
+        "ebay.com": {"paths": [".*"], "label": "(?i)add"},           # legacy
+        "amazon.com": [{"path": ["^/dp/.*"], "label": "(?i)add"}],   # page rules
+    }})
+    assert al.rules_for("click", "ebay.com", "/anything")
+    assert al.rules_for("click", "amazon.com", "/dp/x")
+    assert al.rules_for("click", "amazon.com", "/other") == []
 
 
 # The shipped sample (configs/samples/read_only_on_popular_websites.yaml) is

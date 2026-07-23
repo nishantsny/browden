@@ -52,7 +52,7 @@ async def test_shipped_default_denies_click_everywhere():
     __import__("importlib").reload(server)
     session = _session(url="https://www.amazon.com/dp/B0FBRRM2VQ", elements=[_atc_node()])
     with patch.object(server._store, "route", return_value=session):
-        with pytest.raises(ValidationError, match="not on allowlist"):
+        with pytest.raises(ValidationError, match="not allowed on this page"):
             await server.click("#add-to-cart-button", "h1")
     session.click.assert_not_awaited()
 
@@ -92,7 +92,7 @@ async def test_host_not_allowed_is_rejected():
     session = _session(url="https://evil.example.com/p", elements=[_atc_node()])
     with patch.object(server._store, "route", return_value=session), \
          patch.object(server, "_refresher", AllowlistRefresher.static(_ENABLED_ALLOWLIST)):
-        with pytest.raises(ValidationError, match="not on allowlist"):
+        with pytest.raises(ValidationError, match="not allowed on this page"):
             await server.click("#x", "h1")
     session.click.assert_not_awaited()
 
@@ -107,7 +107,7 @@ async def test_buy_now_rejected_by_site_label():
                        elements=[_atc_node(value="Buy Now")])
     with patch.object(server._store, "route", return_value=session), \
          patch.object(server, "_refresher", AllowlistRefresher.static(_ENABLED_ALLOWLIST)):
-        with pytest.raises(ValidationError, match="required label"):
+        with pytest.raises(ValidationError, match="does not match any click label"):
             await server.click("#buy-now", "h1")
     session.click.assert_not_awaited()
 
@@ -175,7 +175,7 @@ async def test_label_mismatch_for_site_is_rejected():
                        elements=[_atc_node(value="Add to bag")])
     with patch.object(server._store, "route", return_value=session), \
          patch.object(server, "_refresher", AllowlistRefresher.static(_ENABLED_ALLOWLIST)):
-        with pytest.raises(ValidationError, match="required label"):
+        with pytest.raises(ValidationError, match="does not match any click label"):
             await server.click("#x", "h1")
     session.click.assert_not_awaited()
 

@@ -23,7 +23,6 @@ from .intent import (
     is_fillable_control,
     label_matches,
 )
-from .read_gates import validate_url
 
 
 def check_action_host(allowlist: ActionAllowlist, action: str, url: str) -> None:
@@ -36,9 +35,16 @@ def check_action_host(allowlist: ActionAllowlist, action: str, url: str) -> None
     denied host is never even queried.
     """
     parsed = urlparse(url)
-    if allowlist.is_denied(parsed.hostname or "", parsed.path):
+    host = parsed.hostname or ""
+    if allowlist.is_denied(host, parsed.path):
         raise ValidationError(f"URL on denylist: {parsed.hostname}{parsed.path}")
-    validate_url(url, allowlist.section(action))  # raises if host not allowed
+    # Page-scoped: the host must have at least one rule whose page selector
+    # matches this exact URL, or the action is refused here — even on a host that
+    # authorizes the action on *other* pages.
+    if not allowlist.rules_for(action, host, parsed.path, parsed.query, parsed.fragment):
+        raise ValidationError(
+            f"no {action} rule authorizes {host}{parsed.path or '/'} — "
+            f"{action} not allowed on this page")
 
 
 def _single_node(found: dict, css_selector: str, refusal: str) -> dict:
@@ -82,18 +88,20 @@ def validate_click_target(allowlist: ActionAllowlist, url: str,
             "anchor uses a non-navigational scheme (mailto:/tel:/data:/…) — refusing to click")
     if kind == "nav":
         t = urlparse(target)
-        if not allowlist.read_policy.is_allowed(t.hostname or "", t.path):
+        if not allowlist.read_policy.is_allowed(t.hostname or "", t.path, t.query, t.fragment):
             raise ValidationError(
                 f"anchor target {t.hostname or target!r} is not on the read allowlist — refusing to click")
 
-    # Gate 3: the host's required label. Every listed host has one (config
-    # parsing enforces it); '.*' is how a host opts into any control. Fail closed
-    # if it is somehow absent rather than waving the click through.
-    host = urlparse(url).hostname or ""
-    label_re = allowlist.label_pattern("click", host)
-    if label_re is None or not label_matches(node, label_re):
+    # Gate 3: the label required for THIS page. A control is authorized when some
+    # page rule matching this URL has a label the control's text fully matches
+    # ('.*' opts a page into any control). rules_for already excludes non-matching
+    # pages, so a label allowed elsewhere on the host does not leak onto this one.
+    p = urlparse(url)
+    rules = allowlist.rules_for("click", p.hostname or "", p.path, p.query, p.fragment)
+    if not any(r.label is not None and label_matches(node, r.label) for r in rules):
         raise ValidationError(
-            f"control text does not match the required label for {host} — refusing to click")
+            f"control text does not match any click label configured for "
+            f"{p.hostname or ''}{p.path or '/'} — refusing to click")
 
 
 def validate_write_text_target(allowlist: ActionAllowlist, url: str,
@@ -111,14 +119,16 @@ def validate_write_text_target(allowlist: ActionAllowlist, url: str,
             "selected element is not a fillable text control (or is a "
             "hidden/disabled/readonly/decoy element) — refusing to insert text")
 
-    # Gate 3: authorize the field either by its visible label (the host's required
-    # write-text label regex) OR — for a label-less box the operator has named
-    # explicitly — by its exact id/name in the host's field_ids. Fail closed: with
-    # no label configured and no id match, nothing is typed.
-    host = urlparse(url).hostname or ""
-    label_re = allowlist.label_pattern("write-text", host)
-    label_ok = label_re is not None and field_label_matches(node, label_re)
-    id_ok = field_id_matches(node, allowlist.field_ids("write-text", host))
+    # Gate 3: authorize the field against the page rules matching THIS URL —
+    # either by its visible label (a rule's write-text label regex) OR, for a
+    # label-less box the operator named explicitly, by its exact id/name in that
+    # same rule's field_ids. Fail closed: no matching rule => nothing is typed, so
+    # a field authorized on another page of the host does not leak onto this one.
+    p = urlparse(url)
+    rules = allowlist.rules_for("write-text", p.hostname or "", p.path, p.query, p.fragment)
+    label_ok = any(r.label is not None and field_label_matches(node, r.label) for r in rules)
+    id_ok = any(field_id_matches(node, r.field_ids) for r in rules)
     if not (label_ok or id_ok):
         raise ValidationError(
-            f"field label does not match the required write-text label for {host} — refusing to insert text")
+            f"field label does not match any write-text rule for "
+            f"{p.hostname or ''}{p.path or '/'} — refusing to insert text")
