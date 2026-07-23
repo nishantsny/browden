@@ -481,6 +481,27 @@ class SeleniumChromeBackend(WebNavigatorBackend):
         except NoSuchWindowException:
             raise TabNotFoundError("there is no active tab") from None
 
+    def document_url(self) -> str:
+        """URL of the *focused document* (``document.URL``), for policy gating.
+
+        Unlike ``current_url`` — the top-level browsing context's URL, i.e. what the
+        address bar shows — this reflects whichever document the driver is currently
+        focused on. So once focus is inside an iframe, the read/write gates see the
+        frame's own URL rather than the top page's; when focus is at the top the two
+        are identical.
+
+        Falls back to ``current_url`` when script can't run in the focused document
+        (e.g. a ``chrome://`` internal page disallows ``execute_script``) — those URLs
+        are handled by the read policy's special cases anyway.
+        """
+        drv = self._drv()
+        try:
+            return drv.execute_script("return document.URL")
+        except NoSuchWindowException:
+            raise TabNotFoundError("there is no active tab") from None
+        except Exception:
+            return self.current_url()
+
     def screenshot(self) -> bytes:
         try:
             return self._drv().get_screenshot_as_png()

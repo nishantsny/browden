@@ -36,7 +36,7 @@ def _atc_node(value="Add to cart", text="", **attrs):
 
 def _session(*, url, elements):
     s = MagicMock()
-    s.current_url = AsyncMock(return_value=url)
+    s.document_url = AsyncMock(return_value=url)
     s.query_selector_all = AsyncMock(
         return_value={"total_count": len(elements), "elements": elements})
     s.click = AsyncMock(

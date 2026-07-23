@@ -353,7 +353,7 @@ async def test_dom_tools_delegate_with_kwargs():
     import browden.mcp.server as server
     importlib.reload(server)
     session = _fake_session(
-        current_url="https://www.google.com/",  # read-allowed so the H2 gate passes
+        document_url="https://www.google.com/",  # read-allowed so the H2 gate passes
         get_element_by_id={"found": False, "element": None},
         query_selector_all={"total_count": 0, "elements": []},
         force_reload_tab={"reloaded": True},
@@ -384,7 +384,7 @@ async def test_screenshot_tool_returns_image():
     import browden.mcp.server as server
     importlib.reload(server)
     png = b"\x89PNG\r\n\x1a\n" + b"fakepixels"
-    session = _fake_session(current_url="https://www.google.com/", screenshot=png)
+    session = _fake_session(document_url="https://www.google.com/", screenshot=png)
     with patch.object(server._store, "route", return_value=session):
         result = await server.screenshot("pre-h1")
     session.screenshot.assert_awaited_once_with(id="pre-h1")
@@ -399,7 +399,7 @@ async def test_screenshot_tool_returns_tab_gone_envelope():
     # tab-gone envelope before ever screenshotting (H2).
     import browden.mcp.server as server
     importlib.reload(server)
-    session = _fake_session(current_url=None)
+    session = _fake_session(document_url=None)
     with patch.object(server._store, "route", return_value=session):
         result = await server.screenshot("pre-h9")
     assert result == {"error": "tab pre-h9 is no longer open — call list_tabs for current tabs",
@@ -452,7 +452,7 @@ async def test_read_tool_refuses_tab_on_non_allowlisted_host():
     from browden.mcp.validator import ValidationError
     import browden.mcp.server as server
     importlib.reload(server)
-    session = _fake_session(current_url="https://nonexistent-xyz-99.test/secret",
+    session = _fake_session(document_url="https://nonexistent-xyz-99.test/secret",
                             query_selector={"found": True})
     with patch.object(server._store, "route", return_value=session):
         with pytest.raises(ValidationError, match="read allowlist"):

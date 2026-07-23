@@ -98,7 +98,13 @@ class WebNavigatorBackend(ABC):
 
     @abstractmethod
     def current_url(self) -> str:
-        """Return the URL of the focused tab. Caller focuses the tab first."""
+        """Return the top-level URL of the focused tab (address-bar URL). Caller focuses first."""
+
+    @abstractmethod
+    def document_url(self) -> str:
+        """Return the focused *document*'s URL (``document.URL``) — the iframe's own URL
+        when focus is inside a frame, else the top URL. Used by the read/write gates so
+        they validate the document actually being acted on. Caller focuses first."""
 
     @abstractmethod
     def screenshot(self) -> bytes:
