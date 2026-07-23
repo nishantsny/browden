@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 #
-# deploy.sh — redeploy browden to the live systemd --user service from
-# origin/main, then run the e2e suite as a post-deploy smoke test.
+# deploy.sh — redeploy browden to the live systemd --user service from the deploy
+# branch (origin/main by default), then run the e2e suite as a post-deploy smoke test.
 #
 # Pipeline (fails fast — any step aborts with a non-zero exit):
 #   0. preflight  — release checkout / venv / config / systemctl all present
-#   1. fast-forward the release checkout to origin/main
+#   1. fast-forward the release checkout to origin/$BROWDEN_DEPLOY_BRANCH (default main)
 #   2. sync the release venv to the pulled pyproject deps (uv pip install -e),
 #      so a ff-pull that ADDED a runtime dependency doesn't crash-loop the
 #      service on import — same editable install setup/onetime_setup.py does
@@ -14,7 +14,7 @@
 #   4. restart the service + health-check (active AND listening on the port)
 #   5. run the e2e suite from the deployed tree (post-deploy verification)
 #
-# Idempotent: safe to re-run even when already at origin/main (it redeploys).
+# Idempotent: safe to re-run even when already at the deploy branch (it redeploys).
 #
 # The Tranco snapshot lives beside the config in ~/.browden (NOT in the checkout),
 # so the release tree stays clean and the ff-pull just works — see the deploy
@@ -23,6 +23,9 @@
 #
 # Overridable via env (defaults match the live host):
 #   BROWDEN_RELEASE_DIR  release checkout to deploy FROM  ($HOME/projects/browser-guard-release)
+#   BROWDEN_DEPLOY_BRANCH  branch to deploy (default main); the checkout must be ON
+#                          this branch. Lets you smoke-test a feature branch on the
+#                          live service before merge; --release stays main-only.
 #   BROWDEN_ALLOWLIST    allowlist config the service loads (~/.browden/allowlist.yaml)
 #   BROWDEN_SERVICE      systemd --user unit name           (browden.service)
 #   BROWDEN_PORT         port to health-check              (derived from the unit's MCP_PORT)
@@ -48,6 +51,10 @@ set -euo pipefail
 RELEASE_DIR="${BROWDEN_RELEASE_DIR:-$HOME/projects/browser-guard-release}"
 CONFIG="${BROWDEN_ALLOWLIST:-$HOME/.browden/allowlist.yaml}"
 SERVICE="${BROWDEN_SERVICE:-browden.service}"
+# Branch to deploy. Defaults to main; override to smoke-test a feature branch on
+# the live service before it merges (the checkout must be on that branch). A
+# GitHub release (--release) is refused for anything but main — see preflight.
+DEPLOY_BRANCH="${BROWDEN_DEPLOY_BRANCH:-main}"
 # Health-check the port the live unit actually binds — read MCP_PORT from its
 # Environment rather than hardcode a literal, so this can never drift from the
 # service. Overridable via BROWDEN_PORT; validated (non-empty) in preflight.
@@ -98,7 +105,8 @@ if [ -n "$RELEASE_TAG" ]; then
 fi
 
 branch="$(git -C "$RELEASE_DIR" rev-parse --abbrev-ref HEAD)"
-[ "$branch" = "main" ] || die "release checkout is on '$branch', not 'main' — refusing to deploy"
+[ "$branch" = "$DEPLOY_BRANCH" ] \
+    || die "release checkout is on '$branch', not '$DEPLOY_BRANCH' (BROWDEN_DEPLOY_BRANCH) — refusing to deploy"
 
 # Refuse to deploy on top of local *tracked* edits (they'd block the ff-pull).
 [ -z "$(git -C "$RELEASE_DIR" status --porcelain --untracked-files=no)" ] \
@@ -106,13 +114,13 @@ branch="$(git -C "$RELEASE_DIR" rev-parse --abbrev-ref HEAD)"
 
 before="$(git -C "$RELEASE_DIR" rev-parse --short HEAD)"
 
-# ---- 1. fast-forward to origin/main --------------------------------------
-log "Fetching + fast-forwarding $RELEASE_DIR to origin/main"
-git -C "$RELEASE_DIR" fetch --quiet origin main
-git -C "$RELEASE_DIR" merge --ff-only origin/main
+# ---- 1. fast-forward to origin/$DEPLOY_BRANCH ----------------------------
+log "Fetching + fast-forwarding $RELEASE_DIR to origin/$DEPLOY_BRANCH"
+git -C "$RELEASE_DIR" fetch --quiet origin "$DEPLOY_BRANCH"
+git -C "$RELEASE_DIR" merge --ff-only "origin/$DEPLOY_BRANCH"
 after="$(git -C "$RELEASE_DIR" rev-parse --short HEAD)"
 if [ "$before" = "$after" ]; then
-    log "Already at origin/main ($after) — no new commits; redeploying anyway"
+    log "Already at origin/$DEPLOY_BRANCH ($after) — no new commits; redeploying anyway"
 else
     log "Advanced $before -> $after"
     git -C "$RELEASE_DIR" --no-pager log --oneline "$before..$after"
