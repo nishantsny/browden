@@ -12,6 +12,7 @@ from browden.mcp.validator import (
     ValidationError,
     check_action_host,
     validate_click_target,
+    validate_press_key_target,
     validate_write_text_target,
 )
 
@@ -139,6 +140,81 @@ def test_write_text_non_text_control_rejected():
 def test_write_text_label_mismatch_rejected():
     with pytest.raises(ValidationError, match="does not match any write-text rule"):
         validate_write_text_target(_ALLOWLIST, AMAZON, "#x", _found(_field(label="Coupon code")))
+
+# -- validate_press_key_target (Gates 2, 2b, 3) ------------------------------
+
+# cronometer.com press-key enabled: Enter + up/down arrows on the app path '/'.
+_PK = ActionAllowlist({
+    "read": {"enabled": True, "tranco": {"enabled": False},
+             "website_overrides": {"cronometer.com": [".*"]}},
+    "press-key": {"cronometer.com": [
+        {"path": ["^/$"], "label": ".*", "keys": ["Enter", "ArrowDown", "ArrowUp"]},
+    ]},
+})
+# same, but the rule only admits rows whose text starts with "Fried".
+_PK_LABELLED = ActionAllowlist({
+    "read": {"enabled": True, "tranco": {"enabled": False},
+             "website_overrides": {"cronometer.com": [".*"]}},
+    "press-key": {"cronometer.com": [
+        {"path": ["^/$"], "label": r"(?i)fried.*", "keys": ["Enter"]},
+    ]},
+})
+CRONO = "https://cronometer.com/"
+
+
+def _row(text="Fried Eggs, Whole Egg", tag="tr", **attrs):
+    return {"tag": tag, "id": None, "classes": [],
+            "attributes": {"tabindex": "0", **attrs}, "text": text}
+
+
+def test_press_key_host_not_on_section_rejected():
+    with pytest.raises(ValidationError, match="no press-key rule authorizes"):
+        check_action_host(_PK, "press-key", "https://evil.example.com/p")
+
+
+def test_press_key_happy_path_enter():
+    validate_press_key_target(_PK, CRONO, "tr", _found(_row()), "Enter")  # no raise
+
+
+def test_press_key_arrow_navigation_allowed():
+    validate_press_key_target(_PK, CRONO, "tr", _found(_row()), "ArrowDown")  # no raise
+
+
+def test_press_key_non_focusable_rejected():
+    div = {"tag": "div", "id": None, "classes": [], "attributes": {}, "text": "row"}
+    with pytest.raises(ValidationError, match="not a focusable control"):
+        validate_press_key_target(_PK, CRONO, "div", _found(div), "Enter")
+
+
+def test_press_key_character_key_rejected():
+    # A character key is never allowed — that's write-text's job.
+    with pytest.raises(ValidationError, match="not an allowed control key"):
+        validate_press_key_target(_PK, CRONO, "tr", _found(_row()), "a")
+
+
+def test_press_key_unlisted_control_key_rejected():
+    # Escape is a valid control key, but this rule only authorizes Enter/arrows.
+    with pytest.raises(ValidationError, match="no press-key rule authorizes"):
+        validate_press_key_target(_PK, CRONO, "tr", _found(_row()), "Escape")
+
+
+def test_press_key_label_mismatch_rejected():
+    # The labelled rule only admits rows starting with "Fried".
+    validate_press_key_target(_PK_LABELLED, CRONO, "tr", _found(_row("Fried Eggs")), "Enter")
+    with pytest.raises(ValidationError, match="no press-key rule authorizes"):
+        validate_press_key_target(_PK_LABELLED, CRONO, "tr", _found(_row("Avocado, raw")), "Enter")
+
+
+def test_press_key_decoy_rejected():
+    node = _row(**{"data-target-audience": "ai-agent"})
+    with pytest.raises(ValidationError, match="decoy"):
+        validate_press_key_target(_PK, CRONO, "tr", _found(node), "Enter")
+
+
+def test_press_key_ambiguous_rejected():
+    with pytest.raises(ValidationError, match="ambiguous"):
+        validate_press_key_target(_PK, CRONO, "tr", _found(_row(), _row()), "Enter")
+
 
 # The read-tool gate (is_url_allowed / ensure_url_is_in_allowlist) now lives in
 # read_gates.py and is covered by test_read_gates.py.

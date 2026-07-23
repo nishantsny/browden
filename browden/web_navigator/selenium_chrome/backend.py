@@ -22,6 +22,24 @@ from ...dependencies.selenium import (
 from ..interface import TabNotFoundError, WebNavigatorBackend
 from ..utils.network_utils import get_free_port
 
+# W3C `key` value -> the Selenium `Keys` constant that dispatches it. Covers
+# exactly the control keys the press-key gate authorizes (validator.ACTIVATION_KEYS);
+# a key that reaches here outside this map is a caller/gate mismatch and raises.
+_SELENIUM_KEYS = {
+    "Enter": Keys.ENTER,
+    "Space": Keys.SPACE,
+    "Tab": Keys.TAB,
+    "Escape": Keys.ESCAPE,
+    "ArrowUp": Keys.ARROW_UP,
+    "ArrowDown": Keys.ARROW_DOWN,
+    "ArrowLeft": Keys.ARROW_LEFT,
+    "ArrowRight": Keys.ARROW_RIGHT,
+    "Home": Keys.HOME,
+    "End": Keys.END,
+    "PageUp": Keys.PAGE_UP,
+    "PageDown": Keys.PAGE_DOWN,
+}
+
 
 def _switch(drv, handle: str) -> None:
     """Focus a tab by id, translating Selenium's missing-window error.
@@ -542,6 +560,33 @@ class SeleniumChromeBackend(WebNavigatorBackend):
             "inserted": True,
             "value": value,
             "handle": drv.current_window_handle,
+            "url": drv.current_url,
+            "title": drv.title,
+        }
+
+    def press_key_element(self, css_selector: str, key: str) -> dict:
+        drv = self._drv()
+        try:
+            url_before = drv.current_url
+            el = self._resolve_one_visible(drv, css_selector)
+        except NoSuchWindowException:
+            raise TabNotFoundError("there is no active tab to press a key in") from None
+        selenium_key = _SELENIUM_KEYS.get(key)
+        if selenium_key is None:
+            # The gate only lets control keys through; anything else is a bug.
+            raise ValueError(f"unsupported key {key!r}")
+        # Focus by reference (not a coordinate click, so no hit-testing — an
+        # overlay can't intercept it), then dispatch the key to the now-active
+        # element. send_keys targets `el`, which the explicit focus() guarantees is
+        # focused even for non-input controls (a <tr>/<div> a11y widget).
+        drv.execute_script("arguments[0].focus();", el)
+        el.send_keys(selenium_key)
+        _wait_for_title(drv)
+        return {
+            "pressed": True,
+            "key": key,
+            "handle": drv.current_window_handle,
+            "url_before": url_before,
             "url": drv.current_url,
             "title": drv.title,
         }

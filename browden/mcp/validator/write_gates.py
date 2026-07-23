@@ -16,11 +16,13 @@ from urllib.parse import urlparse
 from .allowlist import ActionAllowlist
 from .errors import ValidationError
 from .intent import (
+    ACTIVATION_KEYS,
     classify_anchor_target,
     field_id_matches,
     field_label_matches,
     is_clickable_control,
     is_fillable_control,
+    is_focusable_control,
     label_matches,
 )
 
@@ -132,3 +134,43 @@ def validate_write_text_target(allowlist: ActionAllowlist, url: str,
         raise ValidationError(
             f"field label does not match any write-text rule for "
             f"{p.hostname or ''}{p.path or '/'} — refusing to insert text")
+
+
+def validate_press_key_target(allowlist: ActionAllowlist, url: str,
+                              css_selector: str, found: dict, key: str) -> None:
+    """Gates 2, 2b and 3 for ``press-key`` — focusability, control-key, then label+key.
+
+    ``url`` is the tab's live URL; ``found`` is the ``query_selector_all(limit=2)``
+    result for ``css_selector``; ``key`` is the W3C ``key`` value the caller wants
+    to send. Raises :class:`ValidationError` on the first failing gate; returns
+    ``None`` when the key press is authorized. Gate 1 (host + page section) is run
+    by :func:`check_action_host` in the tool, exactly as for ``click``.
+    """
+    # Gate 2: the element must be a single, real, visible, non-decoy *focusable*
+    # control (natively focusable or tabindex) — the keyboard analogue of the
+    # is_clickable_control integrity check.
+    node = _single_node(found, css_selector, "refusing to press a key")
+    if not is_focusable_control(node):
+        raise ValidationError(
+            "selected element is not a focusable control (or is a "
+            "hidden/disabled/decoy element) — refusing to press a key")
+
+    # Gate 2b: only control keys ever go through press-key. Character keys are
+    # refused outright — typing text is write-text's job (gated by field label);
+    # letting characters through here would be a text-entry channel that skips it.
+    if key not in ACTIVATION_KEYS:
+        raise ValidationError(
+            f"key {key!r} is not an allowed control key — press-key sends only "
+            f"{sorted(ACTIVATION_KEYS)}; type text with insert_text instead")
+
+    # Gate 3: some page rule matching THIS url must both admit the control (its
+    # visible-text label matches) AND list this key. Authority is per page and per
+    # key — a rule that allows Enter on the picker doesn't thereby allow Escape,
+    # and one that allows a control here does not leak onto another page.
+    p = urlparse(url)
+    rules = allowlist.rules_for("press-key", p.hostname or "", p.path, p.query, p.fragment)
+    if not any(r.label is not None and label_matches(node, r.label) and key in r.keys
+               for r in rules):
+        raise ValidationError(
+            f"no press-key rule authorizes key {key!r} on this control for "
+            f"{p.hostname or ''}{p.path or '/'} — refusing to press a key")

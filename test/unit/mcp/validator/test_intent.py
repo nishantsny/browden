@@ -3,10 +3,12 @@ import re
 import pytest
 
 from browden.mcp.validator import (
+    ACTIVATION_KEYS,
     classify_anchor_target,
     field_label_matches,
     is_clickable_control,
     is_fillable_control,
+    is_focusable_control,
     label_matches,
 )
 
@@ -245,3 +247,50 @@ def test_classify_cross_domain_is_nav_not_blocked():
 @pytest.mark.parametrize("href", ["mailto:a@b.com", "tel:+15551234", "data:text/html,hi", "file:///etc/passwd"])
 def test_classify_non_navigational_schemes_blocked(href):
     assert classify_anchor_target(node("a", text="x", href=href), CUR) == ("blocked", None)
+
+
+# -- press-key: integrity of a FOCUSABLE control -----------------------------
+
+def test_natively_focusable_tags_are_focusable():
+    for tag in ("input", "button", "select", "textarea"):
+        assert is_focusable_control(node(tag)), tag
+
+
+def test_anchor_focusable_only_with_href():
+    assert is_focusable_control(node("a", text="Home", href="/"))
+    assert not is_focusable_control(node("a", text="Home"))   # no href → not focusable
+
+
+def test_tabindex_makes_generic_element_focusable():
+    # The motivating case: a food-search result row is a <tr tabindex="0"> the
+    # click gate refuses, but which IS keyboard-focusable.
+    assert is_focusable_control(node("tr", text="Fried Eggs, Whole Egg", tabindex="0"))
+    assert is_focusable_control(node("div", text="option", tabindex="-1"))
+    assert is_focusable_control(node("li", text="row", tabindex="0", role="option"))
+
+
+def test_generic_element_without_tabindex_not_focusable():
+    # A bare <div onclick> that a coordinate click could hit is NOT focusable — the
+    # whole point of the narrower press-key reach.
+    assert not is_focusable_control(node("div", text="click me"))
+    assert not is_focusable_control(node("tr", text="row"))
+    assert not is_focusable_control(node("span", text="x", onclick="go()"))
+
+
+def test_focusable_still_rejects_integrity_failures():
+    # tabindex doesn't rescue a hidden/disabled/decoy element.
+    assert not is_focusable_control(node("tr", text="row", tabindex="0", **{"aria-hidden": "true"}))
+    assert not is_focusable_control(node("input", disabled=""))
+    assert not is_focusable_control(node("div", tabindex="0", **{"display:none": ""}, style="display:none"))
+    assert not is_focusable_control(
+        node("tr", text="row", tabindex="0", **{"data-target-audience": "ai-agent"}))
+    assert not is_focusable_control(None)
+    assert not is_focusable_control({})
+
+
+def test_activation_keys_are_control_keys_only():
+    # The universe press-key may ever send: activation/navigation, never characters.
+    assert "Enter" in ACTIVATION_KEYS and "ArrowDown" in ACTIVATION_KEYS
+    assert "Escape" in ACTIVATION_KEYS and "Tab" in ACTIVATION_KEYS
+    for ch in ("a", "A", "1", " ", "x", "Delete", "Backspace"):
+        assert ch not in ACTIVATION_KEYS, ch
