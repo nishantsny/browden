@@ -40,7 +40,7 @@ too so you fail fast (before a ~7-minute run) and can offer to fix it.
 ## Steps
 
 1. **Preflight (read-only).** Work against the release worktree
-   (`${BROWDEN_RELEASE_DIR:-/home/buddy/projects/browser-guard-release}`).
+   (`${BROWDEN_RELEASE_DIR:-$HOME/projects/browser-guard-release}`).
    `git fetch origin main` and report: current `origin/main` HEAD, `pyproject`
    version, latest `git tag`, the `## [Unreleased]` + newest version section of
    `CHANGELOG.md`, and that `.github/workflows/release.yml` exists on main. If the

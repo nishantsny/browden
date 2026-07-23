@@ -22,7 +22,7 @@
 # edits (which would block the ff-pull) abort the deploy.
 #
 # Overridable via env (defaults match the live host):
-#   BROWDEN_RELEASE_DIR  release checkout to deploy FROM  (/home/buddy/projects/browser-guard-release)
+#   BROWDEN_RELEASE_DIR  release checkout to deploy FROM  ($HOME/projects/browser-guard-release)
 #   BROWDEN_ALLOWLIST    allowlist config the service loads (~/.browden/allowlist.yaml)
 #   BROWDEN_SERVICE      systemd --user unit name           (browden.service)
 #   BROWDEN_PORT         port the service listens on         (8000)
@@ -45,7 +45,7 @@
 # created — nothing is pushed.
 set -euo pipefail
 
-RELEASE_DIR="${BROWDEN_RELEASE_DIR:-/home/buddy/projects/browser-guard-release}"
+RELEASE_DIR="${BROWDEN_RELEASE_DIR:-$HOME/projects/browser-guard-release}"
 CONFIG="${BROWDEN_ALLOWLIST:-$HOME/.browden/allowlist.yaml}"
 SERVICE="${BROWDEN_SERVICE:-browden.service}"
 PORT="${BROWDEN_PORT:-8000}"
