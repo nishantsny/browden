@@ -74,6 +74,14 @@ issues:
   with `"*": [".*"]`, or add a host/label to the `click` / `write-text`
   allowlists, the resulting access is intended behavior. Loosen the config and
   you own the consequences.
+- **Config the agent's own host tools can rewrite.** browden enforces the policy
+  it loads; it cannot stop a process on the same host from editing that policy
+  first. If the agent can write to `~/.browden/allowlist.yaml`, the Tranco/PSL
+  snapshots, or browden's source — via its edit tools, a shell, or any script —
+  it can widen its own access, and agent permission rules are a speed bump, not
+  a boundary. Making those files root-owned and read-only (see
+  [Protecting browden's own files](README.md#protecting-browdens-own-files)) is
+  the deployment's job, not browden's.
 - **You point it at your real Chrome profile.** Reusing your logged-in profile
   means the agent can read your logged-in pages — that's the documented
   trade-off, not a leak.

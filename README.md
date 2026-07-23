@@ -217,6 +217,28 @@ The "allowlist" policy has **three layers**, evaluated in order (first match win
 
 To refresh the Tranco snapshot, use `python3 setup/fetch_tranco.py` and restart the MCP server.
 
+### Protecting browden's own files
+
+The policy only holds if the agent can't rewrite it. That means the allowlist,
+the Tranco/PSL snapshots next to it, *and* browden's source — an agent that edits
+any of them widens its own access. Setup prints both steps at the end:
+
+1. **Deny agent edits to every browden file** (`~/.browden/**` and the install
+   tree) in your agent's settings — `"ask"` if you'd rather approve each edit,
+   never auto-approve.
+2. **Lock them down at the OS level.** Permission rules only gate the agent's
+   *file* tools; any shell it runs (`Bash`, `python -c`, `sed -i`) writes to them
+   directly, and command rules are trivially rephrased around. Make the files
+   root-owned and read-only instead — browden only ever reads them:
+
+   ```bash
+   sudo chown -R root:root ~/.browden
+   sudo find ~/.browden -type d -exec chmod 755 {} +   # +x = traverse, keep it
+   sudo find ~/.browden -type f -exec chmod 444 {} +   # data, never executable
+   ```
+
+   Afterwards, refreshing the snapshots takes `sudo`.
+
 ### Sample allowlists
 - [`read_only_on_popular_websites.yaml`](configs/samples/read_only_on_popular_websites.yaml) — the shipped default: Tranco reads, no writes.
 - [`allow_grocery_cart_manipulation.yaml`](configs/samples/allow_grocery_cart_manipulation.yaml) — a worked example enabling `click`/`write-text` on a few storefronts.
@@ -282,7 +304,9 @@ into it (via `uv sync --frozen`, pinned by the committed `uv.lock`; falls back
 to stdlib `venv` + `pip` when uv is absent), copies the sample
 allowlist to `~/.browden/allowlist.yaml` (never overwriting an existing one),
 fetches the Tranco snapshot next to it, and prints the JSON block to add to your
-agent. It's idempotent, and **defaults to stdio** (shown in
+agent plus the hardening steps in
+[Protecting browden's own files](#protecting-browdens-own-files). It's
+idempotent, and **defaults to stdio** (shown in
 [Quick start](#quick-start)) — pass `--mode service` for the persistent SSE
 service below.
 
