@@ -119,3 +119,51 @@ def test_stdio_config_includes_display_on_linux(tmp_path):
 def test_stdio_config_omits_env_without_display(tmp_path):
     cfg = json.loads(ots.stdio_config("browden", "py", tmp_path / "a.yaml", None))
     assert "env" not in cfg["mcpServers"]["browden"]
+
+
+# -- hardening advisories ----------------------------------------------------
+
+def test_rule_path_spells_home_and_absolute_paths():
+    # Permission rules read a bare path as settings-relative: home paths need
+    # "~/", anything else a leading "//".
+    assert ots._rule_path(Path.home() / ".browden") == "~/.browden"
+    assert ots._rule_path(Path("/opt/browden")) == "//opt/browden"
+
+
+def test_guard_files_note_denies_every_browden_file(tmp_path):
+    config_dir = tmp_path / "cfg"
+    note = ots.guard_files_note(config_dir, config_dir / "allowlist.yaml", tmp_path / "repo")
+    assert '"deny"' in note
+    assert f'"Edit({ots._rule_path(config_dir)}/**)"' in note   # allowlist + snapshots
+    assert f'"Edit({ots._rule_path(tmp_path / "repo")}/**)"' in note  # browden's code
+    assert '"ask"' in note                                      # the softer alternative
+    json.loads(note[note.index("{"):note.rindex("}") + 1])      # the block is valid JSON
+
+
+def test_guard_files_note_names_an_allowlist_kept_outside_the_config_dir(tmp_path):
+    elsewhere = tmp_path / "elsewhere" / "allowlist.yaml"
+    note = ots.guard_files_note(tmp_path / "cfg", elsewhere, tmp_path / "repo")
+    assert f'"Edit({ots._rule_path(elsewhere)})"' in note
+
+
+def test_guard_files_note_skips_the_redundant_allowlist_rule(tmp_path):
+    # Inside the config dir the "/**" rule already covers it — don't repeat it.
+    config_dir = tmp_path / "cfg"
+    note = ots.guard_files_note(config_dir, config_dir / "allowlist.yaml", tmp_path / "repo")
+    assert f'"Edit({ots._rule_path(config_dir / "allowlist.yaml")})"' not in note
+
+
+def test_lockdown_note_gives_posix_root_ownership_commands(monkeypatch, tmp_path):
+    monkeypatch.setattr(ots.os, "name", "posix")
+    note = ots.lockdown_note(tmp_path / "cfg", tmp_path / "repo")
+    assert f"sudo chown -R root:root {tmp_path / 'cfg'}" in note
+    assert "-type f -exec chmod 444" in note   # data files: read-only, never executable
+    assert "-type d -exec chmod 755" in note   # dirs keep +x, or nothing can traverse
+    assert "Bash" in note                      # says why the rules alone don't hold
+
+
+def test_lockdown_note_gives_icacls_on_windows(monkeypatch, tmp_path):
+    monkeypatch.setattr(ots.os, "name", "nt")
+    note = ots.lockdown_note(tmp_path / "cfg", tmp_path / "repo")
+    assert "icacls" in note
+    assert "chown" not in note

@@ -18,7 +18,10 @@ What it does, in order:
      In --mode service, installs a background service that serves SSE on
      <port>, pinned to that venv, using the host's native service manager:
      systemd (Linux), launchd (macOS), or Task Scheduler (Windows).
-  5. Prints the JSON block to add to your agent's settings by hand.
+  5. Prints the JSON block to add to your agent's settings by hand, then two
+     hardening notes: the permission rules that keep the agent from editing any
+     browden file, and how to make those files root-owned/read-only so a shell
+     or script can't rewrite what the rules only ask about.
 
 Run it again anytime: the venv/install and config copy are idempotent and the
 service steps re-apply cleanly. Use --service-name/--port to stand up a second
@@ -226,23 +229,99 @@ def main(argv: list[str] | None = None) -> None:
         f"{snapshot_path(config_dir)} (not committed). Refresh it anytime with:\n\n"
         f"    python3 setup/fetch_tranco.py --config-dir {config_dir}\n"
     )
-    print(guard_allowlist_note(allowlist))
+    print(guard_files_note(config_dir, allowlist, REPO_ROOT))
+    print(lockdown_note(config_dir, REPO_ROOT))
 
 
-def guard_allowlist_note(allowlist: Path) -> str:
-    """Advisory text nudging the user to gate edits to the allowlist file.
+def _rule_path(path: Path) -> str:
+    """Render ``path`` the way agent permission rules want it spelled.
 
-    The allowlist is the security boundary: an agent that can silently rewrite
-    it can widen its own read/click permissions. So — at the very least — the
-    agent's settings should require approval ("ask") before *every* edit to it.
+    Claude Code matches file rules gitignore-style: ``~/`` for a home-relative
+    path, a leading ``//`` for one anchored at the filesystem root. Anything
+    else would be read as relative to the settings file.
+    """
+    home = Path.home()
+    try:
+        return "~/" + path.relative_to(home).as_posix()
+    except ValueError:
+        return "//" + path.as_posix().lstrip("/")
+
+
+def guard_files_note(config_dir: Path, allowlist: Path, repo_root: Path) -> str:
+    """Advisory text nudging the user to gate agent edits to *every* browden file.
+
+    The allowlist is the security boundary, but it is not the only file that
+    decides what the agent may do: the Tranco and PSL snapshots feed the read
+    gate, and browden's own source is what enforces all of it. An agent that can
+    silently rewrite any of them can widen its own read/click permissions. So
+    the agent's settings should refuse those edits outright ("deny"), or at the
+    very least require approval ("ask") before every one — never auto-approve.
     Returned as a string (not printed) so it stays easy to test and reuse.
     """
+    rules = [f'"Edit({_rule_path(config_dir)}/**)"']   # allowlist + Tranco/PSL snapshots
+    if allowlist.parent != config_dir:                 # an allowlist kept elsewhere
+        rules.append(f'"Edit({_rule_path(allowlist)})"')
+    rules.append(f'"Edit({_rule_path(repo_root)}/**)"')  # the code enforcing the policy
+    body = ",\n          ".join(rules)
     return (
-        f"\nSecurity tip (recommended): {allowlist} is what constrains the "
-        f"agent. Keep it from quietly widening its own access by marking edits "
-        f"to it as always-ask in your agent's settings — at the very least "
-        f'"ask" before every edit, never auto-approve. For Claude Code, add a '
-        f'permissions rule like:\n\n    "ask": ["Edit({allowlist})"]\n'
+        f"\nSecurity tip (recommended): every browden file is part of the "
+        f"perimeter — {allowlist} decides what the agent may visit and click, "
+        f"the Tranco/PSL snapshots in {config_dir} feed the read gate, and the "
+        f"code in {repo_root} enforces both. Stop the agent from quietly "
+        f"widening its own access by denying edits to all of them in your "
+        f'agent\'s settings (swap "deny" for "ask" if you do want to edit them '
+        f"through the agent, with approval every time — never auto-approve). "
+        f"For Claude Code, in ~/.claude/settings.json:\n\n"
+        f"    {{\n"
+        f'      "permissions": {{\n'
+        f'        "deny": [\n'
+        f"          {body}\n"
+        f"        ]\n"
+        f"      }}\n"
+        f"    }}\n"
+    )
+
+
+def lockdown_note(config_dir: Path, repo_root: Path) -> str:
+    """Advisory: permission rules bind file tools only — the OS is the real lock.
+
+    Those rules constrain the agent's *edit* tools. They do not constrain what a
+    shell or a script does once launched: ``Bash``, a python one-liner, an
+    editor, or any subprocess can rewrite the same files, and command rules are
+    matched on text that is trivially rephrased (``sed -i``, ``sh -c``, ``tee``,
+    a here-doc). The only enforcement that holds regardless of how the write is
+    spelled is filesystem permissions — make browden's files root-owned and
+    read-only to everyone else, so no unprivileged process can touch them.
+    """
+    posix = (
+        f"    sudo chown -R root:root {config_dir}\n"
+        f"    sudo find {config_dir} -type d -exec chmod 755 {{}} +\n"
+        f"    sudo find {config_dir} -type f -exec chmod 444 {{}} +\n"
+    )
+    windows = (
+        f"    icacls \"{config_dir}\" /inheritance:r "
+        f'/grant "Administrators:(OI)(CI)F" /grant "Users:(OI)(CI)RX" /T\n'
+    )
+    cmds = windows if os.name == "nt" else posix
+    return (
+        "\nAdvisory (the rules above are not a lock): agent permission rules "
+        "only gate the agent's own file tools. Any shell it can run — Bash, a "
+        "`python -c`, `sed -i`, an editor — writes to these files directly, and "
+        "command-matching rules are easy to sidestep by rephrasing the command. "
+        "Treat the rules as a speed bump.\n"
+        "\nFor an enforced boundary, hand the files to root and leave everyone "
+        "else read-only — browden only ever reads them:\n\n"
+        f"{cmds}"
+        "\n  Directories keep their execute bit (755): on a directory that is "
+        "the traverse permission, and dropping it would hide the files from "
+        "browden too. The data files need no execute bit at all (444). Root "
+        "ownership of the directory is what matters — it is what stops a "
+        "non-root process from replacing a file it cannot write.\n"
+        f"\n  Do the same for the install tree ({repo_root}) if you never edit "
+        "browden's code — but not while developing it, and note that a venv "
+        "owned by root can no longer be updated without sudo.\n"
+        "\n  After locking down, refreshing the snapshots needs sudo:\n\n"
+        f"    sudo python3 setup/fetch_tranco.py --config-dir {config_dir}\n"
     )
 
 
