@@ -41,13 +41,14 @@ jobs:
         with:
           python-version: "3.12"
 
-      # uv sync --frozen installs the exact set pinned in uv.lock (and fails if
-      # the lockfile has drifted from pyproject.toml), so CI both consumes and
-      # enforces the lockfile instead of re-resolving version ranges every run.
+      # uv sync --locked installs the exact set pinned in uv.lock AND fails if the
+      # lockfile has drifted from pyproject.toml, so CI both consumes and enforces
+      # the lockfile instead of re-resolving version ranges every run. (--frozen
+      # would consume it without checking freshness — drift would sail through.)
       - name: Install package (locked)
         run: |
           python -m pip install --upgrade pip uv
-          uv sync --frozen --extra dev
+          uv sync --locked --extra dev
 
       - name: Run unit tests
         run: uv run --no-sync pytest test/unit -q

@@ -409,9 +409,9 @@ BROWDEN_HEADLESS=1 uv run pytest test/e2e/   # on a machine with no display
 ```
 
 Dependency versions are pinned in the committed `uv.lock`; `uv sync` installs
-exactly that set. After changing dependencies in `pyproject.toml`, run
-`uv lock` and commit the updated lockfile (CI installs with `--frozen` and
-fails on drift).
+exactly that set. After changing dependencies in `pyproject.toml` — or bumping
+`version` — run `uv lock` and commit the updated lockfile (CI installs with
+`--locked` and fails on drift).
 
 The e2e suite renders inline `data:` pages in a throwaway profile (no network,
 no allowlisted host) and includes a harness that stands the real MCP server up
