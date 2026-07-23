@@ -45,20 +45,81 @@ def _check_patterns(patterns, where: str) -> None:
             raise ConfigError(f"{where}: invalid path regex {p!r}: {e}") from None
 
 
+def _check_path_selector(value, where: str) -> None:
+    """A page selector: one regex string, or a non-empty list of them."""
+    _check_patterns([value] if isinstance(value, str) else value, where)
+
+
+def _check_label(rule, where: str) -> None:
+    """A write action's required ``label`` regex."""
+    if "label" not in rule:
+        raise ConfigError(
+            f"{where}: 'label' is required — a regex the control's visible text "
+            f"must fully match (use '.*' to allow any control on this host)")
+    label = rule["label"]
+    if not isinstance(label, str):
+        raise ConfigError(f"{where}.label: must be a regex string, got {type(label).__name__}")
+    try:
+        re.compile(label)
+    except re.error as e:
+        raise ConfigError(f"{where}.label: invalid regex {label!r}: {e}") from None
+
+
+def _check_field_ids(fids, where: str) -> None:
+    if not isinstance(fids, list) or not all(isinstance(x, str) and x for x in fids):
+        raise ConfigError(f"{where}.field_ids: must be a list of non-empty id/name strings")
+
+
+def _check_page_rule(rule, where: str, *, want_label: bool, allow_field_ids: bool) -> None:
+    """Validate one page-rule mapping ``{path, match_on?, label?, field_ids?}``.
+
+    ``want_label`` requires a ``label`` (write actions); when false a ``label`` is
+    rejected as an unknown key (read overrides / denylist have none).
+    ``field_ids`` is only accepted for ``write-text``.
+    """
+    if not isinstance(rule, dict):
+        raise ConfigError(f"{where}: each page rule must be a mapping, got {type(rule).__name__}")
+    allowed = {"path", "match_on"}
+    if want_label:
+        allowed.add("label")
+    if allow_field_ids:
+        allowed.add("field_ids")
+    unknown = set(rule) - allowed
+    if unknown:
+        raise ConfigError(f"{where}: unknown keys {sorted(unknown)} (allowed: {', '.join(sorted(allowed))})")
+    if "path" in rule:
+        _check_path_selector(rule["path"], f"{where}.path")
+    if "match_on" in rule and rule["match_on"] not in ("path", "url"):
+        raise ConfigError(f"{where}.match_on: must be 'path' or 'url', got {rule['match_on']!r}")
+    if want_label:
+        _check_label(rule, where)
+    if "field_ids" in rule:
+        _check_field_ids(rule["field_ids"], where)
+
+
 def _check_host_paths(rules, where: str) -> None:
-    """Validate a host -> [path regex] mapping (denylist / website_overrides)."""
+    """Validate a host -> spec mapping (denylist / website_overrides).
+
+    A host's spec is either the legacy list of path regexes ``["^/docs/.*"]`` or a
+    list of label-less page rules ``[{path: ..., match_on: url}]`` (the page-rule
+    form disambiguated by its elements being mappings, not strings).
+    """
     if rules is None:
         return
     if not isinstance(rules, dict):
         raise ConfigError(f"{where}: expected a mapping of host -> path regexes, got {type(rules).__name__}")
-    for host, patterns in rules.items():
+    for host, spec in rules.items():
         # The empty host "" is permitted: it is the authority-less host that
         # file:// URLs carry (file:///etc/passwd), so `"": [<path regex>]` is how
         # an operator scopes which local-file paths are readable once file:// is
         # opted in. Every other host must be a non-empty string.
         if not isinstance(host, str):
             raise ConfigError(f"{where}: hosts must be strings, got {host!r}")
-        _check_patterns(patterns, f"{where}.{host}")
+        if isinstance(spec, list) and spec and all(isinstance(x, dict) for x in spec):
+            for i, rule in enumerate(spec):
+                _check_page_rule(rule, f"{where}.{host}[{i}]", want_label=False, allow_field_ids=False)
+        else:
+            _check_patterns(spec, f"{where}.{host}")
 
 
 def _check_read(rules, where: str) -> None:
@@ -121,39 +182,35 @@ def validate_allowlist_data(data, *, source: str = "allowlist") -> dict:
             raise ConfigError(
                 f"{source}: section {action!r} must be a mapping of host -> rule, "
                 f"got {type(rules).__name__}")
+        # `field_ids` (exact id/name allowlist for label-less text boxes) is only
+        # meaningful for the write-text action; other write actions may not use it.
+        allow_field_ids = (action == "write-text")
         for host, rule in rules.items():
             where = f"{source}: {action}.{host}"
             if not isinstance(host, str) or not host:
                 raise ConfigError(f"{source}: hosts in {action!r} must be non-empty strings, got {host!r}")
+            # A host maps to a list of page rules (each a mapping with its own
+            # label) OR the legacy single host-wide mapping. Both require a label
+            # per rule — what a control may do is never the silent default of an
+            # omission; "allow any control" reads as label: '.*'.
+            if isinstance(rule, list):
+                if not rule:
+                    raise ConfigError(f"{where}: a write action needs at least one page rule")
+                for i, page_rule in enumerate(rule):
+                    _check_page_rule(page_rule, f"{where}[{i}]",
+                                     want_label=True, allow_field_ids=allow_field_ids)
+                continue
             if not isinstance(rule, dict):
                 raise ConfigError(
-                    f"{where}: rule must be a mapping with a required 'label' "
-                    f"(and optional 'paths'), got {type(rule).__name__}")
-            # `field_ids` (exact id/name allowlist for label-less text boxes) is
-            # only meaningful for the write-text action; other actions may not use it.
-            allowed = ["paths", "label"] + (["field_ids"] if action == "write-text" else [])
+                    f"{where}: rule must be a mapping with a required 'label' (and optional "
+                    f"'paths'), or a list of page rules, got {type(rule).__name__}")
+            allowed = ["paths", "label"] + (["field_ids"] if allow_field_ids else [])
             unknown = set(rule) - set(allowed)
             if unknown:
                 raise ConfigError(f"{where}: unknown keys {sorted(unknown)} (allowed: {', '.join(allowed)})")
             if "paths" in rule:
                 _check_patterns(rule["paths"], f"{where}.paths")
             if "field_ids" in rule:
-                fids = rule["field_ids"]
-                if not isinstance(fids, list) or not all(isinstance(x, str) and x for x in fids):
-                    raise ConfigError(
-                        f"{where}.field_ids: must be a list of non-empty id/name strings")
-            # label is REQUIRED for write actions: what a control may do must be
-            # stated explicitly, so "allow any click" reads as label: '.*' in the
-            # config rather than being the silent default of an omitted field.
-            if "label" not in rule:
-                raise ConfigError(
-                    f"{where}: 'label' is required — a regex the control's visible text "
-                    f"must fully match (use '.*' to allow any control on this host)")
-            label = rule["label"]
-            if not isinstance(label, str):
-                raise ConfigError(f"{where}.label: must be a regex string, got {type(label).__name__}")
-            try:
-                re.compile(label)
-            except re.error as e:
-                raise ConfigError(f"{where}.label: invalid regex {label!r}: {e}") from None
+                _check_field_ids(rule["field_ids"], where)
+            _check_label(rule, where)
     return data

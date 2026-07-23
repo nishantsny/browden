@@ -41,7 +41,7 @@ async def test_shipped_default_denies_fill_everywhere():
     __import__("importlib").reload(server)
     session = _session(url="https://www.amazon.com/checkout", elements=[_field()])
     with patch.object(server._store, "route", return_value=session):
-        with pytest.raises(ValidationError, match="not on allowlist"):
+        with pytest.raises(ValidationError, match="not allowed on this page"):
             await server.insert_text("#tip", "0", "h1")
     session.insert_text.assert_not_awaited()
 
@@ -70,7 +70,7 @@ async def test_write_text_is_a_separate_section_from_click():
     session = _session(url="https://www.amazon.com/checkout", elements=[_field()])
     with patch.object(server._store, "route", return_value=session), \
          patch.object(server, "_refresher", AllowlistRefresher.static(click_only)):
-        with pytest.raises(ValidationError, match="not on allowlist"):
+        with pytest.raises(ValidationError, match="not allowed on this page"):
             await server.insert_text("#tip", "0", "h1")
     session.insert_text.assert_not_awaited()
 
@@ -99,7 +99,7 @@ async def test_field_label_mismatch_is_rejected():
                        elements=[_field(placeholder="Card number")])
     with patch.object(server._store, "route", return_value=session), \
          patch.object(server, "_refresher", AllowlistRefresher.static(_ENABLED)):
-        with pytest.raises(ValidationError, match="write-text label"):
+        with pytest.raises(ValidationError, match="does not match any write-text rule"):
             await server.insert_text("#card", "0", "h1")
     session.insert_text.assert_not_awaited()
 

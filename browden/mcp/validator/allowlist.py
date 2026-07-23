@@ -1,4 +1,5 @@
 import re
+from dataclasses import dataclass
 from pathlib import Path
 
 import yaml
@@ -48,21 +49,154 @@ def _normalize_path(path: str) -> str:
     return normalized or "/"
 
 
-def _paths_map(rules: object) -> dict[str, list[str]]:
-    """Coerce a host -> (list | {'paths': ...}) mapping to host -> [path regex]."""
-    out: dict[str, list[str]] = {}
-    for host, spec in (rules or {}).items():
-        out[host] = spec.get("paths", [".*"]) if isinstance(spec, dict) else spec
-    return out
+_MATCH_MODES = ("path", "url")
+
+
+def _compose_target(path: str, query: str, fragment: str, match_on: str) -> str:
+    """The string a page rule's regexes are tested against.
+
+    ``match_on: path`` (the default) yields just the resolved path, so a rule is
+    written exactly the way path rules always were. ``match_on: url`` appends the
+    query and fragment (``/checkout?step=2#pay``) — the only way to tell pages
+    apart on a hash-routed SPA, where every page shares the path ``/`` and
+    differs only in the ``#/...`` fragment. The path portion is normalized either
+    way (dot segments collapsed, ``%2e`` decoded), so the evasions
+    :func:`_normalize_path` closes for a path rule can't reopen through the url
+    form.
+    """
+    target = _normalize_path(path or "/")
+    if match_on == "url":
+        if query:
+            target += "?" + query
+        if fragment:
+            target += "#" + fragment
+    return target
+
+
+@dataclass(frozen=True)
+class PageRule:
+    """One page-scoped rule: which pages it governs, plus — for a write action —
+    the control ``label`` and label-less ``field_ids`` it authorizes ON those
+    pages (rather than host-wide, as before).
+
+    ``patterns`` are tested against the page selector built by
+    :func:`_compose_target` under ``match_on``. ``label`` is the required
+    visible-text / field-label regex for a write action, and ``None`` for a read
+    override or denylist rule (which have no label). ``field_ids`` are exact
+    ``id``/``name`` values that authorize a label-less text box — page-scoped
+    now, so an id is typable only on the pages this rule matches.
+    """
+    patterns: "tuple[re.Pattern[str], ...]"
+    match_on: str
+    label: "re.Pattern[str] | None" = None
+    field_ids: "frozenset[str]" = frozenset()
+
+    def matches_page(self, path: str, query: str = "", fragment: str = "",
+                     *, full_match: bool) -> bool:
+        """True if this rule governs ``(path, query, fragment)``.
+
+        ``full_match`` mirrors :class:`Allowlist`: an allow rule fullmatches (so
+        ``^/products`` does not also admit ``/products-secret-admin``); a deny
+        rule prefix-matches (so ``^/checkout`` still blocks ``/checkout/pay``).
+        """
+        target = _compose_target(path, query, fragment, self.match_on)
+        return any(
+            (p.fullmatch(target) if full_match else p.match(target))
+            for p in self.patterns
+        )
+
+
+def _as_pattern_tuple(path: object) -> "tuple[re.Pattern[str], ...]":
+    """Compile a page-selector spec (a single regex string or a list of them)."""
+    if isinstance(path, str):
+        path = [path]
+    return tuple(re.compile(p) for p in path)
+
+
+def _page_rule_from_mapping(rule: dict, *, want_label: bool, where: str) -> PageRule:
+    """Build one :class:`PageRule` from a mapping ``{path, match_on?, label?, field_ids?}``.
+
+    ``paths`` (the legacy write key) and ``path`` (the page-rule key) are synonyms
+    for the page selector, defaulting to any page. ``want_label`` is true for the
+    write actions, where a ``label`` is mandatory; it is forbidden elsewhere.
+    """
+    match_on = rule.get("match_on", "path")
+    if match_on not in _MATCH_MODES:
+        raise ValueError(f"{where}: match_on must be 'path' or 'url', got {match_on!r}")
+    raw = rule.get("path", rule.get("paths", [".*"]))
+    label = None
+    if want_label:
+        if "label" not in rule:
+            raise ValueError(
+                f"{where}: a write-action rule requires a 'label' regex "
+                f"(use '.*' to allow any control)")
+        label = re.compile(rule["label"])
+    elif "label" in rule:
+        raise ValueError(f"{where}: 'label' is only meaningful for a write action")
+    field_ids = frozenset(str(x) for x in (rule.get("field_ids") or []))
+    return PageRule(patterns=_as_pattern_tuple(raw), match_on=match_on,
+                    label=label, field_ids=field_ids)
+
+
+def _coerce_page_rules(spec: object, *, want_label: bool, where: str) -> list[PageRule]:
+    """Normalize a host's rule spec into an ordered list of :class:`PageRule`.
+
+    Three input shapes are accepted, so every pre-existing config keeps loading:
+
+    * **write legacy** — a single mapping ``{label, paths?, field_ids?}`` (a
+      host-wide rule): one PageRule with ``match_on: path``.
+    * **read / deny legacy** — a bare list of path regexes ``["^/docs/.*"]``: one
+      label-less PageRule with ``match_on: path``.
+    * **page-rule list** — a list of mappings, each
+      ``{path, match_on?, label?, field_ids?}``: one PageRule apiece, in order,
+      so a host can scope *different* labels / fields to *different* pages.
+
+    ``want_label`` is true for the write actions (``click`` / ``write-text``):
+    every rule must then carry a ``label`` (a bare path-string list is rejected —
+    what a control may do is never implicit). Read overrides and the denylist
+    pass ``want_label=False``.
+    """
+    if isinstance(spec, dict):  # write legacy: one host-wide mapping.
+        return [_page_rule_from_mapping(spec, want_label=want_label, where=where)]
+    if not isinstance(spec, list) or not spec:
+        return []
+    if all(isinstance(x, str) for x in spec):  # read/deny legacy: [path regex, ...].
+        if want_label:
+            raise ValueError(
+                f"{where}: a write action needs page rules with a 'label', not a bare "
+                f"path list (write host-wide as {{label: ..., paths: [...]}})")
+        return [PageRule(patterns=_as_pattern_tuple(spec), match_on="path")]
+    return [_page_rule_from_mapping(r, want_label=want_label, where=f"{where}[{i}]")
+            for i, r in enumerate(spec)]
+
+
+def _coerce_section(rules: object, *, want_label: bool, where: str) -> "dict[str, list[PageRule]]":
+    """Coerce a whole host -> spec section into host -> [PageRule]."""
+    return {host: _coerce_page_rules(spec, want_label=want_label, where=f"{where}.{host}")
+            for host, spec in (rules or {}).items()}
+
+
+def _as_page_rules(page_rules: object) -> list[PageRule]:
+    """Accept either a ready ``[PageRule]`` or the legacy ``[path regex]`` list.
+
+    Direct :class:`Allowlist` construction (and its tests) still pass a bare list
+    of path-regex strings; wrap that into a single ``match_on: path`` rule so the
+    class has one internal representation. A list already holding PageRules (the
+    ActionAllowlist path, via :func:`_coerce_page_rules`) passes through.
+    """
+    rs = list(page_rules or [])
+    if rs and all(isinstance(x, str) for x in rs):
+        return [PageRule(patterns=_as_pattern_tuple(rs), match_on="path")]
+    return rs
 
 
 class Allowlist:
-    """Per-host path-regex allowlist. Use host key '*' for a wildcard fallback."""
+    """Per-host page-rule allowlist. Use host key '*' for a wildcard fallback."""
 
-    def __init__(self, rules: dict[str, list[str]], *, full_match: bool):
-        # full_match decides how a path regex is applied. An *allow* list
-        # fullmatches (the pattern must span the whole path) so `^/products` does
-        # not also wave through `/products-secret-admin`. A *denylist* is the
+    def __init__(self, rules: "dict[str, list[PageRule]]", *, full_match: bool):
+        # full_match decides how a page regex is applied. An *allow* list
+        # fullmatches (the pattern must span the whole target) so `^/products`
+        # does not also wave through `/products-secret-admin`. A *denylist* is the
         # opposite risk — it should block broadly — so it keeps prefix semantics
         # (start-anchored `re.match`): `^/checkout` still denies `/checkout/pay`.
         #
@@ -70,37 +204,33 @@ class Allowlist:
         # rule written 'www.x.com' or 'x.com.' matches host 'x.com' and vice versa
         # — no silently-inert denylist entries, no trailing-dot bypass (H3).
         self._full_match = full_match
-        self._rules: dict[str, list[re.Pattern[str]]] = {
-            canonical_host(host): [re.compile(p) for p in patterns]
-            for host, patterns in rules.items()
+        self._rules: "dict[str, list[PageRule]]" = {
+            canonical_host(host): _as_page_rules(page_rules)
+            for host, page_rules in rules.items()
         }
 
     @classmethod
-    def create_allowlist(cls, rules: dict[str, list[str]]) -> "Allowlist":
-        """An ALLOW list: each path regex must fullmatch the whole path, so
+    def create_allowlist(cls, rules: "dict[str, list[PageRule]]") -> "Allowlist":
+        """An ALLOW list: each page regex must fullmatch the whole target, so
         ``^/products`` does not also admit ``/products-secret-admin`` (spell a
         prefix rule as ``^/products/.*``)."""
         return cls(rules, full_match=True)
 
     @classmethod
-    def create_denylist(cls, rules: dict[str, list[str]]) -> "Allowlist":
-        """A DENY list: each path regex prefix-matches (start-anchored) so it
+    def create_denylist(cls, rules: "dict[str, list[PageRule]]") -> "Allowlist":
+        """A DENY list: each page regex prefix-matches (start-anchored) so it
         blocks broadly — ``^/checkout`` still denies ``/checkout/pay``."""
         return cls(rules, full_match=False)
 
-    def is_allowed(self, host: str, path: str) -> bool:
-        patterns = self._rules.get(canonical_host(host)) or self._rules.get("*")
-        if not patterns:
+    def is_allowed(self, host: str, path: str, query: str = "", fragment: str = "") -> bool:
+        rules = self._rules.get(canonical_host(host)) or self._rules.get("*")
+        if not rules:
             return False
-        target = _normalize_path(path or "/")
-        # An allow list fullmatches (see __init__): `^/products` must cover the
-        # whole path, so it does not also permit `/products-secret-admin`; a
-        # prefix rule is spelled `^/products/.*`. The denylist keeps prefix match
-        # so it still blocks broadly.
-        return any(
-            (p.fullmatch(target) if self._full_match else p.match(target))
-            for p in patterns
-        )
+        # A rule matches per its own match_on (path vs. path+query+fragment); the
+        # host is allowed if ANY of its rules does. Additive by construction, so
+        # adding a rule can only widen — narrowing is the denylist's job.
+        return any(r.matches_page(path, query, fragment, full_match=self._full_match)
+                   for r in rules)
 
     def covers(self, host: str) -> bool:
         """True if a rule set governs ``host`` (an exact entry or the ``*`` wildcard).
@@ -148,15 +278,18 @@ class ReadPolicy:
         self._overrides = overrides
         self._denylist = denylist
 
-    def is_allowed(self, host: str, path: str) -> bool:
+    def is_allowed(self, host: str, path: str, query: str = "", fragment: str = "") -> bool:
         if self._denylist.is_allowed(host, path):
             return False
         if not self._enabled:
             return True
         # An explicit override for this host wins over Tranco — even to restrict
-        # (path-scope) a host Tranco would otherwise allow wholesale.
+        # (page-scope) a host Tranco would otherwise allow wholesale. Listing a
+        # host here therefore DEMOTES it from Tranco's blanket grant to exactly
+        # the pages its override rules match (query/fragment honored when a rule
+        # opts into match_on: url — needed for hash-routed SPAs).
         if self._overrides.covers(host):
-            return self._overrides.is_allowed(host, path)
+            return self._overrides.is_allowed(host, path, query, fragment)
         return self._tranco is not None and self._tranco.contains(host)
 
     def override_has_host(self, host: str) -> bool:
@@ -188,41 +321,47 @@ class ActionAllowlist:
             website_overrides:
               "*": [".*"]                 # host -> path regexes; "*" = any host
 
-    * any other key (e.g. ``click``) — a *write action*, whose per-host rule is
-      a mapping with a **required** ``label`` regex (the activated control's
-      visible name must fully match it) and optional ``paths``::
+    * any other key (e.g. ``click``) — a *write action*. A host maps either to a
+      single **legacy** mapping (a host-wide rule) or to an ordered **list of
+      page rules**, each governing only the pages its ``path`` selector matches::
 
           click:
-            amazon.com:
-              label: '(?i)add to cart'   # required; use '.*' to allow any control
-              paths: [".*"]              # optional, defaults to [".*"]
+            amazon.com:                    # page-scoped: label differs per page
+              - path: ['^/(dp|gp/product)/.*']
+                label: '(?i)add to cart'   # required; '.*' allows any control
+              - path: ['^/gp/buy/.*']
+                match_on: path             # 'path' (default) | 'url' (+query+fragment)
+                label: '(?i)(continue|place your order)'
+            ebay.com:                      # legacy host-wide form still valid
+              label: '(?i)add to (cart|basket)'
+              paths: [".*"]
 
-      The label is mandatory so that allowing every control reads explicitly as
-      ``label: '.*'`` in the config, never as the silent default of an omission.
-    * ``write-text`` — the text-entry write action (the ``insert_text`` tool), a section
-      *separate* from ``click`` so permitting typing never implies permitting
-      clicks. Same shape (per-host ``label`` regex + optional ``paths``), but the
-      label is matched against the **field's visible label** — its placeholder,
-      aria-label, resolved ``aria-labelledby`` / ``<label>``, or title — so an
-      operator authorizes *which* text boxes may be typed into by the name a human
-      reads next to them::
+      A click is authorized when SOME matching page rule's ``label`` matches the
+      control — the rules are additive. The label is mandatory so that allowing
+      every control reads explicitly as ``label: '.*'``, never as a silent
+      default. ``match_on: url`` matches ``path?query#fragment`` — the only way to
+      scope a page on a hash-routed SPA, where every page shares the path ``/``.
+    * ``write-text`` — the text-entry write action (the ``insert_text`` tool), a
+      section *separate* from ``click`` so permitting typing never implies
+      permitting clicks. Same page-rule shape, but the ``label`` is matched
+      against the **field's visible label** — its placeholder, aria-label,
+      resolved ``aria-labelledby`` / ``<label>``, or title — so an operator
+      authorizes *which* text boxes may be typed into by the name a human reads
+      next to them. A page rule may additionally list ``field_ids``: exact ``id``
+      / ``name`` values that authorize a text box carrying **no visible label**
+      (e.g. Amazon's Fresh grocery-tip input), which the label regex can never
+      match. That trusts a non-visible identifier, so it is opt-in per rule and
+      page-scoped — the id is typable only on the pages that rule matches::
 
           write-text:
             amazon.com:
-              label: '(?i)grocery tip.*'  # only fields labelled "Grocery Tip …"
-              paths: [".*"]
-              field_ids:                  # optional escape hatch (see below)
-                - tip-widget--edit-form--amount-input
-
-      A ``write-text`` host may additionally list ``field_ids``: exact ``id`` /
-      ``name`` values that authorize a text box carrying **no visible label**
-      (e.g. Amazon's Fresh grocery-tip input), which the label regex can never
-      match. This trusts a non-visible identifier, so it is opt-in per field and
-      never implied — omit it and only visibly-labelled fields are typable.
+              - path: ['^/gp/css/order-history.*']
+                label: '(?i)grocery tip.*'
+                field_ids: [tip-widget--edit-form--amount-input]
     * ``infra`` — session/tab caps.
 
     ``read_policy`` gates reads; ``denylist`` is the always-deny list (also
-    consulted by write actions); ``section(name)``/``label_pattern(name, host)``
+    consulted by write actions); ``section(name)`` and ``rules_for(name, ...)``
     gate write actions. An unlisted write action default-denies.
     """
 
@@ -231,12 +370,13 @@ class ActionAllowlist:
         # file; the loader/from_file pass it in. A bare dict construction (tests,
         # the import-time default) leaves it None -> the ~/.browden fallback.
         self._sections: dict[str, Allowlist] = {}
-        self._labels: dict[str, dict[str, re.Pattern[str]]] = {}
-        self._field_ids: dict[str, dict[str, set[str]]] = {}
+        # action -> canonical host -> ordered page rules (label + field_ids).
+        self._rules: "dict[str, dict[str, list[PageRule]]]" = {}
         self.max_browser_sessions = 10
         self.max_tabs_per_session = 20
         # A denylist blocks broadly: prefix match, not fullmatch (see Allowlist).
-        self._denylist = Allowlist.create_denylist(_paths_map(sections.get("denylist")))
+        self._denylist = Allowlist.create_denylist(
+            _coerce_section(sections.get("denylist"), want_label=False, where="denylist"))
         self._read_policy = self._build_read_policy(
             sections.get("read"), self._denylist, tranco_path)
         for action, rules in sections.items():
@@ -245,28 +385,11 @@ class ActionAllowlist:
                     self.max_browser_sessions = int(rules.get("max_browser_sessions", 10))
                     self.max_tabs_per_session = int(rules.get("max_tabs_per_session", 20))
                 continue
-            paths: dict[str, list[str]] = {}
-            labels: dict[str, re.Pattern[str]] = {}
-            field_ids: dict[str, set[str]] = {}
-            for host, spec in rules.items():
-                # A write-action host must declare a label — what a control may
-                # do is never implicit. "Allow any control" is spelled '.*'.
-                if not isinstance(spec, dict) or "label" not in spec:
-                    raise ValueError(
-                        f"{action}.{host}: a write-action host requires a 'label' regex "
-                        f"(use '.*' to allow any control on this host)")
-                paths[host] = spec.get("paths", [".*"])
-                labels[canonical_host(host)] = re.compile(spec["label"])
-                # Optional: exact field id/name values that authorize a text box
-                # with no visible label (write-text only; see field_id_matches).
-                raw_ids = spec.get("field_ids") or []
-                if raw_ids and not isinstance(raw_ids, list):
-                    raise ValueError(
-                        f"{action}.{host}: 'field_ids' must be a list of id/name strings")
-                field_ids[canonical_host(host)] = {str(x) for x in raw_ids}
-            self._sections[action] = Allowlist.create_allowlist(paths)
-            self._labels[action] = labels
-            self._field_ids[action] = field_ids
+            host_rules = _coerce_section(rules, want_label=True, where=action)
+            self._rules[action] = {canonical_host(h): rs for h, rs in host_rules.items()}
+            # section() keeps a page-admission view (labels ignored) for callers
+            # that only ask "may this action touch this host+page at all".
+            self._sections[action] = Allowlist.create_allowlist(host_rules)
 
     @staticmethod
     def _build_read_policy(read_cfg: object, denylist: Allowlist,
@@ -289,7 +412,9 @@ class ActionAllowlist:
         if tranco_cfg.get("enabled"):
             snapshot = tranco_path if (tranco_path and tranco_path.exists()) else None
             tranco = PopularityAllowlist(tranco_top_n=int(tranco_cfg.get("top_n", DEFAULT_TOP_N)), path=snapshot)
-        overrides = Allowlist.create_allowlist(_paths_map(cfg.get("website_overrides")))
+        overrides = Allowlist.create_allowlist(
+            _coerce_section(cfg.get("website_overrides"), want_label=False,
+                            where="read.website_overrides"))
         return ReadPolicy(enabled=enabled, tranco=tranco, overrides=overrides, denylist=denylist)
 
     @classmethod
@@ -312,17 +437,25 @@ class ActionAllowlist:
         return self._denylist.is_allowed(host, path)
 
     def section(self, action: str) -> Allowlist:
-        """Return the host/path allowlist for ``action``; an empty (deny-all) one if unlisted."""
+        """Return the host/page-admission allowlist for ``action`` (labels ignored);
+        an empty (deny-all) one if unlisted."""
         return self._sections.get(action) or Allowlist.create_allowlist({})
 
-    def label_pattern(self, action: str, host: str) -> "re.Pattern[str] | None":
-        """Return the required visible-label regex for ``action`` on ``host``, or None if none configured."""
-        return (self._labels.get(action) or {}).get(canonical_host(host))
+    def rules_for(self, action: str, host: str, path: str,
+                  query: str = "", fragment: str = "") -> list[PageRule]:
+        """The page rules for ``action`` on ``host`` that match this page, in order.
 
-    def field_ids(self, action: str, host: str) -> "set[str]":
-        """The exact field id/name values authorized for ``action`` on ``host`` (empty set if none).
-
-        Only meaningful for ``write-text``: these name label-less text boxes that
-        the visible-label regex cannot reach (see ``intent.field_id_matches``).
+        Empty if the action/host is unlisted or no rule's page selector matches —
+        the write gates read that as "this action is not authorized on this page"
+        and refuse before touching the DOM. Each returned rule carries the
+        ``label`` and ``field_ids`` that authorize a control *on these pages*, so
+        the caller checks the live element against the union of them.
         """
-        return (self._field_ids.get(action) or {}).get(canonical_host(host), set())
+        by_host = self._rules.get(action)
+        if not by_host:
+            return []
+        rules = by_host.get(canonical_host(host)) or by_host.get("*")
+        if not rules:
+            return []
+        return [r for r in rules
+                if r.matches_page(path, query, fragment, full_match=True)]

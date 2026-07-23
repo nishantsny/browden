@@ -58,7 +58,7 @@ def test_host_allowed_passes():
 
 
 def test_host_not_on_section_rejected():
-    with pytest.raises(ValidationError, match="not on allowlist"):
+    with pytest.raises(ValidationError, match="no click rule authorizes"):
         check_action_host(_ALLOWLIST, "click", "https://evil.example.com/p")
 
 
@@ -90,7 +90,7 @@ def test_click_decoy_rejected():
 
 
 def test_click_label_mismatch_rejected():
-    with pytest.raises(ValidationError, match="required label"):
+    with pytest.raises(ValidationError, match="does not match any click label"):
         validate_click_target(_ALLOWLIST, AMAZON, "#x", _found(_atc(value="Add to bag")))
 
 
@@ -137,7 +137,7 @@ def test_write_text_non_text_control_rejected():
 
 
 def test_write_text_label_mismatch_rejected():
-    with pytest.raises(ValidationError, match="required write-text label"):
+    with pytest.raises(ValidationError, match="does not match any write-text rule"):
         validate_write_text_target(_ALLOWLIST, AMAZON, "#x", _found(_field(label="Coupon code")))
 
 # The read-tool gate (is_url_allowed / ensure_url_is_in_allowlist) now lives in
