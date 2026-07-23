@@ -25,7 +25,7 @@
 #   BROWDEN_RELEASE_DIR  release checkout to deploy FROM  ($HOME/projects/browser-guard-release)
 #   BROWDEN_ALLOWLIST    allowlist config the service loads (~/.browden/allowlist.yaml)
 #   BROWDEN_SERVICE      systemd --user unit name           (browden.service)
-#   BROWDEN_PORT         port the service listens on         (8000)
+#   BROWDEN_PORT         port to health-check              (derived from the unit's MCP_PORT)
 #   BROWDEN_E2E_VENV     cached venv used to run e2e         (~/.cache/browden/e2e-venv)
 #
 # Usage:
@@ -48,7 +48,11 @@ set -euo pipefail
 RELEASE_DIR="${BROWDEN_RELEASE_DIR:-$HOME/projects/browser-guard-release}"
 CONFIG="${BROWDEN_ALLOWLIST:-$HOME/.browden/allowlist.yaml}"
 SERVICE="${BROWDEN_SERVICE:-browden.service}"
-PORT="${BROWDEN_PORT:-8000}"
+# Health-check the port the live unit actually binds — read MCP_PORT from its
+# Environment rather than hardcode a literal, so this can never drift from the
+# service. Overridable via BROWDEN_PORT; validated (non-empty) in preflight.
+PORT="${BROWDEN_PORT:-$(systemctl --user show "$SERVICE" -p Environment --value 2>/dev/null \
+    | tr ' ' '\n' | sed -n 's/^MCP_PORT=//p' | head -1)}"
 VENV_PY="$RELEASE_DIR/.venv/bin/python"
 
 # Split out --release=<tag>; everything else is passed through to pytest as e2e args.
@@ -81,6 +85,8 @@ git -C "$RELEASE_DIR" rev-parse --is-inside-work-tree >/dev/null 2>&1 \
 command -v systemctl >/dev/null || die "systemctl not found"
 command -v ss >/dev/null        || die "ss (iproute2) not found"
 command -v uv >/dev/null        || die "uv not found (needed to build the e2e venv)"
+[ -n "$PORT" ] \
+    || die "could not determine $SERVICE port (no MCP_PORT in its unit Environment) — set BROWDEN_PORT"
 
 # When cutting a release, verify gh is present + authenticated NOW — at the start,
 # not after a ~7-minute deploy + e2e — so an auth problem fails in seconds instead
