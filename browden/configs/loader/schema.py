@@ -70,12 +70,24 @@ def _check_field_ids(fids, where: str) -> None:
         raise ConfigError(f"{where}.field_ids: must be a list of non-empty id/name strings")
 
 
-def _check_page_rule(rule, where: str, *, want_label: bool, allow_field_ids: bool) -> None:
-    """Validate one page-rule mapping ``{path, match_on?, label?, field_ids?}``.
+def _check_keys(keys, where: str) -> None:
+    # A shape check only: the control-key allowlist (validator.ACTIVATION_KEYS) is
+    # enforced at action time by the press-key gate, which refuses any non-control
+    # key regardless of config — so a typo'd key here just never authorizes; it is
+    # never a way to send a character key.
+    if not isinstance(keys, list) or not keys or not all(isinstance(x, str) and x for x in keys):
+        raise ConfigError(
+            f"{where}.keys: must be a non-empty list of control-key names "
+            f"(e.g. ['Enter', 'ArrowDown'])")
+
+
+def _check_page_rule(rule, where: str, *, want_label: bool, allow_field_ids: bool,
+                     allow_keys: bool = False) -> None:
+    """Validate one page-rule mapping ``{path, match_on?, label?, field_ids?, keys?}``.
 
     ``want_label`` requires a ``label`` (write actions); when false a ``label`` is
     rejected as an unknown key (read overrides / denylist have none).
-    ``field_ids`` is only accepted for ``write-text``.
+    ``field_ids`` is only accepted for ``write-text``; ``keys`` only for ``press-key``.
     """
     if not isinstance(rule, dict):
         raise ConfigError(f"{where}: each page rule must be a mapping, got {type(rule).__name__}")
@@ -84,6 +96,8 @@ def _check_page_rule(rule, where: str, *, want_label: bool, allow_field_ids: boo
         allowed.add("label")
     if allow_field_ids:
         allowed.add("field_ids")
+    if allow_keys:
+        allowed.add("keys")
     unknown = set(rule) - allowed
     if unknown:
         raise ConfigError(f"{where}: unknown keys {sorted(unknown)} (allowed: {', '.join(sorted(allowed))})")
@@ -95,6 +109,8 @@ def _check_page_rule(rule, where: str, *, want_label: bool, allow_field_ids: boo
         _check_label(rule, where)
     if "field_ids" in rule:
         _check_field_ids(rule["field_ids"], where)
+    if "keys" in rule:
+        _check_keys(rule["keys"], where)
 
 
 def _check_host_paths(rules, where: str) -> None:
@@ -183,8 +199,10 @@ def validate_allowlist_data(data, *, source: str = "allowlist") -> dict:
                 f"{source}: section {action!r} must be a mapping of host -> rule, "
                 f"got {type(rules).__name__}")
         # `field_ids` (exact id/name allowlist for label-less text boxes) is only
-        # meaningful for the write-text action; other write actions may not use it.
+        # meaningful for the write-text action; `keys` (the control keys a rule
+        # authorizes) only for press-key. Other write actions may use neither.
         allow_field_ids = (action == "write-text")
+        allow_keys = (action == "press-key")
         for host, rule in rules.items():
             where = f"{source}: {action}.{host}"
             if not isinstance(host, str) or not host:
@@ -198,13 +216,15 @@ def validate_allowlist_data(data, *, source: str = "allowlist") -> dict:
                     raise ConfigError(f"{where}: a write action needs at least one page rule")
                 for i, page_rule in enumerate(rule):
                     _check_page_rule(page_rule, f"{where}[{i}]",
-                                     want_label=True, allow_field_ids=allow_field_ids)
+                                     want_label=True, allow_field_ids=allow_field_ids,
+                                     allow_keys=allow_keys)
                 continue
             if not isinstance(rule, dict):
                 raise ConfigError(
                     f"{where}: rule must be a mapping with a required 'label' (and optional "
                     f"'paths'), or a list of page rules, got {type(rule).__name__}")
-            allowed = ["paths", "label"] + (["field_ids"] if allow_field_ids else [])
+            allowed = ["paths", "label"] + (["field_ids"] if allow_field_ids else []) \
+                + (["keys"] if allow_keys else [])
             unknown = set(rule) - set(allowed)
             if unknown:
                 raise ConfigError(f"{where}: unknown keys {sorted(unknown)} (allowed: {', '.join(allowed)})")
@@ -212,5 +232,7 @@ def validate_allowlist_data(data, *, source: str = "allowlist") -> dict:
                 _check_patterns(rule["paths"], f"{where}.paths")
             if "field_ids" in rule:
                 _check_field_ids(rule["field_ids"], where)
+            if "keys" in rule:
+                _check_keys(rule["keys"], where)
             _check_label(rule, where)
     return data

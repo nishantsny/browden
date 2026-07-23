@@ -95,6 +95,33 @@ def test_localhost_dev_sample_opts_localhost_in():
     assert not al.read_policy.override_has_host("127.0.0.1")
 
 
+def test_press_key_sample_is_valid():
+    # The press-key walkthrough sample must load through the schema — its rules
+    # carry a `keys` field, which the loader's schema must accept (regression:
+    # `keys` was added to the runtime parser but not the file-load schema, so the
+    # sample booted fine in dict tests yet the server refused it on load).
+    al = load_allowlist(SAMPLE_ALLOWLIST.parent / "allow_press_key_activation.yaml")
+    (rule,) = al.rules_for("press-key", "cronometer.com", "/")
+    assert "Enter" in rule.keys
+
+
+def test_load_press_key_rule_keys(tmp_path):
+    # The full file path: schema-validate a press-key rule and parse its `keys`
+    # into PageRule.keys.
+    f = tmp_path / "allowlist.yaml"
+    f.write_text(
+        'read:\n  website_overrides: {"*": [".*"]}\n'
+        "press-key:\n"
+        "  cronometer.com:\n"
+        "    - path: ['^/$']\n"
+        "      label: '.*'\n"
+        "      keys: ['Enter', 'ArrowDown']\n"
+    )
+    al = load_allowlist(f)
+    (rule,) = al.rules_for("press-key", "cronometer.com", "/")
+    assert rule.keys == frozenset({"Enter", "ArrowDown"})
+
+
 def test_empty_host_override_loads_for_file_scheme(tmp_path):
     # "" is a valid override host (the authority-less host of file:/// URLs), so
     # an operator can scope which local-file paths reads may reach.
@@ -189,6 +216,14 @@ def test_load_page_scoped_rules(tmp_path):
     # field_ids only for write-text, not click
     ('click:\n  amazon.com:\n    - path: [".*"]\n      label: ".*"\n      field_ids: [x]\n',
      "unknown keys"),
+    # keys only for press-key, not click
+    ('click:\n  amazon.com:\n    - path: [".*"]\n      label: ".*"\n      keys: [Enter]\n',
+     "unknown keys"),
+    # press-key keys must be a non-empty list of strings
+    ('press-key:\n  x.com:\n    - path: [".*"]\n      label: ".*"\n      keys: []\n',
+     "non-empty list"),
+    ('press-key:\n  x.com:\n    - path: [".*"]\n      label: ".*"\n      keys: "Enter"\n',
+     "non-empty list"),
     # read override page rules may not carry a label
     ('read:\n  website_overrides:\n    x.com:\n      - path: [".*"]\n        label: ".*"\n',
      "unknown keys"),
