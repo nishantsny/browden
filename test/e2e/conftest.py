@@ -10,6 +10,17 @@ in use" clash with a warm background session.
 import pytest
 
 
+def pytest_configure(config):
+    # The suite is slow enough that a bare dot per test leaves a maintainer
+    # watching a deploy unable to tell progress from a hang; progress.py adds a
+    # completion counter alongside pytest's status characters.
+    import sys
+    import os
+    sys.path.insert(0, os.path.dirname(__file__))
+    from progress import register
+    register(config)
+
+
 @pytest.fixture
 def new_backend():
     """Factory for e2e Chrome backends with guaranteed, centralized teardown.
