@@ -7,6 +7,32 @@ All notable changes to browden are documented here. The format follows
 
 ## [Unreleased]
 
+## [1.0.1] — 2026-07-19
+
+### Added
+- **iframe inspection** — new `switch_to_frame`, `switch_to_parent_frame`, and
+  `switch_to_default_content` tools focus a tab's browsing context on an `<iframe>`
+  so the existing DOM-read tools (`query_selector`, `get_element_by_id`,
+  `screenshot`, …) can inspect its contents — which were previously invisible
+  (the tools only ever saw the top document). The frame focus is replayed across the
+  window-refocus that nearly every op performs, and reset on `navigate`/`reload`
+  (#117).
+
+### Security
+- `switch_to_frame` is same-origin only and gates the frame as a distinct document:
+  the iframe's declared `src` is checked against the read allowlist *before*
+  switching, and the frame's actual `document.URL` is gated (read-allowed **and**
+  same-origin with the top page) *after* switching. Cross-origin frames are refused
+  — the existing click/write host gate keys off the tab's top URL, so it cannot
+  govern a different-origin document (that needs a frame-aware write gate, deferred).
+  On any failure the driver returns to the top document and nothing is inspected.
+- `switch_to_parent_frame` / `switch_to_default_content` **re-verify the landed
+  document on every call**, not just on entry: another process may have navigated an
+  ancestor (or the top page) to an untrusted URL while we were deeper in the tree, so
+  the document returned to is re-gated (read-allowed + same-origin). On refusal the
+  driver retreats to the top document and the call raises — mirroring how the read
+  tools re-check the live URL on every call, not only on navigate.
+
 ## [1.0.0] — 2026-07-18
 
 First stable release: hardens the safety perimeter across the board and pins the
