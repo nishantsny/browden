@@ -7,6 +7,16 @@ All notable changes to browden are documented here. The format follows
 
 ## [Unreleased]
 
+## [1.1.0] — 2026-07-22
+
+### Added
+- **Page-scoped allowlist rules.** A `click` / `write-text` host, or a
+  `website_overrides` entry, may now map to an ordered list of page rules —
+  each scoping its `label` / `field_ids` (or read access) to only the pages its
+  `path` selector matches, with `match_on: path` (default) or `match_on: url`
+  (path + query + fragment, for hash-routed SPAs). Authority is per page rather
+  than per registrable domain, and every pre-existing config still loads (#123).
+
 ### Security
 - The read/write tools now gate on the **focused document's URL** (`document.URL`,
   via the new `backend.document_url()`) instead of the top-level `current_url`.
@@ -89,6 +99,7 @@ Initial public release.
   service manager (systemd / launchd / Task Scheduler).
 - Apache-2.0.
 
-[Unreleased]: https://github.com/nishantsny/browden/compare/v1.0.0...HEAD
+[Unreleased]: https://github.com/nishantsny/browden/compare/v1.1.0...HEAD
+[1.1.0]: https://github.com/nishantsny/browden/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/nishantsny/browden/compare/v0.1.0...v1.0.0
 [0.1.0]: https://github.com/nishantsny/browden/releases/tag/v0.1.0
