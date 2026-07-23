@@ -30,12 +30,12 @@ jobs:
         with:
           chrome-version: stable
 
-      # Same locked install as unit.yml: uv sync --frozen consumes uv.lock and
+      # Same locked install as unit.yml: uv sync --locked consumes uv.lock and
       # fails on lockfile drift, so e2e runs against the pinned dependency set.
       - name: Install package (locked)
         run: |
           python -m pip install --upgrade pip uv
-          uv sync --frozen --extra dev
+          uv sync --locked --extra dev
 
       - name: Run unit tests
         run: uv run --no-sync pytest test/unit -q

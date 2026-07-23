@@ -23,8 +23,8 @@ BROWDEN_HEADLESS=1 uv run pytest test/e2e/   # on a machine with no display
 ```
 
 Dependencies are pinned in the committed `uv.lock`. If you change
-`pyproject.toml` dependencies, run `uv lock` and commit the updated lockfile —
-CI installs with `--frozen` and fails if the two drift apart.
+`pyproject.toml` — dependencies **or** `version` — run `uv lock` and commit the
+updated lockfile; CI installs with `--locked` and fails if the two drift apart.
 
 Unit tests never touch a browser and run on Linux/macOS/Windows. The e2e suite
 renders inline `data:` pages in a throwaway profile (no network, no allowlisted
@@ -65,10 +65,14 @@ stays free to change:
 - **Bump a package** — edit `pyproject.toml`, run `uv sync` (re-resolves and
   rewrites `uv.lock`) or `uv lock --upgrade` (bumps within existing ranges),
   then commit `uv.lock`. Local dev is never `--frozen`, so this always works.
-- **`--frozen` lives in exactly two places** — CI (`uv sync --frozen`, so a
-  `pyproject.toml` change without a committed `uv lock` fails the build instead
-  of drifting) and the end-user installer in `setup/onetime_setup.py` (so users
-  get the exact tested set). Re-lock and commit before merging, or CI stays red.
+- **CI asserts the lock is current; the installer just consumes it** — CI runs
+  `uv sync --locked`, which *fails* when `pyproject.toml` and `uv.lock` disagree,
+  so a change without a committed `uv lock` goes red instead of drifting. The
+  end-user installer in `setup/onetime_setup.py` stays on `uv sync --frozen`,
+  which consumes the lockfile as-is without re-resolving (so users get the exact
+  tested set, and a stale lock never blocks an install). Re-lock and commit
+  before merging, or CI stays red. Note the two flags differ: `--frozen` does
+  *not* validate freshness — only `--locked` does.
 - **uv itself is unpinned** — CI installs the latest uv each run and setup uses
   whatever `uv` is on PATH. `uv.lock` pins packages, not uv; nothing to bump.
 
@@ -83,7 +87,12 @@ latest release is supported (see [SECURITY.md](./SECURITY.md)). To cut a release
 2. Bump `version` in `pyproject.toml`, and in `CHANGELOG.md` move the
    `[Unreleased]` notes under the new `[X.Y.Z] — YYYY-MM-DD` heading (update
    the compare links at the bottom).
-3. Tag and push the release commit:
+3. Run `uv lock` and commit the updated `uv.lock`. The project is an editable
+   member of its own lockfile, so its `version` is recorded there too — a bump
+   that skips this leaves the two files disagreeing and CI's `uv sync --locked`
+   failing. Note this is *not* covered by the "changed a dependency" rule
+   above: a version bump changes no dependency, but still needs a relock.
+4. Tag and push the release commit:
    `git tag -a vX.Y.Z -m vX.Y.Z && git push origin vX.Y.Z`.
 
 Pushing the tag is the whole release action. It triggers
