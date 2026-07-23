@@ -244,7 +244,6 @@ class BrowserSessionManager:
             self._backend.select_tab(handle)
             result = self._backend.click_element(css_selector)
             logger.info(f"click: activated {css_selector!r} on tab {id}")
-            result.pop("handle", None)
             result["id"] = id
             return result
         return await self._with_tab(id, work, invalidate=True)
@@ -263,7 +262,6 @@ class BrowserSessionManager:
             self._backend.select_tab(handle)
             result = self._backend.insert_text_element(css_selector, value)
             logger.info(f"insert_text: set {css_selector!r} on tab {id}")
-            result.pop("handle", None)
             result["id"] = id
             return result
         return await self._with_tab(id, work, invalidate=True)
@@ -283,7 +281,6 @@ class BrowserSessionManager:
             self._backend.select_tab(handle)
             result = self._backend.press_key_element(css_selector, key)
             logger.info(f"press_key: sent {key!r} to {css_selector!r} on tab {id}")
-            result.pop("handle", None)
             result["id"] = id
             return result
         return await self._with_tab(id, work, invalidate=True)

@@ -537,7 +537,6 @@ class SeleniumChromeBackend(WebNavigatorBackend):
         _wait_for_title(drv)
         return {
             "clicked": True,
-            "handle": drv.current_window_handle,
             "url_before": url_before,
             "url": drv.current_url,
             "title": drv.title,
@@ -559,7 +558,6 @@ class SeleniumChromeBackend(WebNavigatorBackend):
         return {
             "inserted": True,
             "value": value,
-            "handle": drv.current_window_handle,
             "url": drv.current_url,
             "title": drv.title,
         }
@@ -585,7 +583,6 @@ class SeleniumChromeBackend(WebNavigatorBackend):
         return {
             "pressed": True,
             "key": key,
-            "handle": drv.current_window_handle,
             "url_before": url_before,
             "url": drv.current_url,
             "title": drv.title,
