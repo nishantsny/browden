@@ -4,13 +4,14 @@ import pytest
 @pytest.mark.asyncio
 async def test_mcp_endpoint(mcp_server, mcp_client_session):
     async with mcp_client_session(mcp_server) as mcp_client:
-        # list_tools returns exactly the 12 expected tool names.
+        # list_tools returns exactly the expected tool names.
         tools_result = await mcp_client.list_tools()
         tools = [t.name for t in tools_result.tools]
         expected_tools = {
             "list_tabs", "new_blank_tab", "close_tab", "select_tab", "navigate",
-            "click", "insert_text", "get_element_by_id", "get_elements_by_class_name",
-            "query_selector", "query_selector_all", "screenshot", "force_reload_tab"
+            "click", "insert_text", "press_key", "get_element_by_id",
+            "get_elements_by_class_name", "query_selector", "query_selector_all",
+            "screenshot", "force_reload_tab"
         }
         assert set(tools) == expected_tools
     
