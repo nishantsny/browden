@@ -21,11 +21,15 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Run ruff
+      # Install ruff from uv.lock, like the unit job below, instead of
+      # resolving "ruff>=0.8" fresh on every run. Ruff's default rule set is not
+      # a stable contract — 0.16.0 widened it and turned lint red on unchanged
+      # code — so the linter version has to be pinned with everything else.
+      - name: Run ruff (locked)
         run: |
-          python -m pip install --upgrade pip
-          pip install "ruff>=0.8"
-          ruff check .
+          python -m pip install --upgrade pip uv
+          uv sync --locked --extra dev
+          uv run --no-sync ruff check .
 
   unit:
     strategy:
