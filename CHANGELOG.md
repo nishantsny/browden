@@ -7,6 +7,8 @@ All notable changes to browden are documented here. The format follows
 
 ## [Unreleased]
 
+## [1.2.0] — 2026-07-28
+
 ### Added
 - **`press-key` write action.** A new tool/section that focuses an element and
   sends a single **control key** (Enter/Space/Tab/Escape/arrows/Home/End/
@@ -112,7 +114,8 @@ Initial public release.
   service manager (systemd / launchd / Task Scheduler).
 - Apache-2.0.
 
-[Unreleased]: https://github.com/nishantsny/browden/compare/v1.1.0...HEAD
+[Unreleased]: https://github.com/nishantsny/browden/compare/v1.2.0...HEAD
+[1.2.0]: https://github.com/nishantsny/browden/compare/v1.1.0...v1.2.0
 [1.1.0]: https://github.com/nishantsny/browden/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/nishantsny/browden/compare/v0.1.0...v1.0.0
 [0.1.0]: https://github.com/nishantsny/browden/releases/tag/v0.1.0
