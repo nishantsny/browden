@@ -71,7 +71,7 @@ All notable changes to browden are documented here. The format follows
   it issues no page load, so JS-built DOM state survives. It drives no browser
   action and returns no page content, so it isn't read-gated; reads stay gated on
   the tab's live URL at read time. A tab that is gone returns the usual tab-gone
-  envelope (#130).
+  envelope (#137).
 - **`press-key` write action.** A new tool/section that focuses an element and
   sends a single **control key** (Enter/Space/Tab/Escape/arrows/Home/End/
   Page{Up,Down}) — keyboard activation for controls a coordinate `click` can't
