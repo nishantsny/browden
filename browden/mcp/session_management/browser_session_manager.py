@@ -416,6 +416,29 @@ class BrowserSessionManager:
             return png
         return await self._with_tab(id, work, invalidate=False)
 
+    async def invalidate_dom_cache(self, *, id: str) -> dict:
+        """Drop ``id``'s cached DOM snapshot without touching the page itself.
+
+        The cheap counterpart to ``force_reload_tab``: nothing is reloaded, so
+        whatever the page's own JS built up in the live DOM (an expanded panel, a
+        loaded infinite-scroll batch, a half-filled form) survives — only browden's
+        parsed copy is thrown away, and the next DOM query re-fetches the live HTML.
+
+        The tab is verified to still exist first, via ``list_handles`` — cheap, and
+        unlike ``select_tab`` it doesn't move the focused window — so a tab that is
+        gone reports the standard tab-gone envelope rather than silently succeeding.
+        """
+        self.sweep_idle()
+
+        def work(handle):
+            if handle not in self._backend.list_handles():
+                raise TabNotFoundError(f"tab {handle!r} is not open")
+            logger.info(f"Invalidated cached DOM for tab {id}")
+            return {"id": id, "invalidated": True}
+        # invalidate=True is what actually drops the entry (_with_tab does it only
+        # once work has succeeded), so a gone tab never reports a bogus success.
+        return await self._with_tab(id, work, invalidate=True)
+
     async def force_reload_tab(self, *, id: str) -> dict:
         def work(handle):
             _soup, tab_info = self._cache.force_reload(handle, self._backend)

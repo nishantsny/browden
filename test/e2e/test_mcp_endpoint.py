@@ -11,7 +11,7 @@ async def test_mcp_endpoint(mcp_server, mcp_client_session):
             "list_tabs", "new_blank_tab", "close_tab", "select_tab", "navigate",
             "click", "insert_text", "press_key", "get_element_by_id",
             "get_elements_by_class_name", "query_selector", "query_selector_all",
-            "screenshot", "force_reload_tab"
+            "screenshot", "force_reload_tab", "invalidate_dom_cache"
         }
         assert set(tools) == expected_tools
     
@@ -50,6 +50,13 @@ async def test_mcp_endpoint(mcp_server, mcp_client_session):
             # MCP python SDK might raise an exception if it's a server error
             assert "ValidationError" in str(e) or "not allowed" in str(e) or "error" in str(e).lower()
     
+        # invalidate_dom_cache drops the snapshot that query built; the next read
+        # re-fetches and still answers.
+        inv_res = await mcp_client.call_tool("invalidate_dom_cache", {"id": handle})
+        assert json.loads(inv_res.content[0].text) == {"id": handle, "invalidated": True}
+        requery_res = await mcp_client.call_tool("query_selector", {"css_selector": "html", "id": handle})
+        assert json.loads(requery_res.content[0].text).get("found") is True
+
         # screenshot returns image content
         screenshot_res = await mcp_client.call_tool("screenshot", {"id": handle})
         assert not screenshot_res.isError

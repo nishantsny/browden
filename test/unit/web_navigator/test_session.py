@@ -298,6 +298,46 @@ async def test_dom_query_on_dead_page_returns_error_and_drops_it():
 
 
 @pytest.mark.asyncio
+async def test_invalidate_dom_cache_drops_the_entry_without_driving_the_page():
+    backend = FakeBackend()
+    s = make_session(backend)
+    s._cache._entries["h1"] = object()  # type: ignore[assignment]
+
+    res = await s.invalidate_dom_cache(id="ns-h1")
+
+    assert res == {"id": "ns-h1", "invalidated": True}
+    assert "h1" not in s._cache._entries  # the snapshot is gone…
+    assert "h1" in s._registry._last_access  # …but the tab is still tracked
+    # Nothing was reloaded, re-fetched, or even focused — existence is checked
+    # with list_handles, which doesn't move the focused window.
+    assert not any(c in backend.calls for c in [("reload", "h1"), ("get_tab_html", "h1"), ("select_tab", "h1")])
+
+
+@pytest.mark.asyncio
+async def test_invalidate_dom_cache_is_idempotent_on_an_uncached_page():
+    s = make_session(FakeBackend())
+    assert "h2" not in s._cache._entries
+    res = await s.invalidate_dom_cache(id="ns-h2")
+    assert res == {"id": "ns-h2", "invalidated": True}
+
+
+@pytest.mark.asyncio
+async def test_invalidate_dom_cache_on_dead_page_returns_error_and_drops_it():
+    backend = FakeBackend()
+    backend.live = {"h1"}  # h9 is not among the open tabs
+    s = make_session(backend)
+    s._registry.touch("h9")
+    s._cache._entries["h9"] = object()  # type: ignore[assignment]
+
+    res = await s.invalidate_dom_cache(id="ns-h9")
+
+    assert res == {"id": "ns-h9",
+                   "error": "tab ns-h9 is no longer open — call list_tabs for current tabs"}
+    assert "h9" not in s._cache._entries
+    assert "h9" not in s._registry._last_access  # dropped from tracking
+
+
+@pytest.mark.asyncio
 async def test_force_reload_on_dead_page_returns_error():
     backend = FakeBackend()
     backend.missing.add("h9")

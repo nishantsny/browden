@@ -131,6 +131,7 @@ verbatim; it is globally unique and routes itself to the right profile (multiple
 | `query_selector` | `document.querySelector`, server-side |
 | `query_selector_all` | `document.querySelectorAll`, server-side (paginated) |
 | `screenshot` | PNG of the tab's current viewport |
+| `invalidate_dom_cache` | Drop a tab's cached DOM so the next read re-fetches the live HTML (no page load — JS-built state survives) |
 | `force_reload_tab` | Reload a tab and refresh its cached DOM |
 | `click` | **A write action, off by default** — click a control on a host listed in the `click` allowlist; each host declares a **required** `label` regex the control's visible text must fully match (`.*` to allow any). No host is listed out of the box. |
 | `insert_text` | **A write action, off by default** — type text into a single visible, non-readonly text field (`<textarea>`, a text `<input>`, or a `contenteditable`) on a host listed in the separate `write-text` allowlist section; the field's visible label (placeholder / aria-label / associated `<label>`) must fully match that host's **required** `label` regex. |

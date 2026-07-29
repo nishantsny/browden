@@ -25,6 +25,7 @@ DNS (a navigation outcome, never a gate refusal).
 | `test_navigation.py` | backend | new_blank_tab + list_tabs (a small subset of `test_tabs.py`) |
 | `test_screenshot.py` | backend | screenshot returns real PNG bytes; defaults to active tab |
 | `test_dom_queries.py` | session-mgr | get_element_by_id / class / query_selector(_all) pagination / invalid-CSS / force_reload |
+| `test_dom_cache_invalidation.py` | session-mgr | `invalidate_dom_cache`: a page-side DOM change is stale until invalidated; invalidate keeps live DOM state that force_reload discards; closed tab → tab-gone |
 | `test_insert_text.py` | session-mgr | write-text: clear+replace input & textarea; ambiguous-selector refusal |
 | `test_anchor_click.py` | session-mgr | click an `<a>` fires its onclick; reveals a label-less field, then insert_text |
 | `test_concurrent_profiles.py` | backend | distinct profiles run concurrently & are isolated |
