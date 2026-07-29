@@ -1,10 +1,11 @@
 """Per-tab cache of parsed HTML (BeautifulSoup) with a TTL-driven auto stale-reload.
 
 **Synchronous by contract** — no ``asyncio`` import. The backend handed in is
-synchronous too. ``BrowserSessionManager`` is responsible for only ever calling these
-methods inside ``asyncio.to_thread`` (a WebDriver session is not thread-safe,
-and a serial MCP client means there's only one such call in flight at a time);
-async coordination stays in ``session.py``, never here.
+synchronous too. ``BrowserSessionManager`` is responsible for only ever calling
+these methods inside ``asyncio.to_thread`` *while holding its session's driver
+lock* — a WebDriver session is not thread-safe, and the ``select_tab`` +
+``get_tab_html`` pair below must not have another request's focus change land
+between its two halves; async coordination stays in the manager, never here.
 
 TTL is a duration against ``time.monotonic`` (clock injectable for tests) so a
 wall-clock jump can't make a fresh cache look stale.

@@ -1,6 +1,6 @@
 """Re-export validator symbols for convenient access."""
 from .allowlist import ActionAllowlist, Allowlist, ReadPolicy
-from .errors import ValidationError, tab_gone_envelope
+from .errors import SessionBusyError, ValidationError, tab_gone_envelope
 from .intent import (
     ACTIVATION_KEYS,
     classify_anchor_target,
@@ -27,6 +27,7 @@ __all__ = [
     "Allowlist",
     "PopularityAllowlist",
     "ReadPolicy",
+    "SessionBusyError",
     "TrancoList",
     "ValidationError",
     "check_action_host",

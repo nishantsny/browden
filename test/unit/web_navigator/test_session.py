@@ -5,7 +5,12 @@ import pytest
 
 from browden.common.tab import TabInfo
 from browden.web_navigator.interface import TabNotFoundError
-from browden.mcp.session_management.browser_session_manager import IDLE_TTL_SECONDS, BrowserSessionManager
+from browden.mcp.session_management.browser_session_manager import (
+    DRIVER_LOCK_TIMEOUT_SECONDS,
+    IDLE_TTL_SECONDS,
+    BrowserSessionManager,
+)
+from browden.mcp.validator import SessionBusyError
 
 PAGE_HTML = """
 <html><body>
@@ -371,6 +376,80 @@ async def test_select_dead_page_returns_envelope_and_drops_it():
     assert "h4" not in s._registry._last_access
 
 
+# -- driver lock (concurrent requests on one session) ------------------------
+
+class SlowReadBackend(FakeBackend):
+    """Reads take real time, so an unsynchronized pair WOULD interleave.
+
+    ``get_tab_html`` runs off the loop in ``asyncio.to_thread``; sleeping in it
+    gives a second coroutine every chance to slip a ``select_tab`` in between
+    this one's focus and its read — which is exactly the cross-talk the lock
+    exists to prevent. Each read returns the focused handle's own marker, so a
+    stolen focus shows up as one tab's read returning another tab's document.
+    """
+
+    def get_tab_html(self):
+        time.sleep(0.05)
+        self.calls.append(("get_tab_html", self.active))
+        return f"<html><body><p id='who'>{self.active}</p></body></html>"
+
+
+@pytest.mark.asyncio
+async def test_concurrent_reads_on_one_session_do_not_steal_each_others_focus():
+    backend = SlowReadBackend()
+    s = make_session(backend)
+
+    # Four distinct tabs, so every read is a cold-cache one that really drives
+    # the browser (a second read of the same tab would answer from the soup cache
+    # and never reach the driver).
+    handles = ("h1", "h2", "h3", "h4")
+    results = await asyncio.gather(*(s.query_selector("#who", id=f"ns-{h}") for h in handles))
+
+    assert [r["element"]["text"] for r in results] == list(handles)
+    # Every read is focus-then-act, never focus-focus-read-read.
+    driver_calls = [c for c in backend.calls if c[0] in ("select_tab", "get_tab_html")]
+    assert driver_calls == [call for h in handles
+                            for call in (("select_tab", h), ("get_tab_html", h))]
+
+
+@pytest.mark.asyncio
+async def test_driver_lock_gives_up_after_the_timeout():
+    s = make_session()
+    await s._lock.acquire()  # a request that never finishes
+
+    with pytest.raises(SessionBusyError) as excinfo:
+        async with s._driver_lock(timeout=0.05):
+            pytest.fail("must not get the lock while another request holds it")
+
+    assert "busy" in str(excinfo.value)
+    assert excinfo.value.timeout_seconds == 0.05
+    assert s._lock.locked()  # the timed-out waiter left the lock with its owner
+
+
+@pytest.mark.asyncio
+async def test_a_timed_out_request_surfaces_as_an_error_envelope():
+    # The tool layer turns SessionBusyError into the envelope agents get back.
+    from browden.mcp.server import _tool
+
+    @_tool
+    async def fake_tool(id: str) -> dict:
+        raise SessionBusyError(DRIVER_LOCK_TIMEOUT_SECONDS)
+
+    envelope = await fake_tool(id="ns-h1")
+
+    assert envelope["id"] == "ns-h1"
+    assert "busy" in envelope["error"]
+
+
+@pytest.mark.asyncio
+async def test_separate_sessions_do_not_share_a_lock():
+    # Per-session locking: a profile stuck on a long op must not stall another.
+    busy, free = make_session(), make_session()
+    await busy._lock.acquire()
+
+    await asyncio.wait_for(free.list_tabs(), timeout=1.0)  # unaffected
+
+
 # -- idle reaper ------------------------------------------------------------
 
 @pytest.mark.asyncio
@@ -469,18 +548,44 @@ def test_sweep_idle_swallows_close_errors(fake_clock):
     assert "only" not in s._registry._last_access  # still dropped from tracking
 
 
-def test_sweep_idle_is_noop_while_driver_busy(fake_clock):
+@pytest.mark.asyncio
+async def test_sweep_waits_for_the_driver_lock(fake_clock):
+    # Cleanup drives the driver too, so it must queue behind an in-flight op
+    # rather than reaching into the browser while another request holds it.
+    backend = FakeBackend()
+    backend.live = {"old"}  # still open in Chrome, just idle
+    clock = fake_clock()
+    s = make_session(backend, clock=clock)
+    s._registry.touch("old")
+    clock.t += IDLE_TTL_SECONDS + 1
+
+    await s._lock.acquire()  # stand in for a request holding the driver
+    sweep = asyncio.create_task(s._sweep_idle_locked())
+    await asyncio.sleep(0)
+    assert backend.closed == []
+    assert "list_handles" not in backend.calls  # blocked: didn't even reconcile
+
+    s._lock.release()
+    await sweep
+
+    assert backend.closed == ["old"]  # ran as soon as the driver was free
+
+
+@pytest.mark.asyncio
+async def test_sweep_is_skipped_when_the_session_stays_busy(fake_clock):
+    # Best-effort: cleanup that can't get the lock in time gives up quietly
+    # (the next tick retries) instead of raising into the caller's tool.
     backend = FakeBackend()
     clock = fake_clock()
     s = make_session(backend, clock=clock)
     s._registry.touch("old")
     clock.t += IDLE_TTL_SECONDS + 1
-    s._driver_busy = True  # simulate an in-flight asyncio.to_thread driver op
 
-    s.sweep_idle()
+    await s._lock.acquire()  # never released: the session stays busy
+    await s._sweep_idle_locked(timeout=0.05)  # must not raise
 
     assert backend.closed == []
-    assert "list_handles" not in backend.calls  # didn't even reconcile
+    assert "list_handles" not in backend.calls
     assert "old" in s._registry._last_access  # left for the next tick
 
 

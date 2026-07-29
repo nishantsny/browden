@@ -38,6 +38,7 @@ DNS (a navigation outcome, never a gate refusal).
 | `test_setup_script.py` | setup | onetime_setup.py service mode + stdio mode |
 | `test_read_scheme_gate.py` | MCP server | **https-only** default; **file://** opt-in read; **localhost** dev-server read; **about:blank** readable under deny-all; **denylist** veto |
 | `test_hot_reload.py` | MCP server | **live reload**: an allowlist edit takes effect with no restart; a broken edit keeps the last-good policy |
+| `test_concurrent_requests_one_session.py` | MCP server | **driver lock**: 10 tabs in ONE session, read all at once — each returns its own document (without the lock, reads steal each other's focus) |
 
 ## Notes on duplication
 
@@ -45,3 +46,7 @@ DNS (a navigation outcome, never a gate refusal).
   (erring toward more coverage), not a true duplicate to remove.
 - `test_concurrent_profiles.py` (backend) and `test_mcp_concurrent_profiles.py`
   (full MCP server) look similar but exercise **different layers** — both stay.
+- The three concurrency tests cover the two halves of the contract:
+  `*_concurrent_profiles.py` prove requests on **different** profiles stay
+  independent, `test_concurrent_requests_one_session.py` proves requests on the
+  **same** profile serialize instead of racing.

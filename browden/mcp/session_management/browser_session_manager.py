@@ -1,27 +1,35 @@
 """Async coordinator over a synchronous browser backend.
 
 ``BrowserSessionManager`` owns one profile's backend, its soup cache, idle
-registry, an in-flight-driver flag, and a periodic reaper task. It's also the
-owner of the **customer-facing ids** for its own tabs: constructed with a
+registry, the lock that serializes its driver, and a periodic reaper task. It's
+also the owner of the **customer-facing ids** for its own tabs: constructed with a
 ``namespace`` (the profile's digest, assigned by the store), it composes every
 tab's raw backend handle into an ``id`` of the form ``<namespace>-<handle>`` on
 the way out, and splits an incoming ``id`` back to that handle on the way in.
 The store routes an id to the right manager; the manager owns the id from there.
 
-Concurrency model (lockless, no ``threading``):
+Concurrency model (one lock per session):
 
 * One asyncio event loop (FastMCP's). The pure work — cache lookup/invalidate,
-  registry touch/forget, query, serialize, and all of ``sweep_idle`` — runs
-  synchronously on the loop thread and is therefore atomic w.r.t. other
-  coroutines.
-* Selenium is synchronous and not thread-safe, so every WebDriver call goes
-  through ``await asyncio.to_thread(...)`` (see ``_run_driver``), wrapped by
-  ``_driver_busy`` which is assigned on the loop thread immediately around the
-  ``await``. ``sweep_idle()`` short-circuits while ``_driver_busy`` is set, so
-  the reaper can never issue a command while a tool's driver op is in flight.
-* The one case the flag doesn't cover — two *tool* coroutines both reaching
-  ``to_thread`` at once — is precluded by the serial MCP stdio client (one
-  request in flight at a time), the same assumption the sync tools always made.
+  registry touch/forget, query, serialize — runs synchronously on the loop
+  thread and is therefore atomic w.r.t. other coroutines.
+* Selenium is synchronous and not thread-safe, and a session's tabs share one
+  focused window, so every WebDriver call goes through ``_run_driver``: it
+  takes this session's ``asyncio.Lock`` and only then hands the work to
+  ``asyncio.to_thread(...)``. The unit of mutual exclusion is the whole
+  ``work`` callable — which focuses its tab (``select_tab``) and *then* acts —
+  so focus-then-act is atomic and a second request cannot steal the focus
+  mid-op. Concurrent requests are therefore supported: they queue on the lock,
+  each re-focusing its own tab when its turn comes.
+* A request that cannot get the lock within ``DRIVER_LOCK_TIMEOUT_SECONDS``
+  gives up with ``SessionBusyError`` (surfaced to the agent as an error
+  envelope) rather than queueing behind a wedged op forever.
+* The lock is **per session**, so requests on different profiles still run
+  fully in parallel — one busy profile never blocks another.
+* Cleanup drives the browser too, so it takes the same lock: both callers of the
+  sweep — the reaper's tick and ``new_blank_tab``'s at-the-cap reclaim — go
+  through ``_sweep_idle_locked``. It is best-effort: a sweep that cannot get the
+  lock within the timeout is skipped rather than failing its caller.
 
 Tab identity: an ``id`` is required on every method that acts on a specific tab
 — ``navigate``, ``force_reload_tab``, and all DOM queries. None of them default
@@ -30,19 +38,22 @@ controls. An ``id`` that no longer names an open tab surfaces as
 ``{"error": ..., "id": ...}`` and the dead tab is dropped on the way out.
 """
 import asyncio
+import contextlib
 import time
 from collections.abc import Callable
 
 from ...common.logger import logger
 from ...dom import query, serialize
 from ..validator.allowlist import DEFAULT_REAP_INTERVAL_SECONDS
-from ..validator.errors import tab_gone_envelope
+from ..validator.errors import SessionBusyError, tab_gone_envelope
 from ...web_navigator.interface import TabNotFoundError
 from ...web_navigator.tab_id import format_tab_id, split_tab_id
 from ...web_navigator.registry import TabRegistry
 from ...web_navigator.soup_cache import SoupCache
 
 IDLE_TTL_SECONDS = 3600
+# How long a request waits for its turn on the session's driver before failing.
+DRIVER_LOCK_TIMEOUT_SECONDS = 10
 
 
 class _AtTabCap(Exception):
@@ -66,7 +77,8 @@ class BrowserSessionManager:
         self._cache = SoupCache(clock=clock)
         self._registry = TabRegistry(clock=clock)
         self._reap_interval_seconds = reap_interval_seconds
-        self._driver_busy = False
+        # Serializes every driver touch in this session (tools AND cleanup).
+        self._lock = asyncio.Lock()
         self._reaper_task: asyncio.Task | None = None
         if start_reaper:
             self.start_reaper()
@@ -99,6 +111,11 @@ class BrowserSessionManager:
         reaper task (a no-op flag once the loop is gone) and drives the backend's
         synchronous ``shutdown`` directly, so the Chrome subprocess this session
         launched doesn't outlive the process.
+
+        The one driver touch that deliberately skips the lock, for the same
+        reason: acquiring it needs a running loop, and there isn't one at exit.
+        Nothing else can be driving the browser by then either — the loop that
+        would have run the other requests is already stopped.
         """
         if self._reaper_task is not None:
             self._reaper_task.cancel()
@@ -116,13 +133,34 @@ class BrowserSessionManager:
 
     # -- driver dispatch ----------------------------------------------------
 
-    async def _run_driver(self, fn, *args, **kwargs):
-        """Run a synchronous backend call off the loop, flagged as in-flight."""
-        self._driver_busy = True
+    @contextlib.asynccontextmanager
+    async def _driver_lock(self, timeout: float = DRIVER_LOCK_TIMEOUT_SECONDS):
+        """Hold this session's driver lock, or raise ``SessionBusyError``.
+
+        Every driver touch in the session goes through here, so the section it
+        guards is the only thing driving that Chrome for its duration — which is
+        what makes "focus the tab, then act on it" safe under concurrent
+        requests. Waiters queue in arrival order (``asyncio.Lock`` is FIFO); one
+        that is still waiting after ``timeout`` gives up instead of piling up
+        behind a wedged op. ``wait_for`` cancels the pending acquire on timeout,
+        so a timed-out waiter never leaves the lock held.
+        """
         try:
-            return await asyncio.to_thread(fn, *args, **kwargs)
+            await asyncio.wait_for(self._lock.acquire(), timeout)
+        except TimeoutError:
+            logger.warning(
+                f"Session busy: gave up waiting {timeout:g}s for the driver "
+                f"(profile={self.profile_dir})")
+            raise SessionBusyError(timeout) from None
+        try:
+            yield
         finally:
-            self._driver_busy = False
+            self._lock.release()
+
+    async def _run_driver(self, fn, *args, **kwargs):
+        """Run a synchronous backend call off the loop, holding the driver lock."""
+        async with self._driver_lock():
+            return await asyncio.to_thread(fn, *args, **kwargs)
 
     async def _with_tab(self, id: str, work, invalidate: bool = False):
         """Run ``work(handle)`` for a specific tab off the loop, maintaining tracking.
@@ -194,7 +232,7 @@ class BrowserSessionManager:
             tab = await self._run_driver(work)
         except _AtTabCap:
             logger.info(f"At the {max_tabs}-tab cap: sweeping idle tabs before giving up")
-            self.sweep_idle()
+            await self._sweep_idle_locked()
             try:
                 tab = await self._run_driver(work)
             except _AtTabCap:
@@ -411,24 +449,38 @@ class BrowserSessionManager:
 
     # -- idle reaper --------------------------------------------------------
 
+    async def _sweep_idle_locked(self, timeout: float = DRIVER_LOCK_TIMEOUT_SECONDS) -> None:
+        """Take the driver lock and sweep — the only way cleanup should be run.
+
+        Cleanup drives the driver too (``list_handles``, ``close_tab``), so it
+        has to be serialized with the tools rather than racing them for the
+        focused window. Best-effort by design: if the session stays busy for the
+        whole timeout, this sweep is skipped (``_driver_lock`` logs it) and the
+        next tick catches up. Cleanup falling behind is never worth failing a
+        request the agent asked for — including the at-the-cap reclaim, whose
+        caller then simply reports the cap as it would have anyway.
+        """
+        with contextlib.suppress(SessionBusyError):
+            async with self._driver_lock(timeout):
+                self.sweep_idle()
+
     def sweep_idle(self, now: float | None = None) -> None:
         """Reconcile against the live tabs, then close + drop the idle ones. Runs on the loop thread.
 
-        Runs on the reaper's cadence only — tools deliberately don't sweep, so
-        cleanup costs a `list_handles` round-trip per interval rather than one on
-        every single tool call. Short-circuits while a driver op is in flight
-        (``_driver_busy``); the next tick catches everything it skipped. The
-        driver calls here (``list_handles``, ``close_tab``) are synchronous and
-        briefly block the loop — bounded and rare, acceptable; ``list_handles``
-        is cheap (no per-tab focus changes). The last remaining tab is left open (closing the
+        **Callers must hold the driver lock** — go through ``_sweep_idle_locked``
+        rather than calling this directly. Its two callers are the reaper's tick
+        and ``new_blank_tab``'s at-the-cap reclaim; tools deliberately don't
+        sweep, so cleanup costs a ``list_handles`` round-trip per interval rather
+        than one on every single tool call. The driver calls here
+        (``list_handles``, ``close_tab``) are synchronous and briefly block the
+        loop — bounded and rare, acceptable; ``list_handles`` is cheap (no
+        per-tab focus changes). The last remaining tab is left open (closing the
         only window would quit the driver) but is still dropped from the
         cache/registry so it stops being tracked until touched again.
 
         Everything here is keyed by raw backend handles (what ``list_handles``
         reports and the registry stores), so no id composition is involved.
         """
-        if self._driver_busy:
-            return
         # Reconcile: a tab the human closed in Chrome (and the agent never
         # touched again) is gone — drop it from tracking now rather than waiting
         # for its idle TTL to elapse and the close_tab below to no-op on it.
@@ -468,6 +520,6 @@ class BrowserSessionManager:
         while True:
             await asyncio.sleep(self._reap_interval_seconds())
             try:
-                self.sweep_idle()
+                await self._sweep_idle_locked()
             except Exception:
                 pass

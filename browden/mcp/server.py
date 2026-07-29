@@ -23,6 +23,7 @@ from .session_management.browser_session_store import BrowserSessionStore, Unkno
 
 from .validator import (
     ActionAllowlist,
+    SessionBusyError,
     ValidationError,
     check_action_host,
     ensure_url_allowed,
@@ -37,7 +38,7 @@ DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 8000
 
 _INSTRUCTIONS = (
-    "browden drives a real Chrome session. Within a single profile-dir there is ONE browser session. You can open multiple tabs within that one session, but concurrent requests are only supported across different sessions, never within the same session (a limitation of selenium, the underlying automation library). A new profile-dir can be chosen while creating a new tab. If you choose a previously used profile-dir, then the previous session will be reused. Creating a new tab will return a tab-id which is unique across all sessions, pass it back verbatim on other tools. A tab must be selected before any operation acts on it: passing a tool the tab's id selects that tab, and only one tab per session can be selected at a time, so operate on a session's tabs one at a time."
+    "browden drives a real Chrome session. Within a single profile-dir there is ONE browser session. You can open multiple tabs within that one session, and you may fire concurrent requests at them: selenium (the underlying automation library) is not thread-safe, so a session serves its requests one at a time behind a lock, each re-selecting its own tab when its turn comes. A request that waits more than 10s for its turn comes back with a 'browser session busy' error; retry it. A new profile-dir can be chosen while creating a new tab. If you choose a previously used profile-dir, then the previous session will be reused. Creating a new tab will return a tab-id which is unique across all sessions, pass it back verbatim on other tools. A tab must be selected before any operation acts on it: passing a tool the tab's id selects that tab, and only one tab per session can be selected at a time."
 )
 
 
@@ -121,13 +122,24 @@ def _backend_for(profile_dir: str | None) -> SeleniumChromeBackend:
 
 
 def _tool(fn: Callable[..., Awaitable[dict]]) -> Callable[..., Awaitable[dict]]:
-    """Turn UnknownTabError into the standard error envelope tools return."""
+    """Turn UnknownTabError / SessionBusyError into the error envelopes tools return.
+
+    ``SessionBusyError`` means this request waited out the driver-lock timeout
+    behind other requests on the same profile (see ``BrowserSessionManager``);
+    the tab it names is fine, so the envelope echoes the ``id`` back the way the
+    tab-gone one does, and the agent can simply retry.
+    """
     @functools.wraps(fn)
     async def wrapper(*args, **kwargs) -> dict:
         try:
             return await fn(*args, **kwargs)
         except UnknownTabError as e:
             return e.envelope
+        except SessionBusyError as e:
+            # FastMCP calls tools with keyword arguments, so the tab's id (if the
+            # tool takes one) is in kwargs.
+            id = kwargs.get("id")
+            return e.envelope if id is None else {**e.envelope, "id": id}
     return wrapper
 
 
@@ -138,8 +150,8 @@ async def list_tabs() -> list[dict]:
     """List all open browser tabs across all profiles' sessions.
 
     Within a profile this drives the shared focused window like any other tab
-    call: issue calls sequentially — concurrent requests (even to different
-    ids) race over the focused window and give undefined results.
+    call, so it queues behind whatever else that profile is doing; concurrent
+    calls are safe, they are just served one at a time per profile.
 
     Profiles whose Chrome has exited are skipped (they have no open tabs);
     listing never relaunches a browser.
@@ -147,6 +159,17 @@ async def list_tabs() -> list[dict]:
     logger.info("Tool called: list_tabs")
 
     async def _fetch(session) -> list[dict]:
+        try:
+            return await _fetch_profile(session)
+        except SessionBusyError as e:
+            # One profile too busy to answer must not sink the whole listing, and
+            # must not look like "that profile has no tabs" either — report it in
+            # place of its tabs so the agent knows to retry rather than assuming
+            # the tabs are gone.
+            logger.warning(f"list_tabs: session busy (profile={session.profile_dir})")
+            return [{"error": str(e), "profile_dir": session.profile_dir}]
+
+    async def _fetch_profile(session) -> list[dict]:
         if not await session.is_live():
             logger.info(f"list_tabs: skipping dead session (profile={session.profile_dir})")
             return []
@@ -178,9 +201,10 @@ async def new_blank_tab(profile_dir: str | None = None) -> dict:
     Optional profile_dir runs the request in an independent Chrome profile; the
     returned id is only valid for that same profile.
 
-    Only one tab can be driven at a time within a profile: interact with tabs
-    sequentially — concurrent requests (even to different ids) race over
-    the shared focused window and give undefined results.
+    Only one tab can be driven at a time within a profile: concurrent requests
+    to a profile's tabs are safe but are served one after another (each
+    re-selects its own tab), so they do not run in parallel. Use separate
+    profile_dirs for genuine parallelism.
     """
     logger.info(f"Tool called: new_blank_tab (profile_dir={profile_dir!r})")
     try:
