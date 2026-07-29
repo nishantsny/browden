@@ -31,9 +31,11 @@ controls. An ``id`` that no longer names an open tab surfaces as
 """
 import asyncio
 import time
+from collections.abc import Callable
 
 from ...common.logger import logger
 from ...dom import query, serialize
+from ..validator.allowlist import DEFAULT_REAP_INTERVAL_SECONDS
 from ..validator.errors import tab_gone_envelope
 from ...web_navigator.interface import TabNotFoundError
 from ...web_navigator.tab_id import format_tab_id, split_tab_id
@@ -41,15 +43,29 @@ from ...web_navigator.registry import TabRegistry
 from ...web_navigator.soup_cache import SoupCache
 
 IDLE_TTL_SECONDS = 3600
-REAP_INTERVAL_SECONDS = 300
+
+
+class _AtTabCap(Exception):
+    """Internal: the session is full. Never leaves this module.
+
+    Distinct from the ``RuntimeError`` the caller ends up seeing, so the
+    reclaim-and-retry in ``new_blank_tab`` can tell "no room" apart from a
+    backend failure — and so a backend error can't masquerade as the cap.
+    """
 
 
 class BrowserSessionManager:
-    def __init__(self, backend, *, namespace: str, clock=time.monotonic, start_reaper: bool = True):
+    def __init__(self, backend, *, namespace: str, clock=time.monotonic, start_reaper: bool = True,
+                 reap_interval_seconds: Callable[[], float] = lambda: DEFAULT_REAP_INTERVAL_SECONDS):
+        # reap_interval_seconds is a getter, not a number: the reaper reads it
+        # once per tick, so an ``infra.reap_interval_seconds`` edit takes effect
+        # on the next wake-up like every other live-reloaded setting, without
+        # restarting the server or the session.
         self._backend = backend
         self._namespace = namespace
         self._cache = SoupCache(clock=clock)
         self._registry = TabRegistry(clock=clock)
+        self._reap_interval_seconds = reap_interval_seconds
         self._driver_busy = False
         self._reaper_task: asyncio.Task | None = None
         if start_reaper:
@@ -148,7 +164,6 @@ class BrowserSessionManager:
 
     async def list_tabs(self) -> list[dict]:
         """Return this profile's open tabs as wire dicts, each with its composite id."""
-        self.sweep_idle()
         tabs = await self._run_driver(self._backend.list_tabs)
         logger.info(f"Listed {len(tabs)} tabs")
         result = []
@@ -158,19 +173,38 @@ class BrowserSessionManager:
         return result
 
     async def new_blank_tab(self, max_tabs: int) -> dict:
-        self.sweep_idle()
+        """Open a blank tab, reclaiming idle ones first if the session is full.
+
+        The cap is judged on the live tab count, inside the same driver op that
+        opens the tab, so the check can't go stale between deciding and acting.
+
+        Hitting it triggers a sweep and one retry. This is the only place that
+        sweeps outside the reaper's tick, and deliberately so: the cost lands on
+        the rare request that would otherwise fail rather than on every tool
+        call, and if the sweep frees nothing it cost one extra ``list_handles``
+        on a request that was failing anyway. It also makes the error honest —
+        "session limit reached" now means there was nothing idle left to reclaim,
+        not merely that the reaper hadn't ticked yet.
+        """
         def work():
             if len(self._backend.list_handles()) >= max_tabs:
-                raise RuntimeError(f"session limit of {max_tabs} tabs reached")
+                raise _AtTabCap
             return self._backend.new_blank_tab()
-        tab = await self._run_driver(work)
+        try:
+            tab = await self._run_driver(work)
+        except _AtTabCap:
+            logger.info(f"At the {max_tabs}-tab cap: sweeping idle tabs before giving up")
+            self.sweep_idle()
+            try:
+                tab = await self._run_driver(work)
+            except _AtTabCap:
+                raise RuntimeError(f"session limit of {max_tabs} tabs reached") from None
         logger.info(f"Created new tab: {tab.handle}")
         self._cache.invalidate(tab.handle)
         self._registry.touch(tab.handle)
         return tab.as_dict(id=self._id(tab.handle))
 
     async def close_tab(self, id: str) -> None:
-        self.sweep_idle()
         handle = self._handle(id)
         # Only TabNotFoundError is swallowed: a last-tab ValueError (or any other backend
         # failure) means the tab is still open, so its cache/registry entries must stay.
@@ -183,8 +217,6 @@ class BrowserSessionManager:
         self._registry.forget(handle)
 
     async def select_tab(self, id: str) -> dict:
-        self.sweep_idle()
-
         def work(handle):
             self._backend.select_tab(handle)
             logger.info(f"Selected tab: {id}")
@@ -192,8 +224,6 @@ class BrowserSessionManager:
         return await self._with_tab(id, work)
 
     async def navigate(self, url: str, *, id: str) -> dict:
-        self.sweep_idle()
-
         def work(handle):
             self._backend.select_tab(handle)
             tab = self._backend.navigate(url)
@@ -214,7 +244,6 @@ class BrowserSessionManager:
         (which renders the tab-gone envelope): a gone tab is None here, which the
         caller — the per-action gate — turns into the envelope.
         """
-        self.sweep_idle()
         handle = self._handle(id)
 
         def work():
@@ -238,8 +267,6 @@ class BrowserSessionManager:
         snapshot. Here we re-find it live and click; the soup cache is then
         invalidated because the DOM has changed.
         """
-        self.sweep_idle()
-
         def work(handle):
             self._backend.select_tab(handle)
             result = self._backend.click_element(css_selector)
@@ -256,8 +283,6 @@ class BrowserSessionManager:
         cached snapshot. Here we re-find it live and set its value; the soup cache
         is then invalidated because the DOM has changed.
         """
-        self.sweep_idle()
-
         def work(handle):
             self._backend.select_tab(handle)
             result = self._backend.insert_text_element(css_selector, value)
@@ -275,8 +300,6 @@ class BrowserSessionManager:
         the key; the soup cache is invalidated because the key may have changed the
         DOM (activated a control, moved a selection).
         """
-        self.sweep_idle()
-
         def work(handle):
             self._backend.select_tab(handle)
             result = self._backend.press_key_element(css_selector, key)
@@ -290,8 +313,6 @@ class BrowserSessionManager:
     async def get_element_by_id(self, element_id: str, *, id: str,
                                 include_html: bool = False,
                                 max_html_bytes: int = serialize.DEFAULT_MAX_HTML_BYTES) -> dict:
-        self.sweep_idle()
-
         def work(handle):
             soup, reloaded = self._cache.get_soup(handle, self._backend)
             el = query.by_id(soup, element_id)
@@ -307,8 +328,6 @@ class BrowserSessionManager:
                                          limit: int = query.LIMIT_DEFAULT, offset: int = 0,
                                          include_html: bool = False,
                                          max_html_bytes: int = serialize.DEFAULT_MAX_HTML_BYTES) -> dict:
-        self.sweep_idle()
-
         def work(handle):
             soup, reloaded = self._cache.get_soup(handle, self._backend)
             result = query.by_class(soup, class_names, limit, offset)
@@ -318,8 +337,6 @@ class BrowserSessionManager:
     async def query_selector(self, css_selector: str, *, id: str,
                              include_html: bool = False,
                              max_html_bytes: int = serialize.DEFAULT_MAX_HTML_BYTES) -> dict:
-        self.sweep_idle()
-
         def work(handle):
             soup, reloaded = self._cache.get_soup(handle, self._backend)
             try:
@@ -338,8 +355,6 @@ class BrowserSessionManager:
                                  limit: int = query.LIMIT_DEFAULT, offset: int = 0,
                                  include_html: bool = False,
                                  max_html_bytes: int = serialize.DEFAULT_MAX_HTML_BYTES) -> dict:
-        self.sweep_idle()
-
         def work(handle):
             soup, reloaded = self._cache.get_soup(handle, self._backend)
             try:
@@ -356,8 +371,6 @@ class BrowserSessionManager:
         nor invalidates the soup cache. Returns raw PNG bytes, or the standard
         ``{"error": ..., "id": ...}`` envelope if the tab is gone.
         """
-        self.sweep_idle()
-
         def work(handle):
             self._backend.select_tab(handle)
             png = self._backend.screenshot()
@@ -366,8 +379,6 @@ class BrowserSessionManager:
         return await self._with_tab(id, work, invalidate=False)
 
     async def force_reload_tab(self, *, id: str) -> dict:
-        self.sweep_idle()
-
         def work(handle):
             _soup, tab_info = self._cache.force_reload(handle, self._backend)
             return {"id": id, "url": tab_info.url, "title": tab_info.title, "reloaded": True}
@@ -403,11 +414,13 @@ class BrowserSessionManager:
     def sweep_idle(self, now: float | None = None) -> None:
         """Reconcile against the live tabs, then close + drop the idle ones. Runs on the loop thread.
 
-        Short-circuits while a driver op is in flight (``_driver_busy``): the next
-        tick (or the next tool's lazy sweep) catches everything. The driver calls
-        here (``list_handles``, ``close_tab``) are synchronous and briefly block
-        the loop — bounded and rare, acceptable; ``list_handles`` is cheap (no
-        per-tab focus changes). The last remaining tab is left open (closing the
+        Runs on the reaper's cadence only — tools deliberately don't sweep, so
+        cleanup costs a `list_handles` round-trip per interval rather than one on
+        every single tool call. Short-circuits while a driver op is in flight
+        (``_driver_busy``); the next tick catches everything it skipped. The
+        driver calls here (``list_handles``, ``close_tab``) are synchronous and
+        briefly block the loop — bounded and rare, acceptable; ``list_handles``
+        is cheap (no per-tab focus changes). The last remaining tab is left open (closing the
         only window would quit the driver) but is still dropped from the
         cache/registry so it stops being tracked until touched again.
 
@@ -445,8 +458,15 @@ class BrowserSessionManager:
         return self._reaper_task
 
     async def _reaper_loop(self) -> None:
+        """Sweep on a fixed cadence — the only thing that runs the sweep.
+
+        The interval is re-read every tick, so an ``infra.reap_interval_seconds``
+        edit lands on the next wake-up without a restart. A sweep that raises
+        must never kill the loop: the session would then keep its idle tabs
+        forever, so the failure is swallowed and the next tick tries again.
+        """
         while True:
-            await asyncio.sleep(REAP_INTERVAL_SECONDS)
+            await asyncio.sleep(self._reap_interval_seconds())
             try:
                 self.sweep_idle()
             except Exception:

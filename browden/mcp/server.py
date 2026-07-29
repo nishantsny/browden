@@ -184,7 +184,12 @@ async def new_blank_tab(profile_dir: str | None = None) -> dict:
     """
     logger.info(f"Tool called: new_blank_tab (profile_dir={profile_dir!r})")
     try:
-        session = _store.get_or_create_session(_backend_for(profile_dir), max_sessions=_refresher.allowlist.max_browser_sessions)
+        session = _store.get_or_create_session(
+            _backend_for(profile_dir),
+            max_sessions=_refresher.allowlist.max_browser_sessions,
+            # A getter, not a value: the session's reaper re-reads it every tick,
+            # so an infra.reap_interval_seconds edit lands without a restart.
+            reap_interval_seconds=lambda: _refresher.allowlist.reap_interval_seconds)
         result = await session.new_blank_tab(max_tabs=_refresher.allowlist.max_tabs_per_session)  # wire dict with composite id
     except RuntimeError as e:
         return {"error": str(e)}

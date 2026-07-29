@@ -240,6 +240,36 @@ async def test_new_blank_tab_tool_delegates_and_stamps_namespace():
 
 
 @pytest.mark.asyncio
+async def test_new_blank_tab_hands_the_session_a_live_reap_interval(monkeypatch):
+    """The configured cadence reaches the reaper, and keeps tracking the config.
+
+    The wiring is the point: `infra.reap_interval_seconds` is only useful if the
+    value the session's reaper reads each tick is the *current* one, so what the
+    store receives must be a getter over the live allowlist — not a number
+    snapshotted when the session happened to be created.
+    """
+    import browden.mcp.server as server
+    from browden.configs.loader import AllowlistRefresher
+    from browden.mcp.validator import ActionAllowlist
+    importlib.reload(server)
+
+    session = _fake_session(new_blank_tab={"id": "pre-h1"})
+    with patch.object(server._store, "get_or_create_session", return_value=session) as get_session:
+        monkeypatch.setattr(server, "_refresher", AllowlistRefresher.static(
+            ActionAllowlist({"infra": {"reap_interval_seconds": 600}})))
+        await server.new_blank_tab(profile_dir=None)
+
+        interval = get_session.call_args.kwargs["reap_interval_seconds"]
+        assert interval() == 600
+
+        # A hot reload swaps the allowlist in place; the same getter must now
+        # report the new cadence, with no new session and no restart.
+        monkeypatch.setattr(server, "_refresher", AllowlistRefresher.static(
+            ActionAllowlist({"infra": {"reap_interval_seconds": 30}})))
+        assert interval() == 30
+
+
+@pytest.mark.asyncio
 async def test_navigate_tool_validates_then_delegates():
     import browden.mcp.server as server
     importlib.reload(server)

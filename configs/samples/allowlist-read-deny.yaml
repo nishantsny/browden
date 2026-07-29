@@ -94,3 +94,9 @@ read:
 infra:
   max_browser_sessions: 10
   max_tabs_per_session: 20
+  # How often (seconds) the idle sweep runs: it closes tabs the agent
+  # hasn't touched in an hour, and forgets tabs closed in the browser.
+  # It is the ONLY cleanup pass — tool calls never sweep — so a tab is
+  # closed between 1h and 1h + this interval after its last use. Lower it
+  # to reclaim tabs sooner, raise it to leave a long-running window alone.
+  reap_interval_seconds: 7200

@@ -7,6 +7,15 @@ import yaml
 from .popularity import PopularityAllowlist
 from .tranco import DEFAULT_TOP_N, TRANCO_FILENAME, canonical_host
 
+# Defaults for the `infra` section. They live here, with the rest of the config
+# layer, so there is exactly one place that says what an unset knob means; the
+# session layer imports the reap default rather than restating it.
+DEFAULT_MAX_BROWSER_SESSIONS = 10
+DEFAULT_MAX_TABS_PER_SESSION = 20
+# How often the idle reaper wakes. Deliberately coarse: sweeping is the only
+# cleanup pass (tools never sweep), and a tab idle for an hour can wait.
+DEFAULT_REAP_INTERVAL_SECONDS = 7200
+
 # canonical_host is imported (not redefined) so the denylist/overrides normalize
 # hosts identically to the Tranco check — a trailing dot or leading www. must not
 # make the two gates disagree (finding H3).
@@ -380,8 +389,9 @@ class ActionAllowlist:
         self._sections: dict[str, Allowlist] = {}
         # action -> canonical host -> ordered page rules (label + field_ids).
         self._rules: "dict[str, dict[str, list[PageRule]]]" = {}
-        self.max_browser_sessions = 10
-        self.max_tabs_per_session = 20
+        self.max_browser_sessions = DEFAULT_MAX_BROWSER_SESSIONS
+        self.max_tabs_per_session = DEFAULT_MAX_TABS_PER_SESSION
+        self.reap_interval_seconds = DEFAULT_REAP_INTERVAL_SECONDS
         # A denylist blocks broadly: prefix match, not fullmatch (see Allowlist).
         self._denylist = Allowlist.create_denylist(
             _coerce_section(sections.get("denylist"), want_label=False, where="denylist"))
@@ -390,8 +400,12 @@ class ActionAllowlist:
         for action, rules in sections.items():
             if action in ("infra", "read", "denylist"):
                 if action == "infra" and isinstance(rules, dict):
-                    self.max_browser_sessions = int(rules.get("max_browser_sessions", 10))
-                    self.max_tabs_per_session = int(rules.get("max_tabs_per_session", 20))
+                    self.max_browser_sessions = int(
+                        rules.get("max_browser_sessions", DEFAULT_MAX_BROWSER_SESSIONS))
+                    self.max_tabs_per_session = int(
+                        rules.get("max_tabs_per_session", DEFAULT_MAX_TABS_PER_SESSION))
+                    self.reap_interval_seconds = int(
+                        rules.get("reap_interval_seconds", DEFAULT_REAP_INTERVAL_SECONDS))
                 continue
             host_rules = _coerce_section(rules, want_label=True, where=action)
             self._rules[action] = {canonical_host(h): rs for h, rs in host_rules.items()}

@@ -7,6 +7,31 @@ All notable changes to browden are documented here. The format follows
 
 ## [Unreleased]
 
+### Changed
+- **Idle cleanup is no longer done on the request path.** Every tool call used
+  to run the idle sweep first — a live `list_handles()` round-trip to the browser
+  on *every* call, to maybe close a tab that had been untouched for an hour. The
+  sweep now runs only on the reaper's timer, so a tool call costs exactly the
+  driver work it asked for.
+- **The reaper's cadence moved to the config: `infra.reap_interval_seconds`,
+  defaulting to 7200 (2h).** Like every other allowlist setting it is
+  live-reloaded: the reaper re-reads it each tick, so an edit lands on the
+  next wake-up without restarting the server. A tab is now closed between 1h
+  (`IDLE_TTL_SECONDS`) and 1h + one interval after its last *agent* use; lower
+  the interval to reclaim tabs sooner.
+- **Hitting the per-session tab cap now reclaims idle tabs and retries.** With
+  tool calls no longer sweeping, a session whose tabs had gone idle would sit
+  wedged at `max_tabs_per_session` until the reaper's next tick; instead
+  `new_blank_tab` sweeps once when it finds the session full and tries again.
+  It is the only sweep outside the reaper's tick, so the cost falls on the rare
+  request that would otherwise fail rather than on every call — and
+  `session limit of N tabs reached` now means there was genuinely nothing idle
+  left to reclaim.
+- One consequence of dropping the lazy sweep remains, bounded by the interval:
+  tabs the human closed in Chrome stay tracked until the next reconcile. Acting
+  on one already returned the tab-gone envelope, so this is a bookkeeping delay,
+  not a behaviour change for the agent.
+
 ## [1.2.0] — 2026-07-28
 
 ### Added
