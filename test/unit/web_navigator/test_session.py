@@ -373,6 +373,67 @@ async def test_select_dead_page_returns_envelope_and_drops_it():
 
 # -- idle reaper ------------------------------------------------------------
 
+@pytest.mark.asyncio
+async def test_tools_do_not_sweep():
+    # Cleanup is the reaper's job alone. A tool that swept would pay for a
+    # list_handles round-trip on every single call to maybe close a tab that has
+    # been idle for an hour — the reaper's tick catches it either way.
+    backend = FakeBackend()
+    s = make_session(backend)
+
+    await s.list_tabs()
+    await s.new_blank_tab(max_tabs=10)
+    await s.select_tab("ns-h1")
+    await s.query_selector("#logo", id="ns-h1")
+    await s.close_tab("ns-h2")
+
+    # new_blank_tab's own cap check is the only list_handles here (one call),
+    # and nothing closed a tab that the test didn't ask to close.
+    assert backend.calls.count("list_handles") == 1
+    assert backend.closed == ["h2"]
+
+
+@pytest.mark.asyncio
+async def test_reaper_re_reads_its_interval_every_tick(monkeypatch):
+    # The interval is a getter so an infra.reap_interval_seconds edit lands on
+    # the next wake-up — the reaper must not cache the value it started with.
+    intervals = [0.01, 0.02]
+    slept: list[float] = []
+
+    async def fake_sleep(seconds):
+        slept.append(seconds)
+        if len(slept) >= 3:
+            raise asyncio.CancelledError
+    monkeypatch.setattr(asyncio, "sleep", fake_sleep)
+
+    s = make_session(FakeBackend())
+    s._reap_interval_seconds = lambda: intervals[min(len(slept), len(intervals) - 1)]
+    with pytest.raises(asyncio.CancelledError):
+        await s._reaper_loop()
+
+    assert slept == [0.01, 0.02, 0.02]
+
+
+@pytest.mark.asyncio
+async def test_reaper_survives_a_failing_sweep(monkeypatch):
+    # A sweep that raises must not kill the loop: the session would keep its
+    # idle tabs for the rest of the process's life.
+    calls = {"n": 0}
+
+    async def fake_sleep(seconds):
+        calls["n"] += 1
+        if calls["n"] > 2:
+            raise asyncio.CancelledError
+    monkeypatch.setattr(asyncio, "sleep", fake_sleep)
+
+    s = make_session(FakeBackend())
+    s.sweep_idle = lambda: (_ for _ in ()).throw(RuntimeError("driver exploded"))
+    with pytest.raises(asyncio.CancelledError):
+        await s._reaper_loop()
+
+    assert calls["n"] == 3  # kept ticking after the failures
+
+
 def test_sweep_idle_closes_invalidates_forgets_idle_pages(fake_clock):
     backend = FakeBackend()
     backend.live = {"old1", "old2", "fresh"}  # all still open in Chrome
@@ -478,15 +539,53 @@ class LiveCountBackend(FakeBackend):
 
 @pytest.mark.asyncio
 async def test_new_blank_tab_raises_at_the_tab_cap():
-    """At the per-session tab cap, new_blank_tab raises instead of opening one."""
+    """At the cap with nothing idle, new_blank_tab raises instead of opening one."""
     backend = FakeBackend()
     backend.live = {"h1", "h2"}  # already at a cap of 2
     s = make_session(backend)
+    s._registry.touch("h1")  # both tabs are in active use, so the sweep
+    s._registry.touch("h2")  # below has nothing to reclaim
 
     with pytest.raises(RuntimeError, match="session limit of 2 tabs reached"):
         await s.new_blank_tab(max_tabs=2)
 
     assert "new_blank_tab" not in backend.calls  # never asked the backend to open one
+    assert backend.closed == []  # and an in-use tab is never sacrificed for a new one
+
+
+@pytest.mark.asyncio
+async def test_hitting_the_cap_reclaims_idle_tabs_and_retries(fake_clock):
+    """At the cap, an idle tab is swept and the request succeeds on the retry.
+
+    This is what keeps the cap self-healing now that tool calls don't sweep:
+    without it, a session whose tabs went idle stays wedged at its cap until the
+    reaper's next tick (up to `infra.reap_interval_seconds` later).
+    """
+    backend = LiveCountBackend()
+    clock = fake_clock()
+    s = make_session(backend, clock=clock)
+    s._registry.touch("h1")
+
+    t2 = await s.new_blank_tab(max_tabs=2)  # fills the session to its cap
+    clock.t += IDLE_TTL_SECONDS + 1  # ... and both tabs go idle
+
+    t3 = await s.new_blank_tab(max_tabs=2)
+
+    assert t3["id"] != t2["id"]  # a real new tab, not the old one echoed back
+    assert set(backend.closed) == {"h1", "h2"}  # the idle pair was reclaimed
+    assert backend.live == {"h3"}  # back under the cap, holding only the new tab
+
+
+@pytest.mark.asyncio
+async def test_the_cap_sweep_only_runs_when_the_session_is_full():
+    """Below the cap, opening a tab must not pay for a sweep."""
+    backend = LiveCountBackend()  # one live tab, cap of 10
+    s = make_session(backend)
+
+    await s.new_blank_tab(max_tabs=10)
+
+    # One list_handles: the cap check itself. A sweep would add a second.
+    assert backend.calls.count("list_handles") == 1
 
 
 @pytest.mark.asyncio

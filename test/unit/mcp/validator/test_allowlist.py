@@ -1,6 +1,11 @@
 import pytest
 
 from browden.mcp.validator import ActionAllowlist
+from browden.mcp.validator.allowlist import (
+    DEFAULT_MAX_BROWSER_SESSIONS,
+    DEFAULT_MAX_TABS_PER_SESSION,
+    DEFAULT_REAP_INTERVAL_SECONDS,
+)
 
 
 @pytest.fixture
@@ -386,6 +391,22 @@ def test_legacy_and_page_rule_forms_coexist():
     assert al.rules_for("click", "ebay.com", "/anything")
     assert al.rules_for("click", "amazon.com", "/dp/x")
     assert al.rules_for("click", "amazon.com", "/other") == []
+
+
+# -- infra knobs -------------------------------------------------------------
+
+def test_infra_defaults_when_the_section_is_absent():
+    al = ActionAllowlist({})
+    assert al.max_browser_sessions == DEFAULT_MAX_BROWSER_SESSIONS
+    assert al.max_tabs_per_session == DEFAULT_MAX_TABS_PER_SESSION
+    assert al.reap_interval_seconds == DEFAULT_REAP_INTERVAL_SECONDS == 7200
+
+
+def test_infra_reap_interval_is_read_from_the_config():
+    al = ActionAllowlist({"infra": {"reap_interval_seconds": 600}})
+    assert al.reap_interval_seconds == 600
+    # An unset sibling keeps its default rather than following the one that was set.
+    assert al.max_tabs_per_session == DEFAULT_MAX_TABS_PER_SESSION
 
 
 # The shipped sample (configs/samples/read_only_on_popular_websites.yaml) is

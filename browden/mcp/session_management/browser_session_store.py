@@ -15,11 +15,12 @@ The server — not the backend — composes the customer-facing ``id`` as
 """
 import atexit
 import hashlib
+from collections.abc import Callable
 
 from ...common.logger import logger
 from ...web_navigator.interface import WebNavigatorBackend
 from ...web_navigator.tab_id import split_tab_id
-from .browser_session_manager import BrowserSessionManager
+from .browser_session_manager import DEFAULT_REAP_INTERVAL_SECONDS, BrowserSessionManager
 
 
 class UnknownTabError(LookupError):
@@ -59,7 +60,10 @@ class BrowserSessionStore:
             digest = self._digests[key] = full[:n]
         return digest
 
-    def get_or_create_session(self, backend: WebNavigatorBackend, max_sessions: int) -> BrowserSessionManager:
+    def get_or_create_session(
+            self, backend: WebNavigatorBackend, max_sessions: int,
+            reap_interval_seconds: Callable[[], float] = lambda: DEFAULT_REAP_INTERVAL_SECONDS,
+    ) -> BrowserSessionManager:
         """Cache (and return) the coordinator for ``backend``'s profile.
 
         The caller (the server) builds ``backend`` bound to a concrete, resolved
@@ -73,6 +77,11 @@ class BrowserSessionStore:
         — safe for ``BrowserSessionManager.__init__`` to ``asyncio.create_task``
         the reaper. Runs synchronously on the single event loop (no await between
         lookup and insert), so get-then-set cannot interleave.
+
+        ``reap_interval_seconds`` is passed through to the new session's reaper as
+        a *getter* so it keeps tracking the live config (the caller reads it off
+        the hot-reloaded allowlist); an already-cached session keeps the getter it
+        was built with — which is the same live one.
         """
         key = str(backend.get_profile_dir())
         digest = self.digest_for(key)
@@ -81,7 +90,8 @@ class BrowserSessionStore:
             if len(self._sessions) >= max_sessions:
                 raise RuntimeError(f"Cannot start a new browser session (limit of {max_sessions} reached)")
             logger.info(f"Initializing BrowserSessionManager (profile={key})")
-            session = BrowserSessionManager(backend, namespace=digest)
+            session = BrowserSessionManager(backend, namespace=digest,
+                                            reap_interval_seconds=reap_interval_seconds)
             self._sessions[digest] = session
             if not self._atexit_registered:
                 atexit.register(self._shutdown)

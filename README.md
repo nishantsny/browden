@@ -287,7 +287,11 @@ Key points of the flow:
   `id` (a `<profile>-<handle>` composite) back to the session that owns it.
 - **The session** is the async coordinator: it runs the synchronous, non-thread-
   safe Selenium backend off the event loop, one operation at a time, and manages
-  the per-tab DOM cache and idle-tab cleanup.
+  the per-tab DOM cache and idle-tab cleanup. Cleanup is a background pass on a
+  timer (`infra.reap_interval_seconds`, 2h by default) — never work done on a
+  tool call — that closes tabs the agent hasn't touched in an hour and forgets
+  tabs the human closed in the browser. A tab is therefore closed between 1h and
+  1h + one interval after its last use; only *agent* activity counts as use.
 - **The backend** is the only code that imports a browser library. It launches
   Chrome *itself* — a plain `google-chrome --user-data-dir=… --remote-debugging-
   port=…` subprocess — and *attaches* Selenium over the DevTools port. It

@@ -31,6 +31,8 @@ DNS (a navigation outcome, never a gate refusal).
 | `test_mcp_concurrent_profiles.py` | MCP server | two MCP clients / two profiles: isolation, id namespacing, routing |
 | `test_mcp_endpoint.py` | MCP server | tool list; new_blank_tab/list/query; **data: navigate refused**; screenshot; close |
 | `test_resource_caps.py` | MCP server | per-session tab cap & browser-session cap (trip + recover) |
+| `test_tab_cap_reclaim.py` | session-mgr | hitting the tab cap sweeps idle tabs and retries; refuses (sacrificing nothing) when all tabs are in use |
+| `test_idle_reaper.py` | session-mgr | **the reaper's timer**: one tick at the configured interval really closes an idle tab in Chrome and spares a used one; nothing is reaped before a tick lands |
 | `test_psl_read_gate.py` | MCP server | **PSL** host reduction: public-suffix subdomain & lookalike refused; listed registrable domain allowed (H1/H3) |
 | `test_fetch_tranco_pipeline.py` | setup | fetch_tranco id-resolve → download → parse → gzip → TrancoList membership |
 | `test_setup_script.py` | setup | onetime_setup.py service mode + stdio mode |

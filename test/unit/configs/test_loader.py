@@ -231,6 +231,8 @@ def test_load_page_scoped_rules(tmp_path):
      "match_on: must be 'path' or 'url'"),
     # infra
     ("infra:\n  max_tabs_per_session: -1\n", "must be a positive integer"),
+    ("infra:\n  reap_interval_seconds: 0\n", "must be a positive integer"),
+    ("infra:\n  reap_interval_secs: 60\n", "unknown infra key"),
 ])
 def test_schema_violations_raise_config_error(tmp_path, content, match):
     f = tmp_path / "allowlist.yaml"

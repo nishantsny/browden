@@ -22,6 +22,7 @@ The expected shape (see configs/samples/read_only_on_popular_websites.yaml):
     infra:
       max_browser_sessions: <positive int>
       max_tabs_per_session: <positive int>
+      reap_interval_seconds: <positive int>   # how often idle tabs are swept
 
 Validation is structural plus regex compilation; semantics (default-deny,
 denylist-wins ordering, www-stripping, ...) live in ActionAllowlist/ReadPolicy.
@@ -178,7 +179,8 @@ def validate_allowlist_data(data, *, source: str = "allowlist") -> dict:
             if not isinstance(rules, dict):
                 raise ConfigError(f"{source}: infra must be a mapping, got {type(rules).__name__}")
             for name, value in rules.items():
-                if name not in {"max_browser_sessions", "max_tabs_per_session"}:
+                if name not in {"max_browser_sessions", "max_tabs_per_session",
+                                "reap_interval_seconds"}:
                     raise ConfigError(f"{source}: unknown infra key {name}")
                 if not isinstance(value, int) or isinstance(value, bool) or value <= 0:
                     raise ConfigError(f"{source}: infra.{name} must be a positive integer, got {value}")
