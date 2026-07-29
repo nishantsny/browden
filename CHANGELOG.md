@@ -7,7 +7,34 @@ All notable changes to browden are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+- **Concurrent requests to one profile no longer read each other's tabs.** A
+  session's tabs share one focused window and one (not thread-safe) WebDriver,
+  but the MCP server dispatches every incoming request concurrently — so two
+  in-flight tools would interleave their `select_tab` + read, and a tab came
+  back with whichever document won the last focus change. Each
+  `BrowserSessionManager` now holds an `asyncio.Lock` that every driver touch
+  goes through, making "focus the tab, then act on it" atomic: concurrent
+  requests queue and each re-selects its own tab when its turn comes. A new e2e
+  test fires ten simultaneous reads at ten tabs in one session and asserts each
+  gets its own page — it failed on 6/10 tabs before this change.
+
 ### Changed
+- **Concurrency contract, restated.** Concurrent requests within a session are
+  now *safe* (serialized) rather than unsupported; they are still not *parallel*
+  — use separate `profile_dir`s for that. The MCP instructions, the
+  `new_blank_tab` / `list_tabs` descriptions and the README's Profiles section
+  say so.
+- **A request that waits more than 10s for its session gives up.** Rather than
+  queueing forever behind a wedged operation, it returns
+  `{"error": "browser session busy — ...", "id": ...}` (`SessionBusyError`) and
+  can be retried. `list_tabs` reports a busy profile in place of that profile's
+  tabs instead of failing the whole listing or silently showing none.
+- **Cleanup takes the same lock.** Both sweep callers — the reaper's tick and
+  `new_blank_tab`'s at-the-cap reclaim — drive the browser (`list_handles` /
+  `close_tab`), so both now run through `_sweep_idle_locked`. Best-effort: a
+  sweep that can't get the lock in time is skipped and the next tick catches up.
+  This replaces the old `_driver_busy` flag, which the lock subsumes.
 - **Idle cleanup is no longer done on the request path.** Every tool call used
   to run the idle sweep first — a live `list_handles()` round-trip to the browser
   on *every* call, to maybe close a tab that had been untouched for an hour. The

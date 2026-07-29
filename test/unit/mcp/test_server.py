@@ -13,13 +13,18 @@ def test_server_instructions_state_concurrency_contract():
     assert "verbatim" in ins  # spells out the tab-id pass-back contract
 
 
-def test_tab_entry_point_docs_warn_about_concurrency():
-    """new_blank_tab / list_tabs descriptions (what the agent reads) carry the warning."""
+def test_tab_entry_point_docs_state_the_concurrency_contract():
+    """new_blank_tab / list_tabs descriptions (what the agent reads) spell it out.
+
+    Concurrent requests to one profile are safe (the session serializes them)
+    but are not parallel, so the descriptions have to say both — an agent that
+    reads only "safe" would expect a speed-up that a single Chrome can't give.
+    """
     import browden.mcp.server as server
     for name in ("new_blank_tab", "list_tabs"):
         doc = (getattr(server, name).__doc__ or "").lower()
-        assert "sequential" in doc or "one tab" in doc
-        assert "race" in doc
+        assert "concurrent" in doc
+        assert "at a time" in doc or "one after another" in doc
 
 
 def test_no_backend_or_session_at_import():

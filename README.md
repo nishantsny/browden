@@ -149,10 +149,15 @@ first use. That has two consequences:
 - **Different profiles run in parallel.** Give a request its own `profile_dir`
   and it gets an independent Chrome process — so separate profiles can be driven
   concurrently.
-- **Within one profile, the agent can drive only one tab at a time.** A single session has one
-  focused window and requests are *not* serialized for you; fire calls in
-  parallel against the same profile and they race over that shared window. Issue
-  calls sequentially and wait for each to return.
+- **Within one profile, the agent drives one tab at a time — but concurrent
+  requests are safe.** A single session has one focused window, so browden
+  serializes every request to that profile behind a per-session lock: each one
+  waits its turn, then re-selects its own tab before acting, so a burst of
+  parallel calls to ten tabs returns ten correct answers instead of racing over
+  the shared window. Concurrency here buys safety, not speed — the calls still
+  run one after another. For genuine parallelism, use separate profiles. A
+  request that waits more than **10s** for its turn gives up and returns
+  `{"error": "browser session busy — ...", "id": ...}`; it's safe to retry.
 
 **Which profile should I use?**
 
