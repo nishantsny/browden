@@ -7,6 +7,8 @@ All notable changes to browden are documented here. The format follows
 
 ## [Unreleased]
 
+## [1.2.1] — 2026-07-29
+
 ### Fixed
 - **Concurrent requests to one profile no longer read each other's tabs.** A
   session's tabs share one focused window and one (not thread-safe) WebDriver,
@@ -166,7 +168,8 @@ Initial public release.
   service manager (systemd / launchd / Task Scheduler).
 - Apache-2.0.
 
-[Unreleased]: https://github.com/nishantsny/browden/compare/v1.2.0...HEAD
+[Unreleased]: https://github.com/nishantsny/browden/compare/v1.2.1...HEAD
+[1.2.1]: https://github.com/nishantsny/browden/compare/v1.2.0...v1.2.1
 [1.2.0]: https://github.com/nishantsny/browden/compare/v1.1.0...v1.2.0
 [1.1.0]: https://github.com/nishantsny/browden/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/nishantsny/browden/compare/v0.1.0...v1.0.0
