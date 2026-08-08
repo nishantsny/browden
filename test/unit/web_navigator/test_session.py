@@ -311,6 +311,10 @@ async def test_invalidate_dom_cache_drops_the_entry_without_driving_the_page():
     # Nothing was reloaded, re-fetched, or even focused — existence is checked
     # with list_handles, which doesn't move the focused window.
     assert not any(c in backend.calls for c in [("reload", "h1"), ("get_tab_html", "h1"), ("select_tab", "h1")])
+    # Exactly one list_handles: the existence check. A second would mean the tool
+    # swept idle tabs, which no tool call may do (#136 — sweeping is the reaper's
+    # timer alone, and sweep_idle requires the driver lock this path doesn't hold).
+    assert backend.calls.count("list_handles") == 1
 
 
 @pytest.mark.asyncio

@@ -428,8 +428,6 @@ class BrowserSessionManager:
         unlike ``select_tab`` it doesn't move the focused window — so a tab that is
         gone reports the standard tab-gone envelope rather than silently succeeding.
         """
-        self.sweep_idle()
-
         def work(handle):
             if handle not in self._backend.list_handles():
                 raise TabNotFoundError(f"tab {handle!r} is not open")
