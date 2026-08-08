@@ -7,6 +7,16 @@ All notable changes to browden are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+- **`invalidate_dom_cache` tool.** Drops a tab's cached DOM snapshot so the next
+  read re-fetches the live HTML, without reloading the page — the fix for a
+  change the *page itself* made after the snapshot was taken (its own JS
+  revealing a panel, an infinite-scroll batch landing). Unlike `force_reload_tab`
+  it issues no page load, so JS-built DOM state survives. It drives no browser
+  action and returns no page content, so it isn't read-gated; reads stay gated on
+  the tab's live URL at read time. A tab that is gone returns the usual tab-gone
+  envelope (#137).
+
 ## [1.2.1] — 2026-07-29
 
 ### Fixed

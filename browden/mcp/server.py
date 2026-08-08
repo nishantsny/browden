@@ -537,6 +537,34 @@ async def screenshot(id: str):  # -> dict | Image; unannotated: FastMCP can't sc
 
 @mcp.tool()
 @_tool
+async def invalidate_dom_cache(id: str) -> dict:
+    """Drop a tab's cached DOM snapshot — the next read re-fetches the live HTML.
+
+    The DOM tools answer from a per-tab cached parse of the page, so a change the
+    *page itself* made after that parse (its own JS revealing a panel, an
+    infinite-scroll batch landing, a live region updating) is invisible to them.
+    This throws that snapshot away and nothing else.
+
+    The cheap counterpart to ``force_reload_tab``: no page load, so everything the
+    page built up in the live DOM survives — a reload would discard it (and re-run
+    every request the page makes). Reach for ``force_reload_tab`` only when you
+    actually want the page re-fetched from the server.
+
+    Not gated on the read allowlist: it drives no browser action and returns no
+    page content — it only discards server-side state. Reads stay gated where they
+    always were, on the tab's live URL at read time, so dropping a stale snapshot
+    can't widen what an agent may read. Returns ``{"id": ..., "invalidated": true}``,
+    or ``{"error": ..., "id": ...}`` if the tab is no longer open.
+    """
+    logger.info(f"Tool called: invalidate_dom_cache (id={id!r})")
+    session = _store.route(id)
+    result = await session.invalidate_dom_cache(id=id)
+    logger.info("Tool finished: invalidate_dom_cache")
+    return result
+
+
+@mcp.tool()
+@_tool
 async def force_reload_tab(id: str) -> dict:
     """Reload the named tab and refresh its cached DOM."""
     logger.info(f"Tool called: force_reload_tab (id={id!r})")

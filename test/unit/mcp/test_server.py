@@ -376,6 +376,39 @@ async def test_navigate_passes_through_when_landing_on_about_blank():
 
 
 @pytest.mark.asyncio
+async def test_invalidate_dom_cache_tool_delegates_without_driving_the_browser():
+    import browden.mcp.server as server
+    importlib.reload(server)
+    session = _fake_session(invalidate_dom_cache={"id": "pre-h1", "invalidated": True},
+                            document_url="https://www.google.com/")
+    with patch.object(server._store, "route", return_value=session):
+        result = await server.invalidate_dom_cache(id="pre-h1")
+    assert result == {"id": "pre-h1", "invalidated": True}
+    session.invalidate_dom_cache.assert_awaited_once_with(id="pre-h1")
+    # Discarding server-side state exposes no page content, so it costs no
+    # driver round-trip: unlike the read tools, it never asks for document_url.
+    session.document_url.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_invalidate_dom_cache_tool_requires_page_id():
+    import browden.mcp.server as server
+    importlib.reload(server)
+    with pytest.raises(TypeError):
+        await server.invalidate_dom_cache()
+
+
+@pytest.mark.asyncio
+async def test_invalidate_dom_cache_tool_passes_through_tab_gone_envelope():
+    import browden.mcp.server as server
+    importlib.reload(server)
+    envelope = {"id": "pre-h9", "error": "tab pre-h9 is no longer open — call list_tabs for current tabs"}
+    session = _fake_session(invalidate_dom_cache=envelope)
+    with patch.object(server._store, "route", return_value=session):
+        assert await server.invalidate_dom_cache(id="pre-h9") == envelope
+
+
+@pytest.mark.asyncio
 async def test_force_reload_page_tool_requires_page_id():
     import browden.mcp.server as server
     importlib.reload(server)
