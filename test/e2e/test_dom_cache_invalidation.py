@@ -9,11 +9,15 @@ DOM *behind the cache's back*. That's staged by calling the **backend** directly
 tools invalidate the cache for you, the page's own JS obviously does not. The page
 is an inline ``data:`` document, so the run is deterministic and offline.
 """
+import importlib
 import urllib.parse
+from unittest.mock import patch
 
 import pytest
 
+from browden.configs.loader import AllowlistRefresher
 from browden.mcp.session_management.browser_session_manager import BrowserSessionManager
+from browden.mcp.validator import ActionAllowlist, ValidationError
 
 HTML = """<html><body>
   <button id="add"
@@ -93,3 +97,62 @@ async def test_invalidate_on_a_closed_tab_reports_tab_gone(session):
     assert "error" in res
     assert res["id"] == page["id"]
     assert "invalidated" not in res
+
+
+@pytest.mark.asyncio
+async def test_invalidate_drops_only_the_named_tabs_snapshot(session, backend):
+    # The drop is keyed by the tab's own handle, so a sibling tab — same session,
+    # same page, same kind of page-side mutation — must keep answering from its
+    # own snapshot. Its *staleness* is what proves the invalidation was scoped.
+    first = await _page_with_primed_cache(session)
+    backend.click_element("#add")  # page 1 mutates itself
+    second = await _page_with_primed_cache(session)
+    backend.click_element("#add")  # page 2 mutates itself
+
+    await session.invalidate_dom_cache(id=first["id"])
+
+    assert (await session.query_selector("#late", id=first["id"]))["found"] is True
+    assert (await session.query_selector("#late", id=second["id"]))["found"] is False
+
+    # …and the sibling is exactly one invalidate away from catching up, so it was
+    # holding a stale snapshot rather than having been broken by the first drop.
+    await session.invalidate_dom_cache(id=second["id"])
+    assert (await session.query_selector("#late", id=second["id"]))["found"] is True
+
+
+@pytest.mark.asyncio
+async def test_invalidate_is_not_read_gated_but_reads_still_are(session, tmp_path):
+    """The tool skips the read gate; that must not widen what an agent can read.
+
+    Its docstring justifies dropping the ``document_url`` + ``ensure_url_allowed``
+    round-trip on the grounds that it drives no browser action and returns no page
+    content. The claim only holds if reads stay gated on the tab's live URL — so
+    this drives the real server tools against a tab parked on a URL the read policy
+    refuses: the invalidate succeeds, the read that follows does not.
+
+    A ``file://`` page keeps the run offline. The override keyed ``""`` is what
+    re-enables the ``file://`` scheme at all (see ``validate_url``), while its path
+    regex matches nothing on disk — so the refusal lands on the allowlist, which is
+    the gate under test, rather than on the scheme check ahead of it.
+    """
+    import browden.mcp.server as server
+    importlib.reload(server)
+
+    page_file = tmp_path / "page.html"
+    page_file.write_text(HTML)
+    blank = await session.new_blank_tab(max_tabs=10)
+    page = await session.navigate(f"file://{page_file}", id=blank["id"])
+    primed = await session.query_selector("#marker", id=page["id"])
+    assert primed["found"] is True  # readable while the policy still admits it
+
+    refuses_this_page = ActionAllowlist({
+        "read": {"enabled": True, "tranco": {"enabled": False},
+                 "website_overrides": {"": ["^/definitely-not-this-path/.*"]}},
+    })
+    with patch.object(server._store, "route", return_value=session), \
+         patch.object(server, "_refresher", AllowlistRefresher.static(refuses_this_page)):
+        assert await server.invalidate_dom_cache(id=page["id"]) == {
+            "id": page["id"], "invalidated": True}
+
+        with pytest.raises(ValidationError, match="not on the read allowlist"):
+            await server.query_selector("#marker", page["id"])
