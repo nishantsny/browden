@@ -5,11 +5,19 @@ It is built from the rule sections of a loaded config and holds nothing
 process-wide — the ``infra`` caps live on
 :class:`~.runtime_configuration.BrowdenRuntimeConfiguration`, which owns one of these.
 """
+import re
 from pathlib import Path
 
 from .allowlist import WRITE_ACTIONS, Allowlist, PageRule, ReadPolicy, _coerce_section
+from .intent import ACTIVATION_KEYS
 from .popularity import PopularityAllowlist
 from .tranco import DEFAULT_TOP_N, canonical_host
+
+# The rule an `allow_all` set answers every write-action lookup with: any page,
+# any control, and — for press-key — every control key the gate would accept.
+# Deliberately NOT a `"*"` read override: see BrowdenAccessRuleSet's `allow_all`.
+_ANY_PAGE_ANY_CONTROL = PageRule(patterns=(re.compile(".*"),), match_on="url",
+                                 label=re.compile(".*"), keys=ACTIVATION_KEYS)
 
 
 def _merge_host_rules(base: "dict[str, list[PageRule]]",
@@ -102,6 +110,37 @@ class BrowdenAccessRuleSet:
               - path: ['^/gp/css/order-history.*']
                 label: '(?i)grocery tip.*'
                 field_ids: [tip-widget--edit-form--amount-input]
+
+    * ``allow_all: true`` — every write action on every page, and reads of every
+      host the read gate would otherwise *rank*. It is the sugar for "this is a
+      scratch profile: let the agent work in it", so an operator can scope down
+      to a fresh profile dir and browse without a config edit per host. The
+      schema admits it only inside a ``profiles`` entry.
+
+      It is deliberately **not** shorthand for ``website_overrides: {"*": [".*"]}``:
+      an override that covers a host short-circuits :meth:`ReadPolicy.is_allowed`
+      *before* the Tranco branch, so spelling it that way would silently switch
+      the popularity net off — the opposite of the default this wants. Under
+      ``allow_all`` the Tranco check still runs, and is switched *on* for the set
+      unless it says otherwise, so broad browsing covers the established web
+      while an unranked host — a typosquat, a domain registered yesterday, a
+      paste site an agent followed a link to — still needs a deliberate act::
+
+          allow_all: true
+          read:
+            tranco: {enabled: false}    # deliberate; the net is on until you say this
+
+      Inherited page-scopes do not narrow it: a global override that demotes a
+      host to a few pages still *adds* that host everywhere, but inside an
+      ``allow_all`` set the rest of that host is decided by the popularity check
+      like any other, not refused by a rule the profile never asked for.
+
+      Two things it does not touch. The **denylist** still wins (it is checked
+      first, and the global one is unioned in). And the **scheme gate** is
+      unmoved: ``file://`` and plaintext ``http://`` are admitted only for a host
+      named *explicitly* in ``website_overrides``, which ``allow_all`` never
+      does — opting into local file reads stays a named-host act.
+
     Write actions are read by name from :data:`~.allowlist.WRITE_ACTIONS`; every
     other key is ignored here. ``infra`` (process-wide, part of no access
     decision) and ``profiles`` (which scopes whole rule sets to a browser profile)
@@ -135,6 +174,12 @@ class BrowdenAccessRuleSet:
         action_rules = {
             action: _coerce_section(sections.get(action), want_label=True, where=action)
             for action in WRITE_ACTIONS}
+        allow_all = bool(sections.get("allow_all")) or (base is not None and base._allow_all)
+        # Whether THIS set decided the popularity question for itself. Only an
+        # explicit `tranco.enabled` here counts: under allow_all the net is
+        # turned on rather than inherited, so a profile that wants the whole web
+        # opts out in its own block instead of relying on a global setting.
+        tranco_is_explicit = "enabled" in (read_cfg.get("tranco") or {})
         if base is not None:
             deny_rules = _merge_host_rules(base._deny_rules, deny_rules)
             read_cfg = _merge_read_cfg(base._read_cfg, read_cfg)
@@ -142,7 +187,10 @@ class BrowdenAccessRuleSet:
             action_rules = {
                 action: _merge_host_rules(base._action_rules[action], action_rules[action])
                 for action in WRITE_ACTIONS}
+        if allow_all and not tranco_is_explicit:
+            read_cfg["tranco"] = {**(read_cfg.get("tranco") or {}), "enabled": True}
         # Kept so a set built on top of this one can union against it.
+        self._allow_all = allow_all
         self._deny_rules = deny_rules
         self._read_cfg = read_cfg
         self._override_rules = override_rules
@@ -151,7 +199,7 @@ class BrowdenAccessRuleSet:
         # A denylist blocks broadly: prefix match, not fullmatch (see Allowlist).
         self._denylist = Allowlist.create_denylist(deny_rules)
         self._read_policy = self._build_read_policy(
-            read_cfg, override_rules, self._denylist, tranco_path)
+            read_cfg, override_rules, self._denylist, tranco_path, allow_all=allow_all)
         # action -> canonical host -> ordered page rules (label + field_ids).
         self._rules: "dict[str, dict[str, list[PageRule]]]" = {
             action: {canonical_host(h): rs for h, rs in host_rules.items()}
@@ -164,7 +212,8 @@ class BrowdenAccessRuleSet:
 
     @staticmethod
     def _build_read_policy(read_cfg: dict, override_rules: "dict[str, list[PageRule]]",
-                           denylist: Allowlist, tranco_path: Path | None) -> ReadPolicy:
+                           denylist: Allowlist, tranco_path: Path | None,
+                           *, allow_all: bool = False) -> ReadPolicy:
         """Assemble the ReadPolicy from the ``read`` block (fail-closed if absent).
 
         ``read_cfg`` carries the settings (``enabled`` / ``tranco``) and
@@ -189,7 +238,7 @@ class BrowdenAccessRuleSet:
             tranco = PopularityAllowlist(tranco_top_n=int(tranco_cfg.get("top_n", DEFAULT_TOP_N)), path=snapshot)
         return ReadPolicy(enabled=enabled, tranco=tranco,
                           overrides=Allowlist.create_allowlist(override_rules),
-                          denylist=denylist)
+                          denylist=denylist, allow_all=allow_all)
 
     @property
     def read_policy(self) -> ReadPolicy:
@@ -207,7 +256,9 @@ class BrowdenAccessRuleSet:
 
     def section(self, action: str) -> Allowlist:
         """Return the host/page-admission allowlist for ``action`` (labels ignored);
-        an empty (deny-all) one if unlisted."""
+        an empty (deny-all) one if unlisted. Under ``allow_all``, every host."""
+        if self._allow_all:
+            return Allowlist.create_allowlist({"*": [_ANY_PAGE_ANY_CONTROL]})
         return self._sections.get(action) or Allowlist.create_allowlist({})
 
     def rules_for(self, action: str, host: str, path: str,
@@ -216,15 +267,17 @@ class BrowdenAccessRuleSet:
 
         Empty if the action/host is unlisted or no rule's page selector matches —
         the write gates read that as "this action is not authorized on this page"
-        and refuse before touching the DOM. Each returned rule carries the
-        ``label`` and ``field_ids`` that authorize a control *on these pages*, so
-        the caller checks the live element against the union of them.
+        and refuse before touching the DOM. Never empty under ``allow_all``,
+        which authorizes any control on any page of any host. Each returned rule
+        carries the ``label`` and ``field_ids`` that authorize a control *on these
+        pages*, so the caller checks the live element against the union of them.
         """
-        by_host = self._rules.get(action)
-        if not by_host:
-            return []
-        rules = by_host.get(canonical_host(host)) or by_host.get("*")
-        if not rules:
-            return []
-        return [r for r in rules
-                if r.matches_page(path, query, fragment, full_match=True)]
+        by_host = self._rules.get(action) or {}
+        rules = by_host.get(canonical_host(host)) or by_host.get("*") or []
+        matched = [r for r in rules
+                   if r.matches_page(path, query, fragment, full_match=True)]
+        if self._allow_all:
+            # Any control on any page, plus whatever was listed explicitly (which
+            # can only be narrower, but costs nothing to keep).
+            return [_ANY_PAGE_ANY_CONTROL, *matched]
+        return matched

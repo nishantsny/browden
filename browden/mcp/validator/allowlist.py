@@ -275,19 +275,30 @@ class ReadPolicy:
        wildcard) *triumphs over Tranco*: once a host is covered here, its
        override alone decides, so you can both allow a host Tranco doesn't rank
        **and** path-scope (or effectively block) one that Tranco would otherwise
-       wave through.
+       wave through. Under ``allow_all`` an override only ever adds: it can still
+       admit an unranked host, but a page-scope it inherited from the global
+       rules does not narrow a set that was told to allow everything.
     4. **Tranco** — for hosts with no override, allowed if the host is in the
-       fetched top-sites snapshot (kept next to the allowlist config).
+       fetched top-sites snapshot (kept next to the allowlist config). With no
+       Tranco snapshot configured, an ``allow_all`` set (see
+       :class:`~.access_rule_set.BrowdenAccessRuleSet`) admits the host here and
+       any other set denies it.
 
     Otherwise it is denied (default-deny).
     """
 
     def __init__(self, *, enabled: bool, tranco: PopularityAllowlist | None,
-                 overrides: Allowlist, denylist: Allowlist):
+                 overrides: Allowlist, denylist: Allowlist, allow_all: bool = False):
         self._enabled = enabled
         self._tranco = tranco
         self._overrides = overrides
         self._denylist = denylist
+        # `allow_all` widens step 4 only: it admits a host no rule mentions, but
+        # ONLY once the popularity check has nothing left to say (Tranco off).
+        # While Tranco is on, an `allow_all` set still asks it — the whole point
+        # is that a profile can browse the ranked web freely without also
+        # admitting a freshly-registered typosquat.
+        self._allow_all = allow_all
 
     def is_allowed(self, host: str, path: str, query: str = "", fragment: str = "") -> bool:
         if self._denylist.is_allowed(host, path):
@@ -299,9 +310,18 @@ class ReadPolicy:
         # host here therefore DEMOTES it from Tranco's blanket grant to exactly
         # the pages its override rules match (query/fragment honored when a rule
         # opts into match_on: url — needed for hash-routed SPAs).
-        if self._overrides.covers(host):
-            return self._overrides.is_allowed(host, path, query, fragment)
-        return self._tranco is not None and self._tranco.contains(host)
+        if self._overrides.is_allowed(host, path, query, fragment):
+            return True
+        if self._overrides.covers(host) and not self._allow_all:
+            # A host with an override is DEMOTED to exactly the pages it matches
+            # — that is how a Tranco-ranked host gets page-scoped. The exception
+            # is an `allow_all` set: there the operator said "everything in this
+            # profile", so an override it inherited from the global rules can only
+            # ever ADD a host, never narrow this one back down.
+            return False
+        if self._tranco is not None:
+            return self._tranco.contains(host)
+        return self._allow_all
 
     def override_has_host(self, host: str) -> bool:
         """True if the read overrides name ``host`` explicitly (not via ``*``).
