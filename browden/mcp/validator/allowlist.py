@@ -323,10 +323,19 @@ class ReadPolicy:
         return self._overrides.has_host(host)
 
 
-class ActionAllowlist:
-    """The whole access policy: a denylist, the read allowlist, and write actions.
+# Top-level keys that are not write actions. Every *other* key in a rule set is
+# one (see PolicySet), so this is the single list that says "handled elsewhere":
+# `infra` is process-wide (ActionAllowlist owns it), `read` builds the read gate,
+# `denylist` the always-deny list.
+_NON_ACTION_SECTIONS = ("infra", "read", "denylist")
 
-    Top-level keys are handled as follows:
+
+class PolicySet:
+    """The rules that decide one request: a denylist, the read gate, write actions.
+
+    This is the *evaluated* surface the gates use — everything that answers "may
+    this action touch this host and page". It is built from a mapping of rule
+    sections, whose keys are handled as follows:
 
     * ``denylist`` — host -> path regexes that are **always refused** (checked
       first, wins over everything). ``*`` host matches any host.
@@ -375,7 +384,9 @@ class ActionAllowlist:
               - path: ['^/gp/css/order-history.*']
                 label: '(?i)grocery tip.*'
                 field_ids: [tip-widget--edit-form--amount-input]
-    * ``infra`` — session/tab caps.
+
+    ``infra`` is ignored here — session/tab caps are process-wide, not part of any
+    access decision, and belong to the :class:`ActionAllowlist` that owns this set.
 
     ``read_policy`` gates reads; ``denylist`` is the always-deny list (also
     consulted by write actions); ``section(name)`` and ``rules_for(name, ...)``
@@ -389,23 +400,13 @@ class ActionAllowlist:
         self._sections: dict[str, Allowlist] = {}
         # action -> canonical host -> ordered page rules (label + field_ids).
         self._rules: "dict[str, dict[str, list[PageRule]]]" = {}
-        self.max_browser_sessions = DEFAULT_MAX_BROWSER_SESSIONS
-        self.max_tabs_per_session = DEFAULT_MAX_TABS_PER_SESSION
-        self.reap_interval_seconds = DEFAULT_REAP_INTERVAL_SECONDS
         # A denylist blocks broadly: prefix match, not fullmatch (see Allowlist).
         self._denylist = Allowlist.create_denylist(
             _coerce_section(sections.get("denylist"), want_label=False, where="denylist"))
         self._read_policy = self._build_read_policy(
             sections.get("read"), self._denylist, tranco_path)
         for action, rules in sections.items():
-            if action in ("infra", "read", "denylist"):
-                if action == "infra" and isinstance(rules, dict):
-                    self.max_browser_sessions = int(
-                        rules.get("max_browser_sessions", DEFAULT_MAX_BROWSER_SESSIONS))
-                    self.max_tabs_per_session = int(
-                        rules.get("max_tabs_per_session", DEFAULT_MAX_TABS_PER_SESSION))
-                    self.reap_interval_seconds = int(
-                        rules.get("reap_interval_seconds", DEFAULT_REAP_INTERVAL_SECONDS))
+            if action in _NON_ACTION_SECTIONS:
                 continue
             host_rules = _coerce_section(rules, want_label=True, where=action)
             self._rules[action] = {canonical_host(h): rs for h, rs in host_rules.items()}
@@ -438,11 +439,6 @@ class ActionAllowlist:
             _coerce_section(cfg.get("website_overrides"), want_label=False,
                             where="read.website_overrides"))
         return ReadPolicy(enabled=enabled, tranco=tranco, overrides=overrides, denylist=denylist)
-
-    @classmethod
-    def from_file(cls, path: Path) -> "ActionAllowlist":
-        return cls(yaml.safe_load(path.read_text()) or {},
-                   tranco_path=path.parent / TRANCO_FILENAME)
 
     @property
     def read_policy(self) -> ReadPolicy:
@@ -481,3 +477,74 @@ class ActionAllowlist:
             return []
         return [r for r in rules
                 if r.matches_page(path, query, fragment, full_match=True)]
+
+
+class ActionAllowlist:
+    """A whole loaded config: the process-wide ``infra`` caps plus the rule sets.
+
+    Two kinds of setting live in an allowlist file and they behave differently,
+    so they are held apart here:
+
+    * ``infra`` — ``max_browser_sessions`` / ``max_tabs_per_session`` /
+      ``reap_interval_seconds``. Process-wide resource caps, read by the session
+      layer; they gate no access decision and belong to no single request.
+    * everything else — ``denylist``, ``read``, and the write actions: the rules
+      that decide whether a given request may act. They are parsed into a
+      :class:`PolicySet` (which documents the grammar), reachable as
+      :attr:`policy`.
+
+    The delegating members below (``read_policy``, ``denylist``, ``is_denied``,
+    ``section``, ``rules_for``) forward to that policy set, so existing callers
+    are unchanged by the split.
+    """
+
+    def __init__(self, sections: dict[str, object], tranco_path: Path | None = None):
+        # tranco_path is the Tranco snapshot that sits next to the allowlist
+        # file; the loader/from_file pass it in. A bare dict construction (tests,
+        # the import-time default) leaves it None -> the ~/.browden fallback.
+        self.max_browser_sessions = DEFAULT_MAX_BROWSER_SESSIONS
+        self.max_tabs_per_session = DEFAULT_MAX_TABS_PER_SESSION
+        self.reap_interval_seconds = DEFAULT_REAP_INTERVAL_SECONDS
+        infra = sections.get("infra")
+        if isinstance(infra, dict):
+            self.max_browser_sessions = int(
+                infra.get("max_browser_sessions", DEFAULT_MAX_BROWSER_SESSIONS))
+            self.max_tabs_per_session = int(
+                infra.get("max_tabs_per_session", DEFAULT_MAX_TABS_PER_SESSION))
+            self.reap_interval_seconds = int(
+                infra.get("reap_interval_seconds", DEFAULT_REAP_INTERVAL_SECONDS))
+        self._policy = PolicySet(sections, tranco_path)
+
+    @classmethod
+    def from_file(cls, path: Path) -> "ActionAllowlist":
+        return cls(yaml.safe_load(path.read_text()) or {},
+                   tranco_path=path.parent / TRANCO_FILENAME)
+
+    @property
+    def policy(self) -> PolicySet:
+        """The rule set every gate decides against."""
+        return self._policy
+
+    @property
+    def read_policy(self) -> ReadPolicy:
+        """The read/navigate gate (denylist + master switch + Tranco + overrides)."""
+        return self._policy.read_policy
+
+    @property
+    def denylist(self) -> Allowlist:
+        """The always-deny list, so write actions can veto denied hosts too."""
+        return self._policy.denylist
+
+    def is_denied(self, host: str, path: str) -> bool:
+        """True if ``(host, path)`` is on the denylist (refused for every action)."""
+        return self._policy.is_denied(host, path)
+
+    def section(self, action: str) -> Allowlist:
+        """Return the host/page-admission allowlist for ``action`` (labels ignored);
+        an empty (deny-all) one if unlisted."""
+        return self._policy.section(action)
+
+    def rules_for(self, action: str, host: str, path: str,
+                  query: str = "", fragment: str = "") -> list[PageRule]:
+        """The page rules for ``action`` on ``host`` that match this page, in order."""
+        return self._policy.rules_for(action, host, path, query, fragment)
