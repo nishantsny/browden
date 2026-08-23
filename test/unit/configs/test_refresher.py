@@ -32,7 +32,7 @@ def config(tmp_path):
 
 def test_from_path_loads_and_watches(config):
     r = AllowlistRefresher.from_path(config)
-    assert r.allowlist.read_policy.is_allowed("anything.test", "/")  # "*" override admits it
+    assert r.allowlist.policy.read_policy.is_allowed("anything.test", "/")  # "*" override admits it
 
 
 def test_reload_swaps_in_edited_config(config):
@@ -47,8 +47,8 @@ def test_reload_swaps_in_edited_config(config):
     )
     assert r.maybe_reload() is True
     assert r.allowlist is not before                          # atomic swap happened
-    assert r.allowlist.read_policy.override_has_host("specific.test")
-    assert not r.allowlist.read_policy.override_has_host("anything.test")  # "*" gone
+    assert r.allowlist.policy.read_policy.override_has_host("specific.test")
+    assert not r.allowlist.policy.read_policy.override_has_host("anything.test")  # "*" gone
 
 
 def test_reload_to_disallowed_wins_over_the_contains_memo(tmp_path):
@@ -64,12 +64,12 @@ def test_reload_to_disallowed_wins_over_the_contains_memo(tmp_path):
     cfg = tmp_path / "allowlist.yaml"
     cfg.write_text("read:\n  tranco: {enabled: true, top_n: 10}\n")
     r = AllowlistRefresher.from_path(cfg)
-    assert r.allowlist.read_policy.is_allowed("website.com", "/")  # memo holds True
+    assert r.allowlist.policy.read_policy.is_allowed("website.com", "/")  # memo holds True
     # Tighten top_n to 1: the snapshot's second line (website.com) falls out.
     cfg.write_text("read:\n  tranco: {enabled: true, top_n: 1}\n# tightened\n")
     assert r.maybe_reload() is True
-    assert not r.allowlist.read_policy.is_allowed("website.com", "/")
-    assert r.allowlist.read_policy.is_allowed("popular-anchor.com", "/")  # still listed
+    assert not r.allowlist.policy.read_policy.is_allowed("website.com", "/")
+    assert r.allowlist.policy.read_policy.is_allowed("popular-anchor.com", "/")  # still listed
 
 
 def test_unchanged_file_is_a_noop(config):

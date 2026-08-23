@@ -1,7 +1,7 @@
 """The full default-deny gate sequences for the write actions (``click`` / ``insert_text``).
 
-Composes the three lower-level pieces — the per-action host allowlist
-(:class:`ActionAllowlist`), the URL gate (:func:`validate_url`), and the pure
+Composes the three lower-level pieces — the rule set that decides the request
+(:class:`PolicySet`), the URL gate (:func:`validate_url`), and the pure
 element-integrity predicates (:mod:`.intent`) — into the exact ordered checks
 each write tool must pass before it is allowed to touch the page.
 
@@ -13,7 +13,7 @@ action is authorized.
 """
 from urllib.parse import urlparse
 
-from .allowlist import ActionAllowlist
+from .allowlist import PolicySet
 from .errors import ValidationError
 from .intent import (
     ACTIVATION_KEYS,
@@ -27,7 +27,7 @@ from .intent import (
 )
 
 
-def check_action_host(allowlist: ActionAllowlist, action: str, url: str) -> None:
+def check_action_host(policy: PolicySet, action: str, url: str) -> None:
     """Gate 1 for a write action: denylist veto, then the action's host allowlist.
 
     The denylist is consulted first — a denied host is never actionable, even
@@ -38,12 +38,12 @@ def check_action_host(allowlist: ActionAllowlist, action: str, url: str) -> None
     """
     parsed = urlparse(url)
     host = parsed.hostname or ""
-    if allowlist.is_denied(host, parsed.path):
+    if policy.is_denied(host, parsed.path):
         raise ValidationError(f"URL on denylist: {parsed.hostname}{parsed.path}")
     # Page-scoped: the host must have at least one rule whose page selector
     # matches this exact URL, or the action is refused here — even on a host that
     # authorizes the action on *other* pages.
-    if not allowlist.rules_for(action, host, parsed.path, parsed.query, parsed.fragment):
+    if not policy.rules_for(action, host, parsed.path, parsed.query, parsed.fragment):
         raise ValidationError(
             f"no {action} rule authorizes {host}{parsed.path or '/'} — "
             f"{action} not allowed on this page")
@@ -65,7 +65,7 @@ def _single_node(found: dict, css_selector: str, refusal: str) -> dict:
     return found["elements"][0]
 
 
-def validate_click_target(allowlist: ActionAllowlist, url: str,
+def validate_click_target(policy: PolicySet, url: str,
                           css_selector: str, found: dict) -> None:
     """Gates 2, 2b and 3 for ``click`` — element integrity, anchor target, label.
 
@@ -90,7 +90,7 @@ def validate_click_target(allowlist: ActionAllowlist, url: str,
             "anchor uses a non-navigational scheme (mailto:/tel:/data:/…) — refusing to click")
     if kind == "nav":
         t = urlparse(target)
-        if not allowlist.read_policy.is_allowed(t.hostname or "", t.path, t.query, t.fragment):
+        if not policy.read_policy.is_allowed(t.hostname or "", t.path, t.query, t.fragment):
             raise ValidationError(
                 f"anchor target {t.hostname or target!r} is not on the read allowlist — refusing to click")
 
@@ -99,14 +99,14 @@ def validate_click_target(allowlist: ActionAllowlist, url: str,
     # ('.*' opts a page into any control). rules_for already excludes non-matching
     # pages, so a label allowed elsewhere on the host does not leak onto this one.
     p = urlparse(url)
-    rules = allowlist.rules_for("click", p.hostname or "", p.path, p.query, p.fragment)
+    rules = policy.rules_for("click", p.hostname or "", p.path, p.query, p.fragment)
     if not any(r.label is not None and label_matches(node, r.label) for r in rules):
         raise ValidationError(
             f"control text does not match any click label configured for "
             f"{p.hostname or ''}{p.path or '/'} — refusing to click")
 
 
-def validate_write_text_target(allowlist: ActionAllowlist, url: str,
+def validate_write_text_target(policy: PolicySet, url: str,
                                css_selector: str, found: dict) -> None:
     """Gates 2 and 3 for ``insert_text`` — text-control integrity, then label/id.
 
@@ -127,7 +127,7 @@ def validate_write_text_target(allowlist: ActionAllowlist, url: str,
     # same rule's field_ids. Fail closed: no matching rule => nothing is typed, so
     # a field authorized on another page of the host does not leak onto this one.
     p = urlparse(url)
-    rules = allowlist.rules_for("write-text", p.hostname or "", p.path, p.query, p.fragment)
+    rules = policy.rules_for("write-text", p.hostname or "", p.path, p.query, p.fragment)
     label_ok = any(r.label is not None and field_label_matches(node, r.label) for r in rules)
     id_ok = any(field_id_matches(node, r.field_ids) for r in rules)
     if not (label_ok or id_ok):
@@ -136,7 +136,7 @@ def validate_write_text_target(allowlist: ActionAllowlist, url: str,
             f"{p.hostname or ''}{p.path or '/'} — refusing to insert text")
 
 
-def validate_press_key_target(allowlist: ActionAllowlist, url: str,
+def validate_press_key_target(policy: PolicySet, url: str,
                               css_selector: str, found: dict, key: str) -> None:
     """Gates 2, 2b and 3 for ``press-key`` — focusability, control-key, then label+key.
 
@@ -168,7 +168,7 @@ def validate_press_key_target(allowlist: ActionAllowlist, url: str,
     # key — a rule that allows Enter on the picker doesn't thereby allow Escape,
     # and one that allows a control here does not leak onto another page.
     p = urlparse(url)
-    rules = allowlist.rules_for("press-key", p.hostname or "", p.path, p.query, p.fragment)
+    rules = policy.rules_for("press-key", p.hostname or "", p.path, p.query, p.fragment)
     if not any(r.label is not None and label_matches(node, r.label) and key in r.keys
                for r in rules):
         raise ValidationError(
