@@ -15,11 +15,11 @@ def test_sample_config_gates_reads_by_tranco_and_denies_writes():
     # The shipped sample: reads gated by Tranco top-sites, denylist empty, the
     # click block only present as a commented-out showcase.
     al = load_allowlist(SAMPLE_ALLOWLIST)
-    assert al.read_policy.is_allowed("google.com", "/")            # top site -> allowed
-    assert not al.read_policy.is_allowed("nonexistent-xyz-9876.test", "/")  # not a top site
-    assert not al.is_denied("google.com", "/")                     # denylist empty
-    assert not al.section("click").is_allowed("amazon.com", "/dp/X")
-    assert al.rules_for("click", "amazon.com", "/dp/X") == []
+    assert al.policy.read_policy.is_allowed("google.com", "/")            # top site -> allowed
+    assert not al.policy.read_policy.is_allowed("nonexistent-xyz-9876.test", "/")  # not a top site
+    assert not al.policy.is_denied("google.com", "/")                     # denylist empty
+    assert not al.policy.section("click").is_allowed("amazon.com", "/dp/X")
+    assert al.policy.rules_for("click", "amazon.com", "/dp/X") == []
 
 
 def test_load_builds_working_allowlist(tmp_path):
@@ -37,10 +37,10 @@ def test_load_builds_working_allowlist(tmp_path):
         "    label: '(?i)\\badd to cart\\b'\n"
     )
     al = load_allowlist(f)
-    assert al.read_policy.is_allowed("anything.test", "/")     # overrides "*"
-    assert not al.read_policy.is_allowed("blocked.test", "/")  # denylist wins
-    assert al.section("click").is_allowed("www.amazon.com", "/dp/X")
-    (rule,) = al.rules_for("click", "amazon.com", "/dp/X")
+    assert al.policy.read_policy.is_allowed("anything.test", "/")     # overrides "*"
+    assert not al.policy.read_policy.is_allowed("blocked.test", "/")  # denylist wins
+    assert al.policy.section("click").is_allowed("www.amazon.com", "/dp/X")
+    (rule,) = al.policy.rules_for("click", "amazon.com", "/dp/X")
     assert rule.label.search("Add to Cart")
 
 
@@ -55,8 +55,8 @@ def test_explicit_wildcard_label_allows_any_control(tmp_path):
         "    label: '.*'\n"
     )
     al = load_allowlist(f)
-    assert al.section("click").is_allowed("amazon.com", "/anything")
-    (rule,) = al.rules_for("click", "amazon.com", "/anything")
+    assert al.policy.section("click").is_allowed("amazon.com", "/anything")
+    (rule,) = al.policy.rules_for("click", "amazon.com", "/anything")
     assert rule.label.fullmatch("Place your order")
 
 
@@ -64,35 +64,35 @@ def test_second_sample_read_deny_is_valid():
     # The annotated read/deny sample must load cleanly through the schema.
     sample = SAMPLE_ALLOWLIST.parent / "allowlist-read-deny.yaml"
     al = load_allowlist(sample)
-    assert al.read_policy.is_allowed("google.com", "/")  # tranco enabled in it
+    assert al.policy.read_policy.is_allowed("google.com", "/")  # tranco enabled in it
 
 
 def test_page_scoped_sample_is_valid():
     # The page-rule walkthrough sample must load and gate per page.
     al = load_allowlist(SAMPLE_ALLOWLIST.parent / "page_scoped_write_actions.yaml")
     # read: the SPA reports page is in scope; the host is otherwise off Tranco.
-    assert al.read_policy.is_allowed("app.example.com", "/", fragment="/reports/1")
-    assert not al.read_policy.is_allowed("app.example.com", "/", fragment="/admin")
+    assert al.policy.read_policy.is_allowed("app.example.com", "/", fragment="/reports/1")
+    assert not al.policy.read_policy.is_allowed("app.example.com", "/", fragment="/admin")
     # click: "add to cart" only on a product page, not in the buy pipeline.
-    (dp,) = al.rules_for("click", "amazon.com", "/dp/B0X")
+    (dp,) = al.policy.rules_for("click", "amazon.com", "/dp/B0X")
     assert dp.label.search("Add to Cart")
-    assert al.rules_for("click", "amazon.com", "/gp/css/homepage") == []
+    assert al.policy.rules_for("click", "amazon.com", "/gp/css/homepage") == []
 
 
 def test_local_file_sample_opts_file_scheme_in():
     # The file:// walkthrough sample must load and actually opt the empty file
     # host in, without opening every host to non-https.
     al = load_allowlist(SAMPLE_ALLOWLIST.parent / "allow_local_file_reads.yaml")
-    assert al.read_policy.override_has_host("")            # file:/// host opted in
-    assert not al.read_policy.override_has_host("example.com")
+    assert al.policy.read_policy.override_has_host("")            # file:/// host opted in
+    assert not al.policy.read_policy.override_has_host("example.com")
 
 
 def test_localhost_dev_sample_opts_localhost_in():
     # The localhost dev-server sample must load and opt localhost in (covering any
     # port) without opting 127.0.0.1 in.
     al = load_allowlist(SAMPLE_ALLOWLIST.parent / "allow_localhost_dev_server.yaml")
-    assert al.read_policy.override_has_host("localhost")
-    assert not al.read_policy.override_has_host("127.0.0.1")
+    assert al.policy.read_policy.override_has_host("localhost")
+    assert not al.policy.read_policy.override_has_host("127.0.0.1")
 
 
 def test_press_key_sample_is_valid():
@@ -101,7 +101,7 @@ def test_press_key_sample_is_valid():
     # `keys` was added to the runtime parser but not the file-load schema, so the
     # sample booted fine in dict tests yet the server refused it on load).
     al = load_allowlist(SAMPLE_ALLOWLIST.parent / "allow_press_key_activation.yaml")
-    (rule,) = al.rules_for("press-key", "cronometer.com", "/")
+    (rule,) = al.policy.rules_for("press-key", "cronometer.com", "/")
     assert "Enter" in rule.keys
 
 
@@ -118,7 +118,7 @@ def test_load_press_key_rule_keys(tmp_path):
         "      keys: ['Enter', 'ArrowDown']\n"
     )
     al = load_allowlist(f)
-    (rule,) = al.rules_for("press-key", "cronometer.com", "/")
+    (rule,) = al.policy.rules_for("press-key", "cronometer.com", "/")
     assert rule.keys == frozenset({"Enter", "ArrowDown"})
 
 
@@ -128,7 +128,7 @@ def test_empty_host_override_loads_for_file_scheme(tmp_path):
     f = tmp_path / "allowlist.yaml"
     f.write_text('read:\n  website_overrides:\n    "": ["^/home/me/.*"]\n')
     al = load_allowlist(f)
-    assert al.read_policy.override_has_host("")
+    assert al.policy.read_policy.override_has_host("")
 
 
 def test_missing_file_raises_config_error(tmp_path):
@@ -147,7 +147,7 @@ def test_empty_document_is_deny_all(tmp_path):
     f = tmp_path / "allowlist.yaml"
     f.write_text("# everything commented out\n")
     al = load_allowlist(f)
-    assert not al.read_policy.is_allowed("example.com", "/")
+    assert not al.policy.read_policy.is_allowed("example.com", "/")
 
 
 def test_load_page_scoped_rules(tmp_path):
@@ -171,14 +171,14 @@ def test_load_page_scoped_rules(tmp_path):
     )
     al = load_allowlist(f)
     # read override: only the reports SPA page, and it demotes the host off Tranco.
-    assert al.read_policy.is_allowed("app.example.com", "/", fragment="/reports/3")
-    assert not al.read_policy.is_allowed("app.example.com", "/", fragment="/admin")
+    assert al.policy.read_policy.is_allowed("app.example.com", "/", fragment="/reports/3")
+    assert not al.policy.read_policy.is_allowed("app.example.com", "/", fragment="/admin")
     # click: label is page-scoped.
-    (dp,) = al.rules_for("click", "amazon.com", "/dp/B0X")
+    (dp,) = al.policy.rules_for("click", "amazon.com", "/dp/B0X")
     assert dp.label.search("Add to Cart") and not dp.label.search("Place your order")
-    (buy,) = al.rules_for("click", "amazon.com", "/gp/buy/spc")
+    (buy,) = al.policy.rules_for("click", "amazon.com", "/gp/buy/spc")
     assert buy.label.search("Place your order")
-    assert al.rules_for("click", "amazon.com", "/gp/css/homepage") == []
+    assert al.policy.rules_for("click", "amazon.com", "/gp/css/homepage") == []
 
 
 # -- schema validation --------------------------------------------------------

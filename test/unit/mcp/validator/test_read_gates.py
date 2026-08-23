@@ -118,8 +118,8 @@ def test_validate_url_passes_browser_internal_tabs_through(amazon_only):
 _READ = ActionAllowlist({
     "read": {"enabled": True, "tranco": {"enabled": False},
              "website_overrides": {"amazon.com": [".*"]}},
-})
-_DENIED = ActionAllowlist({"denylist": {"amazon.com": [".*"]}})
+}).policy
+_DENIED = ActionAllowlist({"denylist": {"amazon.com": [".*"]}}).policy
 AMAZON = "https://www.amazon.com/dp/B0FBRRM2VQ"
 
 
@@ -147,7 +147,7 @@ def test_ensure_url_allowed_true_for_browser_internal_tabs():
 
 def _read_policy(overrides: dict) -> ReadPolicy:
     """A ReadPolicy whose website_overrides are ``overrides`` (Tranco off)."""
-    return ActionAllowlist({"read": {"website_overrides": overrides}}).read_policy
+    return ActionAllowlist({"read": {"website_overrides": overrides}}).policy.read_policy
 
 
 def test_https_always_allowed_on_read_policy():

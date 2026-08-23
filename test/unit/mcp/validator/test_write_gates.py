@@ -23,12 +23,12 @@ _ALLOWLIST = ActionAllowlist({
     "click": {"amazon.com": {"paths": [".*"], "label": r"(?i)\badd to cart\b"}},
     "write-text": {"amazon.com": {"paths": [".*"], "label": r"(?i)grocery tip.*",
                                   "field_ids": ["tip-amount"]}},
-})
+}).policy
 
 _DENIED = ActionAllowlist({
     "denylist": {"amazon.com": [".*"]},
     "click": {"amazon.com": {"paths": [".*"], "label": ".*"}},
-})
+}).policy
 
 AMAZON = "https://www.amazon.com/dp/B0FBRRM2VQ"
 
@@ -109,7 +109,7 @@ def test_click_anchor_cross_domain_allowlisted_passes():
         "read": {"enabled": True, "tranco": {"enabled": False},
                  "website_overrides": {"amazon.com": [".*"], "wholefoodsmarket.com": [".*"]}},
         "click": {"amazon.com": {"paths": [".*"], "label": ".*"}},
-    })
+    }).policy
     validate_click_target(allow_any, AMAZON, "a.wf", _found(node))  # no raise
 
 
@@ -150,7 +150,7 @@ _PK = ActionAllowlist({
     "press-key": {"cronometer.com": [
         {"path": ["^/$"], "label": ".*", "keys": ["Enter", "ArrowDown", "ArrowUp"]},
     ]},
-})
+}).policy
 # same, but the rule only admits rows whose text starts with "Fried".
 _PK_LABELLED = ActionAllowlist({
     "read": {"enabled": True, "tranco": {"enabled": False},
@@ -158,7 +158,7 @@ _PK_LABELLED = ActionAllowlist({
     "press-key": {"cronometer.com": [
         {"path": ["^/$"], "label": r"(?i)fried.*", "keys": ["Enter"]},
     ]},
-})
+}).policy
 CRONO = "https://cronometer.com/"
 
 

@@ -54,7 +54,7 @@ def make_server(tmp_path):
         cfg = d / "allowlist.yaml"
         cfg.write_text(yaml.safe_dump(config, sort_keys=False))
         # No Tranco snapshot is written (these policies keep Tranco off); the
-        # loader tolerates its absence — see ActionAllowlist._build_read_policy.
+        # loader tolerates its absence — see PolicySet._build_read_policy.
         cache = d / "cache"
         cache.mkdir()
         harness = McpServerHarness(cache, allowlist_path=cfg)
