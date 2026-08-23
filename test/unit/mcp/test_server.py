@@ -543,3 +543,128 @@ async def test_list_tabs_closes_non_allowlisted_tabs():
     result = await server.list_tabs()
     assert result == [keep]                                 # non-allowlisted tab dropped
     session.close_tab.assert_awaited_once_with("pre-h2")    # ...because it was closed
+
+
+# -- per-profile policy (#139) ------------------------------------------------
+
+def _profiled_session(profile_dir: str, **methods):
+    """A fake session that reports which profile it drives (what scopes policy)."""
+    s = _fake_session(**methods)
+    s.profile_dir = profile_dir
+    return s
+
+
+@pytest.mark.asyncio
+async def test_click_is_authorized_per_profile(monkeypatch):
+    # One config, two profiles: the same click on the same page is allowed in the
+    # profile whose block authorizes it and refused in the one that doesn't.
+    import browden.mcp.server as server
+    from browden.configs.loader import AllowlistRefresher
+    from browden.mcp.validator import ActionAllowlist, ValidationError
+    importlib.reload(server)
+
+    allowlist = ActionAllowlist({
+        "read": {"website_overrides": {"*": [".*"]}},
+        "profiles": {"/profiles/shopper": {
+            "click": {"shop.test": {"paths": [".*"], "label": "(?i)add to cart"}}}},
+    })
+    monkeypatch.setattr(server, "_refresher", AllowlistRefresher.static(allowlist))
+    node = {"tag": "button", "id": None, "classes": [], "attributes": {},
+            "text": "Add to cart"}
+
+    async def click_in(profile_dir):
+        session = _profiled_session(
+            profile_dir,
+            document_url="https://shop.test/cart",
+            query_selector_all={"total_count": 1, "elements": [node]},
+            click={"clicked": True})
+        with patch.object(server._store, "route", return_value=session):
+            return await server.click("#atc", "h1"), session
+
+    result, session = await click_in("/profiles/shopper")
+    assert result["clicked"] is True
+    session.click.assert_awaited_once()
+
+    with pytest.raises(ValidationError, match="not allowed on this page"):
+        await click_in("/profiles/reader")
+
+
+@pytest.mark.asyncio
+async def test_reads_are_gated_by_the_tabs_own_profile(monkeypatch):
+    import browden.mcp.server as server
+    from browden.configs.loader import AllowlistRefresher
+    from browden.mcp.validator import ActionAllowlist, ValidationError
+    importlib.reload(server)
+
+    monkeypatch.setattr(server, "_refresher", AllowlistRefresher.static(ActionAllowlist({
+        "read": {"tranco": {"enabled": False}},
+        "profiles": {"/profiles/research": {
+            "read": {"website_overrides": {"unranked.test": [".*"]}}}},
+    })))
+
+    async def read_in(profile_dir):
+        session = _profiled_session(
+            profile_dir,
+            document_url="https://unranked.test/x",
+            query_selector={"found": True, "element": {"tag": "body"}})
+        with patch.object(server._store, "route", return_value=session):
+            return await server.query_selector("body", "h1")
+
+    assert (await read_in("/profiles/research"))["found"] is True
+    with pytest.raises(ValidationError, match="not on the read allowlist"):
+        await read_in("/profiles/other")
+
+
+@pytest.mark.asyncio
+async def test_navigate_gates_the_url_against_the_target_tabs_profile(monkeypatch):
+    # The tab is routed first, precisely so the URL is judged by the policy of
+    # the profile it would be loaded in.
+    import browden.mcp.server as server
+    from browden.configs.loader import AllowlistRefresher
+    from browden.mcp.validator import ActionAllowlist, ValidationError
+    importlib.reload(server)
+
+    monkeypatch.setattr(server, "_refresher", AllowlistRefresher.static(ActionAllowlist({
+        "read": {"tranco": {"enabled": False}},
+        "profiles": {"/profiles/research": {
+            "read": {"website_overrides": {"unranked.test": [".*"]}}}},
+    })))
+    landing = {"id": "h1", "url": "https://unranked.test/x", "title": "t"}
+
+    session = _profiled_session("/profiles/research", navigate=landing)
+    with patch.object(server._store, "route", return_value=session):
+        assert (await server.navigate("https://unranked.test/x", "h1"))["url"] == landing["url"]
+
+    other = _profiled_session("/profiles/other", navigate=landing)
+    with patch.object(server._store, "route", return_value=other):
+        with pytest.raises(ValidationError, match="not on allowlist"):
+            await server.navigate("https://unranked.test/x", "h1")
+    other.navigate.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_list_tabs_judges_each_profiles_tabs_by_its_own_rules(monkeypatch):
+    # list_tabs closes a tab parked off the read allowlist. With per-profile
+    # rules that verdict is per profile: the same URL is kept in the profile that
+    # allows it and closed in the one that doesn't.
+    import browden.mcp.server as server
+    from browden.configs.loader import AllowlistRefresher
+    from browden.mcp.validator import ActionAllowlist
+    importlib.reload(server)
+
+    monkeypatch.setattr(server, "_refresher", AllowlistRefresher.static(ActionAllowlist({
+        "read": {"tranco": {"enabled": False}},
+        "profiles": {"/profiles/research": {
+            "read": {"website_overrides": {"unranked.test": [".*"]}}}},
+    })))
+    tab = {"id": "x", "url": "https://unranked.test/x", "title": "t"}
+    allowed = _profiled_session("/profiles/research", list_tabs=[dict(tab, id="ok")],
+                                close_tab={"closed": "ok"})
+    refused = _profiled_session("/profiles/other", list_tabs=[dict(tab, id="closed")],
+                                close_tab={"closed": "closed"})
+    with patch.object(server._store, "sessions", return_value=[allowed, refused]):
+        listed = await server.list_tabs()
+
+    assert [t["id"] for t in listed] == ["ok"]
+    refused.close_tab.assert_awaited_once_with("closed")
+    allowed.close_tab.assert_not_awaited()
