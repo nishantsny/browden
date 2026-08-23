@@ -9,6 +9,7 @@ from pathlib import Path
 
 
 from ..common.logger import logger
+from ..common.profile import canonical_profile_dir
 from ..configs.loader import (
     AllowlistRefresher,
     ConfigError,
@@ -110,9 +111,14 @@ def _default_profile_dir() -> Path:
 
 
 def _resolve_profile_dir(profile_dir: str | None) -> Path:
-    """The concrete profile path for a request: the caller's, or the default."""
+    """The concrete profile path for a request: the caller's, or the default.
+
+    Canonicalized through the shared :func:`canonical_profile_dir`, so a path a
+    caller spells one way names the same profile as the same path spelled
+    another way — here and anywhere else a profile is named.
+    """
     if profile_dir:
-        return Path(profile_dir).expanduser().resolve()
+        return canonical_profile_dir(profile_dir)
     return _default_profile_dir()
 
 
