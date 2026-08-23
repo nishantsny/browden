@@ -21,6 +21,7 @@ The expected shape (see configs/samples/read_only_on_popular_websites.yaml):
 
     profiles:                     # per-browser-profile rule sets (additive over
       <profile dir>:              #   the global ones above)
+        allow_all: <bool>         # every action in THIS profile; Tranco stays on
         <any of the sections above except infra/profiles>
 
     infra:
@@ -279,6 +280,11 @@ def _check_profiles(rules, source: str) -> None:
                 raise ConfigError(
                     f"{where}: {key!r} is not allowed inside a profile — it is "
                     f"process-wide; move it to the top level")
+            if key == "allow_all":
+                if not isinstance(section, bool):
+                    raise ConfigError(
+                        f"{where}.allow_all: must be a boolean, got {type(section).__name__}")
+                continue
             _check_section(key, section, source=where)
 
 
@@ -300,6 +306,15 @@ def _check_section(key, rules, *, source: str) -> None:
     if key == "profiles":
         _check_profiles(rules, source)
         return
+    if key == "allow_all":
+        # Only meaningful inside a profile: "allow everything" is a thing you say
+        # about ONE browsing identity, never about every profile the server drives
+        # — which is what it would mean here. Caught by name so the message says
+        # that, rather than the "must be a mapping of host -> rule" an unknown
+        # top-level key would otherwise get as a presumed write action.
+        raise ConfigError(
+            f"{source}: allow_all is only allowed inside a profiles entry — "
+            f"it opens every action in one profile, not across all of them")
     _check_write_action(key, rules, source)
 
 

@@ -41,16 +41,26 @@ profiles:
           label: 'Save'
 
   # -------------------------------------------------------------------------
-  # A scratch profile for research: log into nothing here, and it may read the
-  # whole ranked web. Note what is NOT restated — the global denylist and the
-  # Tranco settings above apply here too.
+  # A scratch profile for research and open-ended searching. Log into nothing
+  # here, and `allow_all` lets an agent work without a config edit per host:
+  # every action, on every page, of every site the read gate would rank.
+  #
+  # The popularity net stays ON under allow_all — that is the point. Broad
+  # browsing across established sites is the low-risk case; an unranked host
+  # (a typosquat, a domain registered yesterday, a paste site an agent reached
+  # from a search page) still needs a deliberate act, either the opt-out below
+  # or a named override. Nothing here touches any other profile.
   # -------------------------------------------------------------------------
   ~/.cache/browden/chrome-research:
+    allow_all: true
     read:
       website_overrides:
         # Two hosts Tranco doesn't rank, readable only in this profile.
         docs.internal.example: ['.*']
         wiki.internal.example: ['^/pages/.*']
+      # Uncomment to drop the popularity net in THIS profile — every host, ranked
+      # or not, becomes readable here. Deliberate, and scoped to this profile.
+      # tranco: {enabled: false}
 
   # -------------------------------------------------------------------------
   # A profile pointed at a local dev server. `http://` (not https) is opened by

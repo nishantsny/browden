@@ -19,6 +19,16 @@ All notable changes to browden are documented here. The format follows
   `~/.cache/browden/p` and its resolved path name one profile; a relative key
   fails the load rather than sitting inert. Per-profile edits hot-reload like
   every other rule.
+- **`allow_all: true` inside a profile (#139).** Opens every write action and
+  every read *in that profile*, so an agent can be pointed at a fresh scratch
+  profile and work without a config edit per host. The Tranco popularity check
+  stays **on** under it — turned on for the profile even if the global config
+  had it off — so broad browsing covers the established web while an unranked
+  host still needs a deliberate act (`read: {tranco: {enabled: false}}` in the
+  same block, or a named override). It never enables `file://` or plaintext
+  `http://`: those still require a host named explicitly in
+  `website_overrides`. The denylist still wins. `allow_all` at the top level is
+  rejected — it describes one browsing identity, not every profile at once.
 
 ### Added
 - **`invalidate_dom_cache` tool.** Drops a tab's cached DOM snapshot so the next
