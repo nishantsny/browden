@@ -1,6 +1,6 @@
 import pytest
 
-from browden.mcp.validator import ActionAllowlist
+from browden.mcp.validator import ActionAllowlist, PolicySet
 from browden.mcp.validator.allowlist import (
     DEFAULT_MAX_BROWSER_SESSIONS,
     DEFAULT_MAX_TABS_PER_SESSION,
@@ -407,6 +407,44 @@ def test_infra_reap_interval_is_read_from_the_config():
     assert al.reap_interval_seconds == 600
     # An unset sibling keeps its default rather than following the one that was set.
     assert al.max_tabs_per_session == DEFAULT_MAX_TABS_PER_SESSION
+
+
+# -- the policy set / container split -----------------------------------------
+
+def test_policy_set_decides_without_the_infra_container():
+    # PolicySet is the surface the gates use: it needs only the rule sections,
+    # never the process-wide caps, so it can be built (and tested) on its own.
+    ps = PolicySet({
+        "denylist": {"blocked.test": [".*"]},
+        "read": {"website_overrides": {"example.com": ["^/docs/.*"]}},
+        "click": {"shop.test": {"paths": [".*"], "label": "(?i)add"}},
+    })
+    assert ps.read_policy.is_allowed("example.com", "/docs/x")
+    assert not ps.read_policy.is_allowed("example.com", "/secret")
+    assert ps.is_denied("blocked.test", "/")
+    assert ps.rules_for("click", "shop.test", "/cart")
+    assert ps.section("click").is_allowed("shop.test", "/cart")
+
+
+def test_infra_is_not_a_write_action():
+    # `infra` is the container's, so the policy set must not mistake it for a
+    # write action named "infra" (every unrecognized key is one).
+    ps = PolicySet({"infra": {"max_tabs_per_session": 3}})
+    assert ps.rules_for("infra", "example.com", "/") == []
+    assert not ps.section("infra").is_allowed("example.com", "/")
+
+
+def test_allowlist_delegates_every_decision_to_its_policy_set():
+    al = ActionAllowlist({
+        "denylist": {"blocked.test": [".*"]},
+        "read": {"website_overrides": {"example.com": [".*"]}},
+        "click": {"shop.test": {"paths": [".*"], "label": "(?i)add"}},
+    })
+    assert isinstance(al.policy, PolicySet)
+    assert al.read_policy is al.policy.read_policy
+    assert al.denylist is al.policy.denylist
+    assert al.is_denied("blocked.test", "/") == al.policy.is_denied("blocked.test", "/")
+    assert al.rules_for("click", "shop.test", "/") == al.policy.rules_for("click", "shop.test", "/")
 
 
 # The shipped sample (configs/samples/read_only_on_popular_websites.yaml) is
