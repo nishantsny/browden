@@ -38,6 +38,10 @@ All notable changes to browden are documented here. The format follows
   `website_overrides`. The denylist still wins. `allow_all` at the top level is
   rejected — it describes one browsing identity, not every profile at once
   (#144).
+- **README: scoping rules to a profile.** Documents the `profiles:` block and
+  `allow_all`: additive rules, the unioned denylist, inherited `read` settings,
+  canonical keys, `infra` staying global, and what `allow_all` keeps (the
+  Tranco net and the scheme gate) (#145).
 
 ### Changed
 - **Unknown top-level config sections are refused.** A section that is not

@@ -47,6 +47,9 @@ Defer to richer automation tools when you need to *drive* the browser rather tha
   your browser, you can point browden at your primary Chrome profile and
   let it reuse your existing logins — the agent can read your logged-in pages but
   cannot click "Buy", change settings, send mail, or delete anything.
+- **Rules can be scoped per browser profile.** The credentialed profile stays
+  narrow while a scratch profile browses freely — widening one never widens the
+  other. See [Scoping rules to a profile](#scoping-rules-to-a-profile).
 - **No data exfiltration, all local.** It runs entirely on your machine and drives a Chrome on your
   machine. No cloud, no proxy — nothing about your browsing leaves the host.
 - **One-click install for Linux/Mac (minimal for Windows).** A single setup script installs a background service and
@@ -160,6 +163,10 @@ first use. That has two consequences:
   request that waits more than **10s** for its turn gives up and returns
   `{"error": "browser session busy — ...", "id": ...}`; it's safe to retry.
 
+Because a profile is a real security boundary, the allowlist can scope rules to
+one: see [Scoping rules to a profile](#scoping-rules-to-a-profile) for keeping
+the credentialed profile narrow while a scratch profile browses freely.
+
 **Which profile should I use?**
 
 - **Let the agent create one** (or pass a fresh `profile_dir`) when you just want
@@ -223,6 +230,66 @@ The "allowlist" policy has **three layers**, evaluated in order (first match win
 
 To refresh the Tranco snapshot, use `python3 setup/fetch_tranco.py` and restart the MCP server.
 
+### Scoping rules to a profile
+
+All three layers can be scoped to a single **[profile](#profiles)** — the Chrome
+`--user-data-dir` that holds one browsing identity's cookies, extensions and
+logins. Without that, loosening a rule for one kind of work loosens it for the
+browser holding your real sessions too.
+
+A `profiles:` block takes the *same* rule vocabulary, keyed by profile directory:
+
+```yaml
+denylist:                                   # global: the floor every profile gets
+  "*": ['^/(account|settings)/security.*']
+read:
+  tranco: {enabled: true, top_n: 1000000}
+
+profiles:
+  ~/.cache/browden/chrome-profile:          # the credentialed profile: narrow
+    click:
+      secure.splitwise.com:
+        - path: ['^/expenses.*']
+          label: 'Save'
+
+  ~/.cache/browden/chrome-research:         # a scratch profile: everything, here
+    allow_all: true
+```
+
+- **A profile's rules are additive over the global ones.** A profile with no
+  entry gets exactly the global rules — so a config written before this existed
+  behaves identically — and widening one profile never widens another.
+- **The denylist is unioned and still wins**, global entry or profile entry.
+- **`read` settings are inherited** unless the profile restates them, so a
+  profile can move `top_n` (or drop the popularity net *for itself*) without
+  repeating the rest.
+- **Keys are canonicalized** the way a caller's `profile_dir` is, so
+  `~/.cache/browden/p` and its resolved path are one profile. A *relative* key
+  is refused at load — it would depend on the server's working directory. A
+  profile directory that doesn't exist yet is fine; Chrome creates it on first
+  launch.
+- **`infra` stays global** (one process, one set of caps) and is rejected inside
+  a profile block rather than silently ignored.
+- Edits hot-reload like every other rule, including for profiles already driving
+  a live Chrome.
+
+**`allow_all: true`** is the shorthand for "this is a scratch profile: let the
+agent work in it" — every write action on every page, and every read of a host
+the read gate would otherwise *rank*. Two things it deliberately keeps:
+
+- **The Tranco net stays on** (turned on for that profile even if the global
+  config had it off). Broad browsing across established sites is the low-risk
+  case that motivates the flag; an unranked host — a typosquat, a domain
+  registered yesterday, a paste site reached from a search page — still takes a
+  deliberate act: `read: {tranco: {enabled: false}}` in the same block, or a
+  named override.
+- **The scheme gate is unmoved.** `file://` and plaintext `http://` are admitted
+  only for a host named *explicitly* in `website_overrides`, which `allow_all`
+  never does.
+
+The denylist still vetoes everything under it, and `allow_all` is only valid
+inside a profile — it describes one browsing identity, never all of them.
+
 ### Protecting browden's own files
 
 The policy only holds if the agent can't rewrite it. That means the allowlist,
@@ -249,6 +316,7 @@ any of them widens its own access. Setup prints both steps at the end:
 - [`read_only_on_popular_websites.yaml`](configs/samples/read_only_on_popular_websites.yaml) — the shipped default: Tranco reads, no writes.
 - [`allow_grocery_cart_manipulation.yaml`](configs/samples/allow_grocery_cart_manipulation.yaml) — a worked example enabling `click`/`write-text` on a few storefronts.
 - [`allowlist-read-deny.yaml`](configs/samples/allowlist-read-deny.yaml) — a fully-commented tour of the read/deny system.
+- [`profile_scoped_rules.yaml`](configs/samples/profile_scoped_rules.yaml) — scope rules per browser profile: a narrow credentialed profile, an `allow_all` scratch profile, a dev-server profile.
 - [`allow_local_file_reads.yaml`](configs/samples/allow_local_file_reads.yaml) — opt `file://` local-file reads in (scoped by path).
 - [`allow_localhost_dev_server.yaml`](configs/samples/allow_localhost_dev_server.yaml) — read a local `http://localhost:PORT` dev server.
 
