@@ -587,5 +587,122 @@ def test_an_unusable_profile_path_falls_back_to_the_global_set():
     assert al.policy_for("some\x00garbage") is al.policy
 
 
+# -- allow_all (#139) ---------------------------------------------------------
+#
+# The mini Tranco fixture ranks google.com (#1); "unranked.test" is in no
+# snapshot, which is what makes the popularity branch observable here.
+
+def _allow_all(read: dict | None = None, **rest) -> "PolicySet":
+    body = {"allow_all": True, **rest}
+    if read is not None:
+        body["read"] = read
+    return ActionAllowlist({"profiles": {"/profiles/scratch": body}}).policy_for("/profiles/scratch")
+
+
+def test_allow_all_permits_every_write_action_on_any_page():
+    scratch = _allow_all()
+    for action in ("click", "write-text", "press-key", "some-future-action"):
+        rules = scratch.rules_for(action, "anything.test", "/deep/page", "q=1", "frag")
+        assert rules, action
+        assert any(r.label is not None and r.label.fullmatch("Whatever the control says")
+                   for r in rules), action
+    # press-key needs the key in the rule's `keys`; allow_all authorizes the
+    # control keys the gate accepts (and no character keys — that gate is
+    # separate and unmoved).
+    assert "Enter" in scratch.rules_for("press-key", "anything.test", "/")[0].keys
+    assert "a" not in scratch.rules_for("press-key", "anything.test", "/")[0].keys
+
+
+def test_allow_all_reads_ranked_hosts_but_still_refuses_unranked_ones():
+    # The acceptance criterion: allow_all is "browse the established web", not
+    # "browse anything". Tranco is ON here without the profile saying so.
+    scratch = _allow_all()
+    assert scratch.read_policy.is_allowed("google.com", "/search")
+    assert not scratch.read_policy.is_allowed("unranked.test", "/")
+
+
+def test_allow_all_turns_tranco_on_even_when_the_global_config_had_it_off():
+    # The net is turned ON for an allow_all set rather than inherited: opting out
+    # is something the profile says in its own block, so a global
+    # `tranco: {enabled: false}` doesn't quietly make allow_all mean "anything".
+    al = ActionAllowlist({
+        "read": {"tranco": {"enabled": False}},
+        "profiles": {"/profiles/scratch": {"allow_all": True}},
+    })
+    scoped = al.policy_for("/profiles/scratch")
+    assert scoped.read_policy.is_allowed("google.com", "/")          # ranked -> allowed
+    assert not scoped.read_policy.is_allowed("unranked.test", "/")   # the net is on
+
+
+def test_allow_all_plus_explicit_tranco_off_admits_an_unranked_host():
+    scratch = _allow_all(read={"tranco": {"enabled": False}})
+    assert scratch.read_policy.is_allowed("unranked.test", "/")
+    assert scratch.read_policy.is_allowed("google.com", "/")
+
+
+def test_allow_all_is_not_narrowed_by_an_inherited_page_scoped_override():
+    al = ActionAllowlist({
+        "read": {"tranco": {"enabled": False},
+                 "website_overrides": {"docs.test": ["^/public/.*"]}},
+        "profiles": {"/profiles/scratch": {"allow_all": True,
+                                           "read": {"tranco": {"enabled": False}}}},
+    })
+    # Globally the override demotes docs.test to /public/* — its whole purpose.
+    assert al.policy.read_policy.is_allowed("docs.test", "/public/x")
+    assert not al.policy.read_policy.is_allowed("docs.test", "/private/x")
+    # In the profile that allows everything, that inherited page-scope only adds.
+    assert al.policy_for("/profiles/scratch").read_policy.is_allowed("docs.test", "/private/x")
+
+
+def test_allow_all_with_the_net_on_still_refuses_unranked_pages_outside_an_override():
+    # The override adds the pages it names; the rest of an unranked host is left
+    # to the popularity check, which is on.
+    scratch = _allow_all(read={"website_overrides": {"unranked.test": ["^/ok/.*"]}})
+    assert scratch.read_policy.is_allowed("unranked.test", "/ok/x")
+    assert not scratch.read_policy.is_allowed("unranked.test", "/elsewhere")
+
+
+def test_allow_all_does_not_open_file_or_plaintext_http():
+    # The scheme gate asks whether the operator named THIS host explicitly.
+    # allow_all names nothing, so it can never answer yes.
+    scratch = _allow_all(read={"tranco": {"enabled": False}})
+    assert not scratch.read_policy.override_has_host("localhost")
+    assert not scratch.read_policy.override_has_host("")       # the file:// host
+    # Naming the host is still what opts it in.
+    named = _allow_all(read={"tranco": {"enabled": False},
+                             "website_overrides": {"localhost": [".*"]}})
+    assert named.read_policy.override_has_host("localhost")
+
+
+def test_denylist_still_wins_inside_an_allow_all_profile():
+    al = ActionAllowlist({
+        "denylist": {"blocked.test": [".*"]},
+        "profiles": {"/profiles/scratch": {"allow_all": True,
+                                           "denylist": {"local-block.test": [".*"]}}},
+    })
+    scratch = al.policy_for("/profiles/scratch")
+    assert scratch.is_denied("blocked.test", "/")
+    assert scratch.is_denied("local-block.test", "/")
+    assert not scratch.read_policy.is_allowed("blocked.test", "/")
+
+
+def test_allow_all_stays_inside_its_own_profile():
+    al = ActionAllowlist({"profiles": {
+        "/profiles/scratch": {"allow_all": True},
+        "/profiles/narrow": {},
+    }})
+    assert al.policy_for("/profiles/scratch").rules_for("click", "shop.test", "/")
+    assert al.policy_for("/profiles/narrow").rules_for("click", "shop.test", "/") == []
+    assert al.policy.rules_for("click", "shop.test", "/") == []
+    assert not al.policy_for("/profiles/narrow").read_policy.is_allowed("unranked.test", "/")
+
+
+def test_allow_all_is_not_a_write_action_named_allow_all():
+    scratch = _allow_all()
+    # The flag must not fall through to the "every other key is a write action"
+    # branch — that would try to read `True` as a host -> rule mapping.
+    assert scratch.section("click").is_allowed("anything.test", "/")
+
+
 # The shipped sample (configs/samples/read_only_on_popular_websites.yaml) is
 # covered by test/unit/configs/test_loader.py through the schema-validating loader.

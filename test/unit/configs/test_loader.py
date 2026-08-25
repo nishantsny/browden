@@ -246,6 +246,9 @@ def test_load_page_scoped_rules(tmp_path):
     ("profiles:\n  ~/p:\n    read:\n      website_overrides:\n        x.com: ['[']\n",
      "invalid path regex"),
     ("profiles:\n  ~/p:\n    read:\n      typo: 1\n", "unknown keys"),
+    # allow_all is a profile-scoped flag, not a global one
+    ("allow_all: true\n", "only allowed inside a profiles entry"),
+    ("profiles:\n  ~/p:\n    allow_all: sure\n", "allow_all: must be a boolean"),
     # infra
     ("infra:\n  max_tabs_per_session: -1\n", "must be a positive integer"),
     ("infra:\n  reap_interval_seconds: 0\n", "must be a positive integer"),
@@ -326,6 +329,29 @@ def test_a_profile_that_does_not_exist_yet_loads(tmp_path):
     )
     al = load_allowlist(f)
     assert al.policy_for(str(tmp_path / "never-launched")).read_policy.is_allowed("ok.test", "/")
+
+
+def test_load_allow_all_profile(tmp_path):
+    scratch = tmp_path / "scratch"
+    f = tmp_path / "allowlist.yaml"
+    f.write_text(
+        "read:\n"
+        "  tranco: {enabled: false}\n"
+        "profiles:\n"
+        f"  {scratch}:\n"
+        "    allow_all: true\n"
+        "    read:\n"
+        "      tranco: {enabled: false}\n"
+    )
+    policy = load_allowlist(f).policy_for(str(scratch))
+    # Every action, every host — with the popularity net explicitly opted out of.
+    assert policy.read_policy.is_allowed("anything.test", "/x")
+    assert policy.rules_for("click", "anything.test", "/x")
+    assert policy.rules_for("write-text", "anything.test", "/x")
+    # ...and none of it anywhere else.
+    other = load_allowlist(f).policy_for(str(tmp_path / "other"))
+    assert not other.read_policy.is_allowed("anything.test", "/x")
+    assert other.rules_for("click", "anything.test", "/x") == []
 
 
 # -- path resolution ----------------------------------------------------------

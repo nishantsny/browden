@@ -218,3 +218,52 @@ def test_press_key_ambiguous_rejected():
 
 # The read-tool gate (is_url_allowed / ensure_url_is_in_allowlist) now lives in
 # read_gates.py and is covered by test_read_gates.py.
+
+
+# -- allow_all: the write gates, through a scratch profile's rule set (#139) ---
+
+_SCRATCH = ActionAllowlist({"profiles": {"/profiles/scratch": {
+    "allow_all": True, "read": {"tranco": {"enabled": False}}}}}).policy_for("/profiles/scratch")
+
+
+def test_allow_all_authorizes_a_click_through_the_real_gates():
+    node = {"tag": "button", "id": None, "classes": [], "attributes": {},
+            "text": "Anything at all"}
+    check_action_host(_SCRATCH, "click", "https://unlisted.test/whatever")
+    validate_click_target(_SCRATCH, "https://unlisted.test/whatever", "#b", _found(node))
+
+
+def test_allow_all_authorizes_typing_into_a_field_with_no_visible_label():
+    # A label-less box is the case an operator normally has to name by id; under
+    # allow_all the "any label" rule covers it without one.
+    node = {"tag": "input", "id": "x", "classes": [], "attributes": {"type": "text"},
+            "text": ""}
+    check_action_host(_SCRATCH, "write-text", "https://unlisted.test/form")
+    validate_write_text_target(_SCRATCH, "https://unlisted.test/form", "#x", _found(node))
+
+
+def test_allow_all_authorizes_a_control_key_but_never_a_character_key():
+    node = {"tag": "tr", "id": None, "classes": [], "attributes": {"tabindex": "0"},
+            "text": "A row"}
+    validate_press_key_target(_SCRATCH, "https://unlisted.test/list", "tr", _found(node), "Enter")
+    with pytest.raises(ValidationError, match="not an allowed control key"):
+        validate_press_key_target(_SCRATCH, "https://unlisted.test/list", "tr", _found(node), "a")
+
+
+def test_allow_all_does_not_authorize_a_click_on_a_denied_host():
+    denied = ActionAllowlist({
+        "denylist": {"blocked.test": [".*"]},
+        "profiles": {"/profiles/scratch": {"allow_all": True}},
+    }).policy_for("/profiles/scratch")
+    with pytest.raises(ValidationError, match="denylist"):
+        check_action_host(denied, "click", "https://blocked.test/x")
+
+
+def test_allow_all_still_gates_where_an_anchor_would_navigate():
+    # The anchor check runs against the same read policy, so a link off to an
+    # unranked host is refused even in an allow_all profile with Tranco on.
+    scratch = ActionAllowlist({"profiles": {"/profiles/s": {"allow_all": True}}}).policy_for("/profiles/s")
+    anchor = {"tag": "a", "id": None, "classes": [],
+              "attributes": {"href": "https://unranked.test/x"}, "text": "Go"}
+    with pytest.raises(ValidationError, match="not on the read allowlist"):
+        validate_click_target(scratch, "https://google.com/", "a", _found(anchor))
