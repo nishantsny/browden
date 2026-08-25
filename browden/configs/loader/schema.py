@@ -19,6 +19,10 @@ The expected shape (see configs/samples/read_only_on_popular_websites.yaml):
                                      #   (use '.*' to allow any control on the host)
         paths: [<path regex>, ...]   # optional, defaults to [".*"]
 
+    profiles:                     # per-browser-profile rule sets (additive over
+      <profile dir>:              #   the global ones above)
+        <any of the sections above except infra/profiles>
+
     infra:
       max_browser_sessions: <positive int>
       max_tabs_per_session: <positive int>
@@ -28,6 +32,8 @@ Validation is structural plus regex compilation; semantics (default-deny,
 denylist-wins ordering, www-stripping, ...) live in ActionAllowlist/ReadPolicy.
 """
 import re
+
+from pathlib import Path
 
 
 class ConfigError(ValueError):
@@ -227,6 +233,55 @@ def _check_write_action(action, rules, source: str) -> None:
         _check_label(rule, where)
 
 
+def _check_profiles(rules, source: str) -> None:
+    """Validate the ``profiles`` block: profile directory -> its own rule set.
+
+    Each key names a browser profile (Chrome's ``--user-data-dir``) and must be
+    an absolute path (``~`` allowed) — a relative one would resolve against the
+    server's working directory, so the same config would scope rules to a
+    different profile depending on how the server was launched. It fails the load
+    with its own spelling in the message rather than sitting inert in a config the
+    operator believes is in force.
+
+    The body is validated by the *same* :func:`_check_section` as a top-level
+    one, minus the two keys that make no sense inside a profile: ``infra`` is
+    process-wide (one Chrome cap can't differ per profile) and ``profiles``
+    doesn't nest. Both are rejected rather than ignored — a cap written where it
+    has no effect is a misunderstanding worth surfacing at load.
+    """
+    if not isinstance(rules, dict):
+        raise ConfigError(
+            f"{source}: profiles must be a mapping of profile dir -> rules, "
+            f"got {type(rules).__name__}")
+    for profile_dir, body in rules.items():
+        if not isinstance(profile_dir, str) or not profile_dir.strip():
+            raise ConfigError(f"{source}: profile keys must be non-empty paths, got {profile_dir!r}")
+        try:
+            expanded = Path(profile_dir).expanduser()
+        except (OSError, RuntimeError, ValueError) as e:
+            raise ConfigError(f"{source}: profiles.{profile_dir}: not a usable path: {e}") from None
+        # Checked *before* resolving: `resolve()` would silently anchor a relative
+        # key to whatever directory the server happens to be started from, so the
+        # same config would scope rules to a different profile depending on how it
+        # was launched. A profile is named absolutely (`~` is fine) or not at all.
+        if not expanded.is_absolute():
+            raise ConfigError(
+                f"{source}: profiles.{profile_dir!r}: must be an absolute profile "
+                f"directory (a relative path would depend on the server's working "
+                f"directory)")
+        where = f"{source}: profiles.{profile_dir}"
+        if body is None:
+            continue
+        if not isinstance(body, dict):
+            raise ConfigError(f"{where}: must be a mapping of rules, got {type(body).__name__}")
+        for key, section in body.items():
+            if key in ("infra", "profiles"):
+                raise ConfigError(
+                    f"{where}: {key!r} is not allowed inside a profile — it is "
+                    f"process-wide; move it to the top level")
+            _check_section(key, section, source=where)
+
+
 def _check_section(key, rules, *, source: str) -> None:
     """Validate one top-level section of a config document.
 
@@ -241,6 +296,9 @@ def _check_section(key, rules, *, source: str) -> None:
         return
     if key == "read":
         _check_read(rules, f"{source}: read")
+        return
+    if key == "profiles":
+        _check_profiles(rules, source)
         return
     _check_write_action(key, rules, source)
 

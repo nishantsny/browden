@@ -4,6 +4,7 @@ from pathlib import Path
 
 import yaml
 
+from ...common.profile import canonical_profile_dir
 from .popularity import PopularityAllowlist
 from .tranco import DEFAULT_TOP_N, TRANCO_FILENAME, canonical_host
 
@@ -326,8 +327,44 @@ class ReadPolicy:
 # Top-level keys that are not write actions. Every *other* key in a rule set is
 # one (see PolicySet), so this is the single list that says "handled elsewhere":
 # `infra` is process-wide (ActionAllowlist owns it), `read` builds the read gate,
-# `denylist` the always-deny list.
-_NON_ACTION_SECTIONS = ("infra", "read", "denylist")
+# `denylist` the always-deny list, and `profiles` scopes whole rule sets to a
+# browser profile (ActionAllowlist owns those too).
+_NON_ACTION_SECTIONS = ("infra", "read", "denylist", "profiles")
+
+
+def _merge_host_rules(base: "dict[str, list[PageRule]]",
+                      extra: "dict[str, list[PageRule]]") -> "dict[str, list[PageRule]]":
+    """Union two coerced ``host -> [PageRule]`` maps; a host in both keeps both.
+
+    Rules are additive by construction (a host is allowed if ANY of its rules
+    matches — see :meth:`Allowlist.is_allowed`), so a union is exactly "the
+    profile's rules on top of the global floor". Host keys are canonicalized
+    here, before the union, or ``amazon.com`` in one map and ``www.amazon.com``
+    in the other would look like two hosts and one of them would be dropped when
+    the merged map is canonicalized later.
+    """
+    merged: "dict[str, list[PageRule]]" = {}
+    for rules in (base, extra):
+        for host, page_rules in rules.items():
+            merged.setdefault(canonical_host(host), []).extend(page_rules)
+    return merged
+
+
+def _merge_read_cfg(base: dict, extra: dict) -> dict:
+    """Merge two ``read`` blocks — the profile's settings over the global ones.
+
+    Scalars (``enabled``) and each ``tranco`` knob are taken from the profile
+    when it states them and inherited when it doesn't, so a profile can turn the
+    popularity net off (or move ``top_n``) without restating the rest.
+    ``website_overrides`` is absent from the result: it is a rule *map*, unioned
+    by :func:`_merge_host_rules` in coerced form rather than merged raw here.
+    """
+    merged = {**base, **extra}
+    tranco = {**(base.get("tranco") or {}), **(extra.get("tranco") or {})}
+    if tranco:
+        merged["tranco"] = tranco
+    merged.pop("website_overrides", None)
+    return merged
 
 
 class PolicySet:
@@ -393,31 +430,64 @@ class PolicySet:
     gate write actions. An unlisted write action default-denies.
     """
 
-    def __init__(self, sections: dict[str, object], tranco_path: Path | None = None):
+    def __init__(self, sections: dict[str, object], tranco_path: Path | None = None,
+                 *, base: "PolicySet | None" = None):
         # tranco_path is the Tranco snapshot that sits next to the allowlist
         # file; the loader/from_file pass it in. A bare dict construction (tests,
         # the import-time default) leaves it None -> the ~/.browden fallback.
-        self._sections: dict[str, Allowlist] = {}
-        # action -> canonical host -> ordered page rules (label + field_ids).
-        self._rules: "dict[str, dict[str, list[PageRule]]]" = {}
+        #
+        # `base` is the set these rules sit ON TOP OF: a profile's block is
+        # additive over the global one, so a profile starts from every global
+        # rule and adds its own (see _merge_host_rules / _merge_read_cfg). None
+        # for the global set itself. The merge happens on *coerced* rules, so
+        # every input spelling — legacy host-wide mapping, bare path list, page
+        # rule list — is already one shape by the time it is unioned.
+        deny_rules = _coerce_section(sections.get("denylist"), want_label=False,
+                                     where="denylist")
+        read_cfg = sections.get("read")
+        read_cfg = dict(read_cfg) if isinstance(read_cfg, dict) else {}
+        override_rules = _coerce_section(read_cfg.get("website_overrides"), want_label=False,
+                                         where="read.website_overrides")
+        action_rules = {
+            action: _coerce_section(rules, want_label=True, where=action)
+            for action, rules in sections.items() if action not in _NON_ACTION_SECTIONS}
+        if base is not None:
+            deny_rules = _merge_host_rules(base._deny_rules, deny_rules)
+            read_cfg = _merge_read_cfg(base._read_cfg, read_cfg)
+            override_rules = _merge_host_rules(base._override_rules, override_rules)
+            action_rules = {
+                action: _merge_host_rules(base._action_rules.get(action, {}),
+                                          action_rules.get(action, {}))
+                for action in (*base._action_rules, *action_rules)}
+        # Kept so a set built on top of this one can union against it.
+        self._deny_rules = deny_rules
+        self._read_cfg = read_cfg
+        self._override_rules = override_rules
+        self._action_rules = action_rules
+
         # A denylist blocks broadly: prefix match, not fullmatch (see Allowlist).
-        self._denylist = Allowlist.create_denylist(
-            _coerce_section(sections.get("denylist"), want_label=False, where="denylist"))
+        self._denylist = Allowlist.create_denylist(deny_rules)
         self._read_policy = self._build_read_policy(
-            sections.get("read"), self._denylist, tranco_path)
-        for action, rules in sections.items():
-            if action in _NON_ACTION_SECTIONS:
-                continue
-            host_rules = _coerce_section(rules, want_label=True, where=action)
-            self._rules[action] = {canonical_host(h): rs for h, rs in host_rules.items()}
-            # section() keeps a page-admission view (labels ignored) for callers
-            # that only ask "may this action touch this host+page at all".
-            self._sections[action] = Allowlist.create_allowlist(host_rules)
+            read_cfg, override_rules, self._denylist, tranco_path)
+        # action -> canonical host -> ordered page rules (label + field_ids).
+        self._rules: "dict[str, dict[str, list[PageRule]]]" = {
+            action: {canonical_host(h): rs for h, rs in host_rules.items()}
+            for action, host_rules in action_rules.items()}
+        # section() keeps a page-admission view (labels ignored) for callers
+        # that only ask "may this action touch this host+page at all".
+        self._sections: dict[str, Allowlist] = {
+            action: Allowlist.create_allowlist(host_rules)
+            for action, host_rules in action_rules.items()}
 
     @staticmethod
-    def _build_read_policy(read_cfg: object, denylist: Allowlist,
-                           tranco_path: Path | None) -> ReadPolicy:
+    def _build_read_policy(read_cfg: dict, override_rules: "dict[str, list[PageRule]]",
+                           denylist: Allowlist, tranco_path: Path | None) -> ReadPolicy:
         """Assemble the ReadPolicy from the ``read`` block (fail-closed if absent).
+
+        ``read_cfg`` carries the settings (``enabled`` / ``tranco``) and
+        ``override_rules`` the already-coerced ``website_overrides``, which are
+        kept apart so a profile's block can union its overrides with the global
+        ones while merging the settings by key.
 
         With no ``read`` block the allowlist is enabled but empty, so only
         denylist + (nothing) applies — every read is denied until the operator
@@ -428,17 +498,15 @@ class PolicySet:
         a snapshot that setup has not fetched yet degrades to "Tranco matches
         nothing" rather than a crash.
         """
-        cfg = read_cfg if isinstance(read_cfg, dict) else {}
-        enabled = bool(cfg.get("enabled", True))
-        tranco_cfg = cfg.get("tranco") or {}
+        enabled = bool(read_cfg.get("enabled", True))
+        tranco_cfg = read_cfg.get("tranco") or {}
         tranco = None
         if tranco_cfg.get("enabled"):
             snapshot = tranco_path if (tranco_path and tranco_path.exists()) else None
             tranco = PopularityAllowlist(tranco_top_n=int(tranco_cfg.get("top_n", DEFAULT_TOP_N)), path=snapshot)
-        overrides = Allowlist.create_allowlist(
-            _coerce_section(cfg.get("website_overrides"), want_label=False,
-                            where="read.website_overrides"))
-        return ReadPolicy(enabled=enabled, tranco=tranco, overrides=overrides, denylist=denylist)
+        return ReadPolicy(enabled=enabled, tranco=tranco,
+                          overrides=Allowlist.create_allowlist(override_rules),
+                          denylist=denylist)
 
     @property
     def read_policy(self) -> ReadPolicy:
@@ -493,8 +561,34 @@ class ActionAllowlist:
       :class:`PolicySet` (which documents the grammar), reachable as
       :attr:`policy`.
 
-    :attr:`policy` is the only way to a decision: a gate is always handed the
-    rule set that governs the request it is deciding, never the container.
+    ``profiles`` scopes a *second* copy of that same rule grammar to one browser
+    profile — the directory Chrome runs under, which is what actually separates
+    one browsing identity (its cookies, extensions, logins) from another::
+
+        denylist:                        # global: every profile gets these
+          "*": ['^/admin/.*']
+        read:
+          tranco: {enabled: true, top_n: 1000000}
+
+        profiles:
+          ~/.cache/browden/chrome-profile:      # the credentialed profile
+            click:
+              secure.splitwise.com:
+                label: 'Save'
+                paths: ['^/expenses.*']
+
+    A profile's rules are **additive over the global ones**: its set starts from
+    every global rule and adds its own, so widening one profile never narrows
+    another and a profile with no block gets exactly the global rules (which is
+    every config written before this existed). The denylist is unioned the same
+    way and still wins over everything, global entry or profile entry.
+
+    Keys are canonicalized with :func:`canonical_profile_dir` — the same
+    reduction the session layer applies to a caller's ``profile_dir`` — so a key
+    written ``~/.cache/browden/p`` names the same profile as the resolved path.
+
+    :meth:`policy_for` is the only way to a decision: a gate is always handed the
+    rule set for the profile whose session made the request, never the container.
     """
 
     def __init__(self, sections: dict[str, object], tranco_path: Path | None = None):
@@ -513,6 +607,13 @@ class ActionAllowlist:
             self.reap_interval_seconds = int(
                 infra.get("reap_interval_seconds", DEFAULT_REAP_INTERVAL_SECONDS))
         self._policy = PolicySet(sections, tranco_path)
+        # Each profile's rules sit on top of the global set (base=), keyed by the
+        # canonical profile path the session layer keys its Chrome sessions by.
+        profiles = sections.get("profiles")
+        self._profiles: dict[str, PolicySet] = {
+            str(canonical_profile_dir(key)): PolicySet(
+                body if isinstance(body, dict) else {}, tranco_path, base=self._policy)
+            for key, body in (profiles or {}).items()}
 
     @classmethod
     def from_file(cls, path: Path) -> "ActionAllowlist":
@@ -521,5 +622,41 @@ class ActionAllowlist:
 
     @property
     def policy(self) -> PolicySet:
-        """The rule set every gate decides against."""
+        """The global rule set — what a profile with no ``profiles`` block gets.
+
+        Not the one to gate a request with: use :meth:`policy_for`, which starts
+        here and adds whatever the request's own profile is allowed.
+        """
         return self._policy
+
+    def policy_for(self, profile_dir: "str | Path") -> PolicySet:
+        """The rule set that decides a request made in ``profile_dir``'s session.
+
+        The profile's own set if it has a ``profiles`` entry (global rules plus
+        its own), else the global set. ``profile_dir`` is normally the path the
+        session is already keyed by (canonical — see
+        :func:`~browden.common.profile.canonical_profile_dir`), which is a plain
+        dict lookup; a spelling that misses is canonicalized and looked up once
+        more, so a caller naming a profile with ``~`` or a relative path still
+        finds it.
+
+        A lookup that misses falls back to the global set, which is the narrow
+        direction: a profile's rules are additive, so the fallback can only ever
+        grant less than the intended entry would have.
+        """
+        if not self._profiles:
+            return self._policy  # no profiles block — every config written before this
+        key = str(profile_dir)
+        scoped = self._profiles.get(key)
+        if scoped is not None:
+            return scoped  # the session's own (already canonical) path: a plain lookup
+        try:
+            return self._profiles.get(str(canonical_profile_dir(key)), self._policy)
+        except (OSError, ValueError):
+            # An unusable path can't name a profile; fall back to the global set
+            # rather than failing the request open or crashing the gate.
+            return self._policy
+
+    def profile_dirs(self) -> list[str]:
+        """The canonical profile paths this config scopes rules to (for logging)."""
+        return sorted(self._profiles)

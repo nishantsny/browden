@@ -229,6 +229,23 @@ def test_load_page_scoped_rules(tmp_path):
      "unknown keys"),
     ('read:\n  website_overrides:\n    x.com:\n      - path: [".*"]\n        match_on: nope\n',
      "match_on: must be 'path' or 'url'"),
+    # profiles block. The keys are spelled `~/p`: it expands to an absolute path
+    # on every platform, where a literal `/tmp/p` is absolute only on POSIX (on
+    # Windows it has no drive, so the absolute-key check would fire first and
+    # these cases would never reach the error each is about).
+    ("profiles: 5\n", "profiles must be a mapping"),
+    ("profiles:\n  relative/profile: {}\n", "must be an absolute profile directory"),
+    ("profiles:\n  ~/p:\n    infra: {max_tabs_per_session: 2}\n",
+     "'infra' is not allowed inside a profile"),
+    ("profiles:\n  ~/p:\n    profiles: {}\n",
+     "'profiles' is not allowed inside a profile"),
+    ("profiles:\n  ~/p: 5\n", "must be a mapping of rules"),
+    # a profile body is validated by the same rules as a top-level one
+    ("profiles:\n  ~/p:\n    click:\n      amazon.com:\n        paths: ['.*']\n",
+     "'label' is required"),
+    ("profiles:\n  ~/p:\n    read:\n      website_overrides:\n        x.com: ['[']\n",
+     "invalid path regex"),
+    ("profiles:\n  ~/p:\n    read:\n      typo: 1\n", "unknown keys"),
     # infra
     ("infra:\n  max_tabs_per_session: -1\n", "must be a positive integer"),
     ("infra:\n  reap_interval_seconds: 0\n", "must be a positive integer"),
@@ -239,6 +256,76 @@ def test_schema_violations_raise_config_error(tmp_path, content, match):
     f.write_text(content)
     with pytest.raises(ConfigError, match=match):
         load_allowlist(f)
+
+
+def test_load_profile_scoped_rules(tmp_path):
+    # The full path a live server takes: YAML -> schema -> ActionAllowlist ->
+    # a decision scoped to the profile the request runs in.
+    shopper = tmp_path / "shopper"
+    reader = tmp_path / "reader"
+    f = tmp_path / "allowlist.yaml"
+    f.write_text(
+        "read:\n"
+        "  tranco: {enabled: false}\n"
+        "  website_overrides:\n"
+        "    everyone.test: ['.*']\n"
+        "profiles:\n"
+        f"  {shopper}:\n"
+        "    click:\n"
+        "      shop.test:\n"
+        "        - path: ['^/cart.*']\n"
+        "          label: '(?i)add to cart'\n"
+        f"  {reader}:\n"
+        "    read:\n"
+        "      website_overrides:\n"
+        "        docs.test: ['^/pages/.*']\n"
+    )
+    al = load_allowlist(f)
+    assert al.profile_dirs() == sorted([str(shopper), str(reader)])
+
+    shop_policy = al.policy_for(str(shopper))
+    read_policy = al.policy_for(str(reader))
+    # Each profile has its own grant...
+    assert shop_policy.rules_for("click", "shop.test", "/cart")
+    assert read_policy.read_policy.is_allowed("docs.test", "/pages/x")
+    # ...and not the other's.
+    assert read_policy.rules_for("click", "shop.test", "/cart") == []
+    assert not shop_policy.read_policy.is_allowed("docs.test", "/pages/x")
+    # ...on top of the global one, which both keep.
+    for policy in (shop_policy, read_policy, al.policy):
+        assert policy.read_policy.is_allowed("everyone.test", "/")
+
+
+def test_profile_key_with_a_tilde_resolves_to_the_home_path(tmp_path):
+    f = tmp_path / "allowlist.yaml"
+    f.write_text(
+        "profiles:\n"
+        "  ~/.cache/browden/scratch:\n"
+        "    read:\n"
+        "      website_overrides:\n"
+        "        ok.test: ['.*']\n"
+    )
+    al = load_allowlist(f)
+    from pathlib import Path as _Path
+    resolved = str((_Path.home() / ".cache/browden/scratch").resolve())
+    assert al.profile_dirs() == [resolved]
+    assert al.policy_for(resolved).read_policy.is_allowed("ok.test", "/")
+
+
+def test_a_profile_that_does_not_exist_yet_loads(tmp_path):
+    # Chrome creates a profile directory on first launch, so a config naming a
+    # profile before it has ever been used must load — that is exactly the
+    # "scope down to a fresh profile" case the block exists for.
+    f = tmp_path / "allowlist.yaml"
+    f.write_text(
+        "profiles:\n"
+        f"  {tmp_path / 'never-launched'}:\n"
+        "    read:\n"
+        "      website_overrides:\n"
+        "        ok.test: ['.*']\n"
+    )
+    al = load_allowlist(f)
+    assert al.policy_for(str(tmp_path / "never-launched")).read_policy.is_allowed("ok.test", "/")
 
 
 # -- path resolution ----------------------------------------------------------
