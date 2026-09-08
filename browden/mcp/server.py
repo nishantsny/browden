@@ -302,7 +302,13 @@ async def click(css_selector: str, id: str) -> dict:
          visible, non-decoy clickable control — a ``<button>``, ``role="button"``,
          ``<input type=submit|button>``, or an ``<a>`` anchor (an agent-targeted
          decoy, or a hidden/disabled element, is refused). This gate judges
-         element *integrity*, not intent. For an anchor there is one extra check:
+         element *integrity*, not intent. A ``<label>`` bound to a radio or
+         checkbox also counts: pages routinely hide the native input in CSS and
+         draw the visible control on the label, so the label is the only thing a
+         human — or this tool — can click. Target it directly
+         (``label[for="stage2"]``); the label's own visible text is what gate 3
+         matches, and the control it activates must be a real, enabled,
+         non-decoy radio/checkbox. For an anchor there is one extra check:
          where its href would navigate must itself be on the read allowlist (the
          same gate as ``navigate``) — relative and ``javascript:`` hrefs stay in
          place, a cross-domain href is allowed only if that site is allow-listed,

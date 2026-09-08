@@ -31,6 +31,17 @@ _AGENT_BAIT_KEYS = (
 
 _CLICKABLE_INPUT_TYPES = ("submit", "button")
 
+# <input> types a <label> may activate on the agent's behalf. Clicking a label
+# bound to one of these toggles it exactly as a human click would.
+#
+# Deliberately only radio and checkbox: these are the controls pages routinely
+# hide in CSS while drawing the visible affordance on the label, and toggling one
+# is in-page, reversible, and submits nothing on its own. A label bound to a text
+# field only moves focus (nothing to authorize), and one bound to a submit button
+# would let a label's text stand in for a button's — the button must be gated on
+# its own visible text, not on a label an author put next to it.
+_LABEL_ACTIVATABLE_INPUT_TYPES = ("radio", "checkbox")
+
 # <input> types that hold free text the user types into (the `insert_text` action). A
 # bare <input> with no type defaults to "text", so it counts too. Deliberately
 # excludes non-text inputs (checkbox/radio/file/range/color/date-pickers/etc.) —
@@ -53,13 +64,22 @@ ACTIVATION_KEYS = frozenset({
 })
 
 
-def _fails_integrity(attrs: dict) -> bool:
+def _fails_integrity(attrs: dict, *, require_rendered: bool = True) -> bool:
     """Shared anti-injection + statically-hidden/disabled rejection for any write target.
 
     Rejects (a) agent-targeted decoys — never let tab-supplied "for AI" markup
     vouch for an element — and (b) elements the snapshot shows as hidden or
     disabled. The backend re-verifies visibility/enabled live at action time; this
     is best-effort defence in depth on the cached node.
+
+    ``require_rendered=False`` drops *only* the inline ``display:none`` rejection,
+    for a control reached indirectly through its ``<label>``. Being visually
+    hidden is the defining property of that pattern rather than a red flag: the
+    page hid the native input on purpose and drew the affordance on the label. The
+    label itself is still checked with the full rule, so something a human cannot
+    see is never clickable. Everything that speaks to the control being *inert or
+    hostile* — decoy attributes, ``type=hidden``, the ``hidden`` attribute,
+    ``aria-hidden``, ``disabled``/``aria-disabled`` — still rejects either way.
     """
     if any(k in attrs for k in _AGENT_BAIT_KEYS):
         return True
@@ -67,7 +87,7 @@ def _fails_integrity(attrs: dict) -> bool:
         return True
     if "disabled" in attrs or attrs.get("aria-disabled") == "true":
         return True
-    if "display:none" in str(attrs.get("style", "")).replace(" ", "").lower():
+    if require_rendered and "display:none" in str(attrs.get("style", "")).replace(" ", "").lower():
         return True
     return False
 
@@ -110,6 +130,42 @@ def label_matches(node: dict, pattern: "re.Pattern[str]") -> bool:
     return any(pattern.fullmatch(label) for label in _candidate_labels(node))
 
 
+def is_label_activation(node: dict) -> bool:
+    """True iff ``node`` is a ``<label>`` whose click would toggle a real radio/checkbox.
+
+    The gap this closes: a page hides the native ``<input type=radio|checkbox>``
+    in CSS — ``position:absolute;left:-9999px`` or ``display:none`` — and draws
+    the visible control as a ``::before`` on its ``<label>``. The input is then
+    neither clickable (wrong tag for :func:`is_clickable_control`) nor focusable
+    in practice (not rendered, so ``press-key`` refuses it), and the label is not
+    a clickable tag either. Every route is refused and the form is undriveable,
+    even though a human operates it by clicking the label. See issue #146.
+
+    A ``<label>`` is admitted only when the control it resolves to (by ``for=``
+    idref or by wrapping — see ``dom.serialize._labeled_control``) is a real,
+    enabled, non-decoy radio or checkbox. The label itself must pass the full
+    integrity check, so it has to be something a human can actually see; the
+    control it points at is checked with ``require_rendered=False``, since being
+    hidden is the whole point of the pattern.
+
+    This does not judge intent. The ``click`` gate still requires the operator's
+    page ``label`` regex to fullmatch the label's visible text — which is exactly
+    the string a human reads next to the control, and a *better* authorization
+    surface than the hidden input's ``id``.
+
+    Default-deny. ``node`` is a serialized element dict or ``None``.
+    """
+    if not node or node.get("tag") != "label":
+        return False
+    control = node.get("labeled_control") or {}
+    if control.get("tag") != "input":
+        return False
+    control_attrs = control.get("attributes", {})
+    if control_attrs.get("type") not in _LABEL_ACTIVATABLE_INPUT_TYPES:
+        return False
+    return not _fails_integrity(control_attrs, require_rendered=False)
+
+
 def is_clickable_control(node: dict) -> bool:
     """True iff ``node`` is a real, visible, non-decoy clickable control.
 
@@ -119,8 +175,9 @@ def is_clickable_control(node: dict) -> bool:
     label permits any). This guard exists to stop the *page* from tricking the
     agent, not to second-guess the operator.
 
-    Accepts ``<button>``, ``role="button"``, ``<input type=submit|button>``, and
-    ``<a>`` anchors. Anchors *navigate*, so they carry one extra obligation the
+    Accepts ``<button>``, ``role="button"``, ``<input type=submit|button>``,
+    ``<a>`` anchors, and a ``<label>`` bound to a radio/checkbox (see
+    :func:`is_label_activation`). Anchors *navigate*, so they carry one extra obligation the
     others don't: their href must resolve to a site the read allowlist permits —
     that is decided separately via :func:`classify_anchor_target` (which needs the
     current URL and the read policy, neither available here), never by this pure
@@ -142,7 +199,7 @@ def is_clickable_control(node: dict) -> bool:
     is_button = tag == "button" or attrs.get("role") == "button"
     is_submit = tag == "input" and attrs.get("type", "submit") in _CLICKABLE_INPUT_TYPES
     is_anchor = tag == "a"
-    return is_button or is_submit or is_anchor
+    return is_button or is_submit or is_anchor or is_label_activation(node)
 
 
 def is_focusable_control(node: dict) -> bool:

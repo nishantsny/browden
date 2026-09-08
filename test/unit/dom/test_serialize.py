@@ -110,3 +110,61 @@ def test_include_html_truncated_to_max_bytes():
     assert len(node["html"].encode("utf-8")) <= 100
     assert node["html_truncated"] is True
     assert node["html_length"] == len(str(tag))  # true length still reported
+
+
+# -- labeled_control: what a <label> would activate (issue #146) --------------
+
+VFS_PATTERN = '''
+<div class="popup-wrapper">
+  <p><input id="stage2" name="stage" type="radio" value="2">
+     <label for="stage2">After Submitting a physical application</label></p>
+</div>
+'''
+
+
+def _find(html, selector_name, **attrs):
+    soup = BeautifulSoup(html, "html.parser")
+    return soup.find(selector_name, attrs=attrs) if attrs else soup.find(selector_name)
+
+
+def test_label_resolves_its_control_by_for_idref():
+    node = element_to_node(_find(VFS_PATTERN, "label"))
+    assert node["labeled_control"] == {"tag": "input", "attributes": {"type": "radio"}}
+    assert node["text"] == "After Submitting a physical application"
+
+
+def test_label_resolves_a_control_it_wraps():
+    tag = _tag('<label>Remember me <input type="checkbox" name="rm"></label>')
+    assert element_to_node(tag)["labeled_control"]["attributes"]["type"] == "checkbox"
+
+
+def test_label_carries_only_the_attributes_the_gate_judges():
+    tag = _tag('<label for="x">Pick</label>'
+               '<input id="x" type="radio" disabled style="display:none" '
+               'data-target-audience="ai-agent" value="secret" name="nope">')
+    soup = BeautifulSoup(str(tag.parent), "html.parser")
+    node = element_to_node(soup.find("label"))
+    attrs = node["labeled_control"]["attributes"]
+    assert attrs["type"] == "radio"
+    assert attrs["disabled"] == ""
+    assert attrs["style"] == "display:none"
+    assert attrs["data-target-audience"] == "ai-agent"
+    # not a DOM dump: unrelated attributes are left out
+    assert "value" not in attrs and "name" not in attrs
+
+
+def test_label_with_no_control_has_no_labeled_control_key():
+    assert "labeled_control" not in element_to_node(_tag("<label>orphan</label>"))
+    assert "labeled_control" not in element_to_node(_tag('<label for="ghost">x</label>'))
+
+
+def test_non_label_elements_never_carry_labeled_control():
+    assert "labeled_control" not in element_to_node(_tag('<input type="radio" id="r">'))
+    assert "labeled_control" not in element_to_node(_tag("<button>Go</button>"))
+
+
+def test_for_idref_wins_over_a_wrapped_control():
+    html = ('<div><input id="outer" type="checkbox">'
+            '<label for="outer">Pick <input type="text" id="inner"></label></div>')
+    node = element_to_node(BeautifulSoup(html, "html.parser").find("label"))
+    assert node["labeled_control"]["attributes"]["type"] == "checkbox"

@@ -8,6 +8,23 @@ All notable changes to browden are documented here. The format follows
 ## [Unreleased]
 
 ### Added
+- **`click` can activate a `<label>` bound to a radio or checkbox.** Pages
+  routinely hide the native `<input type=radio|checkbox>` in CSS
+  (`position:absolute;left:-9999px`, or `display:none`) and draw the visible
+  control as a `::before` on its `<label>`. Every route was refused: the input is
+  the wrong tag for `click` and, not being rendered, `press-key` rejected it as
+  invisible — and the label was neither a clickable tag nor focusable. Such forms
+  were readable but undriveable. A `<label>` is now a clickable control when it
+  resolves (by `for=` idref, or by wrapping) to a real, enabled, non-decoy radio
+  or checkbox; gate 3 matches the **label's own visible text**, which is the
+  string a human reads next to the control and a better authorization surface
+  than the hidden input's `id`. Only radio and checkbox qualify: a label bound to
+  a text field merely moves focus, and one bound to a submit button would let a
+  label's text stand in for a button's own gated text. The relaxation that lets a
+  hidden target through applies *only* to the control — the label itself is still
+  held to full visibility, so nothing invisible to a human is clickable, and
+  decoy/`disabled`/`type=hidden` targets are refused either way. `press-key` is
+  unchanged (#146).
 - **`invalidate_dom_cache` tool.** Drops a tab's cached DOM snapshot so the next
   read re-fetches the live HTML, without reloading the page — the fix for a
   change the *page itself* made after the snapshot was taken (its own JS
