@@ -8,6 +8,7 @@ from browden.mcp.validator import (
     field_label_matches,
     is_clickable_control,
     is_fillable_control,
+    is_label_activation,
     is_focusable_control,
     label_matches,
 )
@@ -294,3 +295,94 @@ def test_activation_keys_are_control_keys_only():
     assert "Escape" in ACTIVATION_KEYS and "Tab" in ACTIVATION_KEYS
     for ch in ("a", "A", "1", " ", "x", "Delete", "Backspace"):
         assert ch not in ACTIVATION_KEYS, ch
+
+
+# -- <label> activation of CSS-hidden radios / checkboxes (issue #146) --------
+#
+# The pattern: the page hides the native input and draws the visible control as a
+# ::before on its <label>. The label is then the only affordance a human — or the
+# agent — can click.
+
+def label_node(text="After submitting the physical application", *,
+               control_tag="input", control_type="radio", **control_attrs):
+    """A serialized <label> node carrying the control it activates."""
+    attrs = {"type": control_type} if control_type is not None else {}
+    attrs.update(control_attrs)
+    return {
+        "tag": "label", "id": None, "classes": [], "attributes": {}, "text": text,
+        "labeled_control": {"tag": control_tag, "attributes": attrs},
+    }
+
+
+@pytest.mark.parametrize("control_type", ["radio", "checkbox"])
+def test_label_bound_to_radio_or_checkbox_accepted(control_type):
+    assert is_label_activation(label_node(control_type=control_type))
+    assert is_clickable_control(label_node(control_type=control_type))
+
+
+def test_label_activation_survives_the_hidden_input_it_points_at():
+    """The whole point: the control is hidden, and that must not disqualify it."""
+    assert is_clickable_control(label_node(style="display: none"))
+    assert is_clickable_control(label_node(style="position:absolute;left:-9999px"))
+
+
+def test_label_with_no_associated_control_rejected():
+    bare = {"tag": "label", "id": None, "classes": [], "attributes": {}, "text": "Just text"}
+    assert not is_label_activation(bare)
+    assert not is_clickable_control(bare)
+
+
+def test_label_bound_to_text_field_rejected():
+    """Clicking it only moves focus — there is nothing to authorize."""
+    assert not is_clickable_control(label_node(control_type="text"))
+
+
+def test_label_bound_to_submit_button_rejected():
+    """A label's text must never stand in for a submit button's own gated text."""
+    assert not is_clickable_control(label_node(control_type="submit"))
+    assert not is_clickable_control(label_node(control_type="button"))
+
+
+def test_label_bound_to_select_or_textarea_rejected():
+    assert not is_clickable_control(label_node(control_tag="select", control_type=None))
+    assert not is_clickable_control(label_node(control_tag="textarea", control_type=None))
+
+
+def test_label_bound_to_disabled_control_rejected():
+    assert not is_clickable_control(label_node(disabled=""))
+    assert not is_clickable_control(label_node(**{"aria-disabled": "true"}))
+
+
+def test_label_bound_to_decoy_control_rejected():
+    """The page must not smuggle an agent decoy in through the label's target."""
+    assert not is_clickable_control(label_node(**{"data-agent-action": "confirm"}))
+    assert not is_clickable_control(label_node(**{"data-target-audience": "ai-agent"}))
+
+
+def test_label_bound_to_type_hidden_or_hidden_attr_rejected():
+    """Inert in a way display:none is not — nothing to toggle."""
+    assert not is_clickable_control(label_node(control_type="hidden"))
+    assert not is_clickable_control(label_node(hidden=""))
+    assert not is_clickable_control(label_node(**{"aria-hidden": "true"}))
+
+
+def test_hidden_or_decoy_label_itself_still_rejected():
+    """The relaxation applies to the target, never to the label a human must see."""
+    n = label_node()
+    n["attributes"] = {"style": "display:none"}
+    assert not is_clickable_control(n)
+    n2 = label_node()
+    n2["attributes"] = {"data-target-audience": "ai-agent"}
+    assert not is_clickable_control(n2)
+
+
+def test_label_activation_still_gated_on_the_labels_visible_text():
+    """Gate 3 matches the label's own text — the string the human reads."""
+    n = label_node(text="I consent to the processing of my personal data")
+    assert label_matches(n, re.compile(r"(?i)i consent to .*"))
+    assert not label_matches(n, re.compile(r"(?i)submit"))
+
+
+def test_label_is_not_focusable_so_press_key_still_refuses_it():
+    """This feature is click-shaped; it must not widen press-key."""
+    assert not is_focusable_control(label_node())

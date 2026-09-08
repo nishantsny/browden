@@ -82,6 +82,52 @@ def _field_label(tag) -> str:
     return ""
 
 
+# The attributes of a labelled control that the click guard actually judges.
+# A fixed, small set: this is gate input, not a DOM dump.
+_LABELED_CONTROL_ATTRS = (
+    "type", "disabled", "aria-disabled", "hidden", "aria-hidden", "style",
+    "data-agent-action", "data-agent-recommended", "data-agent-priority",
+    "data-agent-button-proxy", "data-target-audience",
+)
+
+
+def _labeled_control(tag) -> dict:
+    """The form control a ``<label>`` would activate, as a minimal node, or ``{}``.
+
+    Clicking a ``<label>`` activates the control bound to it. That is how a human
+    ticks a radio or checkbox on the very common pattern where the page hides the
+    native input in CSS (``position:absolute;left:-9999px`` or ``display:none``)
+    and draws the visible control as a ``::before`` on the label — the input is
+    then unclickable and unfocusable, and the label is the only real affordance.
+
+    The click guard must know *what* such a label would activate before allowing
+    the click, so we resolve it here: by ``for=`` idref, or by a control the label
+    wraps. Extraction only — whether the resolved control may be activated is
+    policy, and lives in ``mcp.validator.intent.is_label_activation``.
+    """
+    if getattr(tag, "name", None) != "label":
+        return {}
+    target = None
+    fid = tag.get("for")
+    if isinstance(fid, (list, tuple)):
+        fid = " ".join(str(v) for v in fid)
+    if fid:
+        root = tag
+        for parent in tag.parents:
+            root = parent
+        target = root.find(attrs={"id": fid})
+    if target is None:
+        # Implicit association — the control sits inside the label.
+        target = tag.find(["input", "select", "textarea"])
+    if getattr(target, "name", None) not in ("input", "select", "textarea"):
+        return {}
+    return {
+        "tag": target.name,
+        "attributes": {k: _attr_value(v)[:ATTR_CAP] for k, v in target.attrs.items()
+                       if k in _LABELED_CONTROL_ATTRS},
+    }
+
+
 def element_to_node(tag, *, include_html: bool = False,
                     max_html_bytes: int = DEFAULT_MAX_HTML_BYTES) -> dict:
     """Return the JSON node for one bs4 ``Tag``. See module docstring for the caps."""
@@ -128,6 +174,9 @@ def element_to_node(tag, *, include_html: bool = False,
     field_label = _field_label(tag)
     if field_label:
         node["field_label"] = field_label[:TEXT_CAP]
+    labeled_control = _labeled_control(tag)
+    if labeled_control:
+        node["labeled_control"] = labeled_control
     if include_html:
         encoded = html_str.encode("utf-8")
         if len(encoded) > max_html_bytes:
