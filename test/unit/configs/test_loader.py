@@ -262,6 +262,10 @@ def test_load_page_scoped_rules(tmp_path):
     ("profiles:\n  ~/p:\n    read:\n      website_overrides:\n        x.com: ['[']\n",
      "invalid path regex"),
     ("profiles:\n  ~/p:\n    read:\n      typo: 1\n", "unknown keys"),
+    # a typo'd section inside a profile fails the load, naming the profile, rather
+    # than loading as rules no gate consults
+    ("profiles:\n  ~/p:\n    clik:\n      amazon.com:\n        label: '.*'\n",
+     r"profiles\.~/p: unknown section 'clik'"),
     # allow_all is a profile-scoped flag, not a global one
     ("allow_all: true\n", "only allowed inside a profiles entry"),
     ("profiles:\n  ~/p:\n    allow_all: sure\n", "allow_all: must be a boolean"),

@@ -51,6 +51,15 @@ All notable changes to browden are documented here. The format follows
   ever consults, so a typo like `clik:` loaded cleanly and silently authorized
   nothing. At startup this is a config error; on hot reload the last-good
   config stays in force, as for any invalid edit.
+- **`ActionAllowlist` renamed to `BrowdenRuntimeConfiguration` (internal).** The
+  class that holds one loaded config (the `infra` caps plus the rules) now lives
+  in `validator/runtime_configuration.py`; `AllowlistRefresher` and
+  `load_allowlist()` became `RuntimeConfigurationRefresher` and
+  `load_runtime_configuration()`. Names that refer to the config *file* are
+  unchanged (`allowlist.yaml`, `--allowlist`, `$BROWDEN_ALLOWLIST`), as are
+  error messages. Maintainers: the first deploy that pulls this fails at step 3,
+  because bash keeps running the already-open old copy of the deploy script,
+  which calls `load_allowlist`. It aborts before the restart; re-run it (#150).
 - **Access rules split out of the runtime configuration (internal).**
   `BrowdenAccessRuleSet` (`validator/access_rule_set.py`) now holds the
   denylist, the read gate and the write-action rules; `BrowdenRuntimeConfiguration`
@@ -73,6 +82,16 @@ All notable changes to browden are documented here. The format follows
   lifted into `_check_section` (with `_check_infra` / `_check_write_action`),
   which is also where an unknown section is refused. No config behaves
   differently; groundwork for profile-scoped rules (#139) (#142).
+- **Schema test for a mistyped section inside a profile (internal).** Pins that
+  `profiles: {<dir>: {clik: ...}}` fails the load with
+  `profiles.<dir>: unknown section 'clik'`, as a top-level typo does (#153).
+- **Deploy script's post-deploy e2e runs in a private temp dir (maintainers).**
+  `release_new_version.sh` points the e2e run's `TMPDIR` at a fresh
+  `browden-e2e.*` dir, so pytest's `tmp_path` dirs and Chrome's scratch dirs
+  land there instead of `/tmp`, where they had filled the root filesystem. The
+  dir is removed after a green run and kept (its path in the failure message)
+  after a red one; each run first sweeps leftover `browden-e2e.*` dirs. The live
+  service's Chrome never sees this `TMPDIR` (#151).
 - **Deploy script's e2e venv is no longer kept between runs (maintainers).**
   `release_new_version.sh` used to build the post-deploy e2e venv at
   `~/.cache/browden/e2e-venv` and keep it forever (~110 MB). It now lives in
