@@ -12,6 +12,13 @@ differently in each:
   profile may load, and the shopper profile is refused it.
 * **hot reload** — a per-profile rule added to the live config takes effect
   without a restart, in the profile it names and no other.
+* **denylist** — a profile's own denylist entry refuses a page the global rules
+  allow, in that profile only.
+* **list_tabs** — each profile's tabs are judged by that profile's rules, so a
+  tab only its own profile may read is still listed.
+* **redirect landing** — ``navigate`` re-gates where a redirect lands against
+  the *target tab's* profile, so the same 302 is kept in one profile and
+  bounced to ``about:blank`` in the other.
 
 The pages come from ``127.0.0.1`` (opted in for plain http by an explicit
 override), so every load is local and offline.
@@ -29,6 +36,10 @@ from browden.configs.loader.refresher import DEFAULT_RELOAD_INTERVAL_SECONDS
 from browden.web_navigator.utils.network_utils import get_free_port
 
 _PAGE = b"<html><body><button id='atc'>Add to cart</button></body></html>"
+# A /dp/* page (readable by every profile) that 302s to a page only the reader
+# profile may read — the landing, not the input URL, is what differs by profile.
+_REDIRECT_PATH = "/dp/go"
+_REDIRECT_TARGET = "/reader-only/7"
 
 # Generous margin over one poll interval: the poller sleeps a full interval
 # before its first re-stat, so a reload can't be observed sooner than that.
@@ -37,6 +48,11 @@ _RELOAD_DEADLINE = DEFAULT_RELOAD_INTERVAL_SECONDS + 15
 
 class _Handler(BaseHTTPRequestHandler):
     def do_GET(self):
+        if self.path == _REDIRECT_PATH:
+            self.send_response(302)
+            self.send_header("Location", _REDIRECT_TARGET)
+            self.end_headers()
+            return
         self.send_response(200)
         self.send_header("Content-Type", "text/html")
         self.end_headers()
@@ -77,6 +93,8 @@ def _config(shopper, reader, *, reader_click: bool = False) -> str:
         "      - path: ['^/dp/.*']\n"      # every profile may read the product page
         "profiles:\n"
         f"  {shopper}:\n"
+        "    denylist:\n"
+        "      127.0.0.1: ['^/dp/blocked']\n"   # refused here though /dp/* is globally readable
         "    click:\n"
         "      127.0.0.1:\n"
         "        - path: ['^/dp/.*']\n"
@@ -198,3 +216,70 @@ async def test_a_profile_rule_added_live_takes_effect_without_a_restart(
                 return
             time.sleep(1.0)
         pytest.fail("the per-profile click rule never took effect after a hot reload")
+
+
+# -- denylist: a profile's own entry beats a global allow, in that profile ------
+
+@pytest.mark.asyncio
+async def test_a_profile_denylist_entry_refuses_only_in_that_profile(
+        profile_scoped_server, mcp_client_session, site, profiles):
+    shopper, reader = profiles
+    async with mcp_client_session(profile_scoped_server) as mcp:
+        shop_tab = await _new_tab_id(mcp, shopper)
+        read_tab = await _new_tab_id(mcp, reader)
+
+        # /dp/* is readable by every profile, but the shopper profile denylists
+        # /dp/blocked: the denial must hold there (scoping it the wrong way would
+        # fail OPEN) and must not leak into the reader profile.
+        url = f"{site}/dp/blocked"
+        assert "allowlist" in (
+            await _call_text(mcp, "navigate", {"url": url, "id": shop_tab})).lower()
+        assert "allowlist" not in (
+            await _call_text(mcp, "navigate", {"url": url, "id": read_tab})).lower()
+
+
+# -- list_tabs: each profile's tabs are judged by its own rules --------------
+
+@pytest.mark.asyncio
+async def test_list_tabs_keeps_a_tab_only_its_own_profile_may_read(
+        profile_scoped_server, mcp_client_session, site, profiles):
+    shopper, reader = profiles
+    async with mcp_client_session(profile_scoped_server) as mcp:
+        shop_tab = await _new_tab_id(mcp, shopper)
+        read_tab = await _new_tab_id(mcp, reader)
+        await mcp.call_tool("navigate", {"url": f"{site}/dp/x", "id": shop_tab})
+        await mcp.call_tool("navigate", {"url": f"{site}{_REDIRECT_TARGET}", "id": read_tab})
+
+        # list_tabs closes and hides any tab its gate refuses. The reader tab's
+        # page is readable under the reader profile's rules only, so it survives
+        # the listing only if it is judged by its own profile, not the global set
+        # or the shopper's.
+        res = await mcp.call_tool("list_tabs", {})
+        listed = {}
+        for c in res.content:
+            if c.type == "text":
+                data = json.loads(c.text)
+                for tab in (data if isinstance(data, list) else [data]):
+                    listed[tab.get("id")] = tab.get("url") or ""
+        assert listed.get(read_tab, "").endswith(_REDIRECT_TARGET), listed
+        assert listed.get(shop_tab, "").endswith("/dp/x"), listed
+
+
+# -- navigate: the redirect landing is judged by the target tab's profile ----
+
+@pytest.mark.asyncio
+async def test_a_redirect_landing_is_judged_by_the_target_tabs_profile(
+        profile_scoped_server, mcp_client_session, site, profiles):
+    shopper, reader = profiles
+    async with mcp_client_session(profile_scoped_server) as mcp:
+        shop_tab = await _new_tab_id(mcp, shopper)
+        read_tab = await _new_tab_id(mcp, reader)
+
+        # The input URL (/dp/go) is readable by both profiles; it 302s to a page
+        # only the reader profile may read. The landing is re-gated against the
+        # tab's own profile: kept in the reader tab, bounced in the shopper tab.
+        url = f"{site}{_REDIRECT_PATH}"
+        landed = await _call_text(mcp, "navigate", {"url": url, "id": read_tab})
+        assert "left the allowlist" not in landed and _REDIRECT_TARGET in landed, landed
+        bounced = await _call_text(mcp, "navigate", {"url": url, "id": shop_tab})
+        assert "navigation left the allowlist" in bounced, bounced
