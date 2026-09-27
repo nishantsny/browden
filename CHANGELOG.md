@@ -40,6 +40,13 @@ All notable changes to browden are documented here. The format follows
   `.access_rules` is the only route to a decision. No gate's order or outcome
   changes; groundwork for handing each request its own profile's rules (#139)
   (#141).
+- **One profile-path canonicalizer, one per-section schema check (internal).**
+  `common.profile.canonical_profile_dir` is the `expanduser().resolve()` the
+  server applies to a caller's `profile_dir`, now shared so anything else that
+  names a profile reduces it identically. The schema's per-key checks are
+  lifted into `_check_section` (with `_check_infra` / `_check_write_action`),
+  which is also where an unknown section is refused. No config behaves
+  differently; groundwork for profile-scoped rules (#139) (#142).
 
 ## [1.2.1] — 2026-07-29
 

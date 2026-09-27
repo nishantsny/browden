@@ -172,6 +172,89 @@ def _check_read(rules, where: str) -> None:
     _check_host_paths(rules.get("website_overrides"), f"{where}.website_overrides")
 
 
+def _check_infra(rules, source: str) -> None:
+    """Validate the ``infra`` block: the process-wide session/tab caps."""
+    if not isinstance(rules, dict):
+        raise ConfigError(f"{source}: infra must be a mapping, got {type(rules).__name__}")
+    for name, value in rules.items():
+        if name not in {"max_browser_sessions", "max_tabs_per_session",
+                        "reap_interval_seconds"}:
+            raise ConfigError(f"{source}: unknown infra key {name}")
+        if not isinstance(value, int) or isinstance(value, bool) or value <= 0:
+            raise ConfigError(f"{source}: infra.{name} must be a positive integer, got {value}")
+
+
+def _check_write_action(action, rules, source: str) -> None:
+    """Validate one write-action section: host -> (page-rule list | legacy mapping).
+
+    ``action`` is one of :data:`WRITE_ACTIONS`; :func:`_check_section` has
+    already refused any other key.
+    """
+    if not isinstance(rules, dict):
+        raise ConfigError(
+            f"{source}: section {action!r} must be a mapping of host -> rule, "
+            f"got {type(rules).__name__}")
+    # `field_ids` (exact id/name allowlist for label-less text boxes) is only
+    # meaningful for the write-text action; `keys` (the control keys a rule
+    # authorizes) only for press-key. Other write actions may use neither.
+    allow_field_ids = (action == "write-text")
+    allow_keys = (action == "press-key")
+    for host, rule in rules.items():
+        where = f"{source}: {action}.{host}"
+        if not isinstance(host, str) or not host:
+            raise ConfigError(f"{source}: hosts in {action!r} must be non-empty strings, got {host!r}")
+        # A host maps to a list of page rules (each a mapping with its own
+        # label) OR the legacy single host-wide mapping. Both require a label
+        # per rule — what a control may do is never the silent default of an
+        # omission; "allow any control" reads as label: '.*'.
+        if isinstance(rule, list):
+            if not rule:
+                raise ConfigError(f"{where}: a write action needs at least one page rule")
+            for i, page_rule in enumerate(rule):
+                _check_page_rule(page_rule, f"{where}[{i}]",
+                                 want_label=True, allow_field_ids=allow_field_ids,
+                                 allow_keys=allow_keys)
+            continue
+        if not isinstance(rule, dict):
+            raise ConfigError(
+                f"{where}: rule must be a mapping with a required 'label' (and optional "
+                f"'paths'), or a list of page rules, got {type(rule).__name__}")
+        allowed = ["paths", "label"] + (["field_ids"] if allow_field_ids else []) \
+            + (["keys"] if allow_keys else [])
+        unknown = set(rule) - set(allowed)
+        if unknown:
+            raise ConfigError(f"{where}: unknown keys {sorted(unknown)} (allowed: {', '.join(allowed)})")
+        if "paths" in rule:
+            _check_patterns(rule["paths"], f"{where}.paths")
+        if "field_ids" in rule:
+            _check_field_ids(rule["field_ids"], where)
+        if "keys" in rule:
+            _check_keys(rule["keys"], where)
+        _check_label(rule, where)
+
+
+def _check_section(key, rules, *, source: str) -> None:
+    """Validate one top-level section of a config document.
+
+    The named sections first, then the write actions; any other key is refused
+    rather than kept as rules no gate ever consults.
+    """
+    if key == "infra":
+        _check_infra(rules, source)
+        return
+    if key == "denylist":
+        _check_host_paths(rules, f"{source}: denylist")
+        return
+    if key == "read":
+        _check_read(rules, f"{source}: read")
+        return
+    if key not in WRITE_ACTIONS:
+        raise ConfigError(
+            f"{source}: unknown section {key!r} "
+            f"(allowed: {', '.join(sorted((*_OTHER_SECTIONS, *WRITE_ACTIONS)))})")
+    _check_write_action(key, rules, source)
+
+
 def validate_allowlist_data(data, *, source: str = "allowlist") -> dict:
     """Validate parsed YAML against the allowlist schema; return it unchanged.
 
@@ -184,68 +267,5 @@ def validate_allowlist_data(data, *, source: str = "allowlist") -> dict:
         raise ConfigError(
             f"{source}: top level must be a mapping, got {type(data).__name__}")
     for key, rules in data.items():
-        if key == "infra":
-            if not isinstance(rules, dict):
-                raise ConfigError(f"{source}: infra must be a mapping, got {type(rules).__name__}")
-            for name, value in rules.items():
-                if name not in {"max_browser_sessions", "max_tabs_per_session",
-                                "reap_interval_seconds"}:
-                    raise ConfigError(f"{source}: unknown infra key {name}")
-                if not isinstance(value, int) or isinstance(value, bool) or value <= 0:
-                    raise ConfigError(f"{source}: infra.{name} must be a positive integer, got {value}")
-            continue
-        if key == "denylist":
-            _check_host_paths(rules, f"{source}: denylist")
-            continue
-        if key == "read":
-            _check_read(rules, f"{source}: read")
-            continue
-
-        # Everything else must be a write action: host -> (path regexes | object form).
-        action = key
-        if action not in WRITE_ACTIONS:
-            raise ConfigError(
-                f"{source}: unknown section {action!r} "
-                f"(allowed: {', '.join(sorted((*_OTHER_SECTIONS, *WRITE_ACTIONS)))})")
-        if not isinstance(rules, dict):
-            raise ConfigError(
-                f"{source}: section {action!r} must be a mapping of host -> rule, "
-                f"got {type(rules).__name__}")
-        # `field_ids` (exact id/name allowlist for label-less text boxes) is only
-        # meaningful for the write-text action; `keys` (the control keys a rule
-        # authorizes) only for press-key. Other write actions may use neither.
-        allow_field_ids = (action == "write-text")
-        allow_keys = (action == "press-key")
-        for host, rule in rules.items():
-            where = f"{source}: {action}.{host}"
-            if not isinstance(host, str) or not host:
-                raise ConfigError(f"{source}: hosts in {action!r} must be non-empty strings, got {host!r}")
-            # A host maps to a list of page rules (each a mapping with its own
-            # label) OR the legacy single host-wide mapping. Both require a label
-            # per rule — what a control may do is never the silent default of an
-            # omission; "allow any control" reads as label: '.*'.
-            if isinstance(rule, list):
-                if not rule:
-                    raise ConfigError(f"{where}: a write action needs at least one page rule")
-                for i, page_rule in enumerate(rule):
-                    _check_page_rule(page_rule, f"{where}[{i}]",
-                                     want_label=True, allow_field_ids=allow_field_ids,
-                                     allow_keys=allow_keys)
-                continue
-            if not isinstance(rule, dict):
-                raise ConfigError(
-                    f"{where}: rule must be a mapping with a required 'label' (and optional "
-                    f"'paths'), or a list of page rules, got {type(rule).__name__}")
-            allowed = ["paths", "label"] + (["field_ids"] if allow_field_ids else []) \
-                + (["keys"] if allow_keys else [])
-            unknown = set(rule) - set(allowed)
-            if unknown:
-                raise ConfigError(f"{where}: unknown keys {sorted(unknown)} (allowed: {', '.join(allowed)})")
-            if "paths" in rule:
-                _check_patterns(rule["paths"], f"{where}.paths")
-            if "field_ids" in rule:
-                _check_field_ids(rule["field_ids"], where)
-            if "keys" in rule:
-                _check_keys(rule["keys"], where)
-            _check_label(rule, where)
+        _check_section(key, rules, source=source)
     return data
