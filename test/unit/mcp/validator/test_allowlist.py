@@ -1,6 +1,6 @@
 import pytest
 
-from browden.mcp.validator import BrowdenRuntimeConfiguration
+from browden.mcp.validator import BrowdenAccessRuleSet, BrowdenRuntimeConfiguration
 from browden.mcp.validator.runtime_configuration import (
     DEFAULT_MAX_BROWSER_SESSIONS,
     DEFAULT_MAX_TABS_PER_SESSION,
@@ -411,3 +411,45 @@ def test_infra_reap_interval_is_read_from_the_config():
 
 # The shipped sample (configs/samples/read_only_on_popular_websites.yaml) is
 # covered by test/unit/configs/test_loader.py through the schema-validating loader.
+
+
+# -- the access rule set / runtime configuration split ------------------------
+
+def test_access_rule_set_decides_without_the_runtime_configuration():
+    # BrowdenAccessRuleSet is the surface the gates use: it needs only the rule
+    # sections, never the process-wide caps, so it can be built (and tested) alone.
+    rs = BrowdenAccessRuleSet({
+        "denylist": {"blocked.test": [".*"]},
+        "read": {"website_overrides": {"example.com": ["^/docs/.*"]}},
+        "click": {"shop.test": {"paths": [".*"], "label": "(?i)add"}},
+    })
+    assert rs.read_policy.is_allowed("example.com", "/docs/x")
+    assert not rs.read_policy.is_allowed("example.com", "/secret")
+    assert rs.is_denied("blocked.test", "/")
+    assert rs.rules_for("click", "shop.test", "/cart")
+    assert rs.section("click").is_allowed("shop.test", "/cart")
+
+
+def test_only_named_write_actions_become_rules():
+    # Write actions are read by name (WRITE_ACTIONS), so `infra` and any section
+    # the schema would refuse never become a write action of the same name.
+    rs = BrowdenAccessRuleSet({
+        "infra": {"max_tabs_per_session": 3},
+        "clik": {"shop.test": {"paths": [".*"], "label": ".*"}},
+    })
+    assert rs.rules_for("infra", "example.com", "/") == []
+    assert rs.rules_for("clik", "shop.test", "/") == []
+    assert not rs.section("clik").is_allowed("shop.test", "/")
+
+
+def test_runtime_configuration_delegates_every_decision_to_its_rule_set():
+    rc = BrowdenRuntimeConfiguration({
+        "denylist": {"blocked.test": [".*"]},
+        "read": {"website_overrides": {"example.com": [".*"]}},
+        "click": {"shop.test": {"paths": [".*"], "label": "(?i)add"}},
+    })
+    assert isinstance(rc.access_rules, BrowdenAccessRuleSet)
+    assert rc.read_policy is rc.access_rules.read_policy
+    assert rc.denylist is rc.access_rules.denylist
+    assert rc.is_denied("blocked.test", "/") == rc.access_rules.is_denied("blocked.test", "/")
+    assert rc.rules_for("click", "shop.test", "/") == rc.access_rules.rules_for("click", "shop.test", "/")

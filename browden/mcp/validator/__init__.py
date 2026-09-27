@@ -1,4 +1,5 @@
 """Re-export validator symbols for convenient access."""
+from .access_rule_set import BrowdenAccessRuleSet
 from .allowlist import Allowlist, ReadPolicy
 from .errors import SessionBusyError, ValidationError, tab_gone_envelope
 from .intent import (
@@ -24,8 +25,9 @@ from .write_gates import (
 
 __all__ = [
     "ACTIVATION_KEYS",
-    "BrowdenRuntimeConfiguration",
     "Allowlist",
+    "BrowdenAccessRuleSet",
+    "BrowdenRuntimeConfiguration",
     "PopularityAllowlist",
     "ReadPolicy",
     "SessionBusyError",
