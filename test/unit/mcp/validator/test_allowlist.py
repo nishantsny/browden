@@ -1,3 +1,5 @@
+from pathlib import Path
+
 import pytest
 
 from browden.mcp.validator import BrowdenAccessRuleSet, BrowdenRuntimeConfiguration
@@ -407,6 +409,143 @@ def test_infra_reap_interval_is_read_from_the_config():
     assert rc.reap_interval_seconds == 600
     # An unset sibling keeps its default rather than following the one that was set.
     assert rc.max_tabs_per_session == DEFAULT_MAX_TABS_PER_SESSION
+
+
+# -- profile-scoped rule sets (#139) ------------------------------------------
+
+def _profiles(**bodies) -> BrowdenRuntimeConfiguration:
+    """An allowlist whose profile keys are absolute paths, as a config's must be."""
+    return BrowdenRuntimeConfiguration({"profiles": {f"/profiles/{name}": body
+                                         for name, body in bodies.items()}})
+
+
+def test_a_write_rule_under_one_profile_authorizes_only_there():
+    rc = _profiles(shopper={"click": {"shop.test": {"paths": [".*"], "label": "(?i)add"}}},
+                   reader={})
+    assert rc.access_rules_for("/profiles/shopper").rules_for("click", "shop.test", "/cart")
+    assert rc.access_rules_for("/profiles/reader").rules_for("click", "shop.test", "/cart") == []
+    # And in a profile the config never mentions at all.
+    assert rc.access_rules_for("/profiles/unknown").rules_for("click", "shop.test", "/cart") == []
+
+
+def test_a_read_override_under_one_profile_admits_only_there():
+    rc = _profiles(research={"read": {"website_overrides": {"unranked.test": [".*"]}}})
+    assert rc.access_rules_for("/profiles/research").read_policy.is_allowed("unranked.test", "/x")
+    assert not rc.access_rules_for("/profiles/other").read_policy.is_allowed("unranked.test", "/x")
+
+
+def test_a_profile_with_no_entry_gets_exactly_the_global_rules():
+    rc = BrowdenRuntimeConfiguration({
+        "read": {"website_overrides": {"example.com": [".*"]}},
+        "profiles": {"/profiles/research": {"read": {"website_overrides": {"other.test": [".*"]}}}},
+    })
+    assert rc.access_rules_for("/profiles/anything-else") is rc.access_rules
+    assert rc.access_rules_for("/profiles/anything-else").read_policy.is_allowed("example.com", "/")
+
+
+def test_no_profiles_block_leaves_every_profile_on_the_global_set():
+    # The backward-compatibility guarantee: a config written before `profiles:`
+    # existed decides every request with the one global rule set.
+    rc = BrowdenRuntimeConfiguration({"read": {"website_overrides": {"example.com": [".*"]}}})
+    assert rc.access_rules_for("/anything") is rc.access_rules
+    assert rc.profile_dirs() == []
+
+
+def test_profile_rules_are_additive_over_the_global_ones():
+    rc = BrowdenRuntimeConfiguration({
+        "read": {"website_overrides": {"global.test": [".*"]}},
+        "click": {"global-shop.test": {"paths": [".*"], "label": "(?i)add"}},
+        "profiles": {"/profiles/shopper": {
+            "read": {"website_overrides": {"local.test": [".*"]}},
+            "click": {"local-shop.test": {"paths": [".*"], "label": "(?i)buy"}},
+        }},
+    })
+    scoped = rc.access_rules_for("/profiles/shopper")
+    # Its own rules, AND everything the global set granted.
+    assert scoped.read_policy.is_allowed("local.test", "/")
+    assert scoped.read_policy.is_allowed("global.test", "/")
+    assert scoped.rules_for("click", "local-shop.test", "/")
+    assert scoped.rules_for("click", "global-shop.test", "/")
+    # The global set is untouched by what the profile added.
+    assert not rc.access_rules.read_policy.is_allowed("local.test", "/")
+    assert rc.access_rules.rules_for("click", "local-shop.test", "/") == []
+
+
+def test_rules_for_one_host_union_across_global_and_profile():
+    # The same host listed in both places keeps both rule sets — including when
+    # the two spell the host differently (www. is stripped by canonicalization,
+    # so these must not look like two hosts and lose one).
+    rc = BrowdenRuntimeConfiguration({
+        "click": {"shop.test": [{"path": ["^/cart.*"], "label": "(?i)add"}]},
+        "profiles": {"/profiles/shopper": {
+            "click": {"www.shop.test": [{"path": ["^/checkout.*"], "label": "(?i)pay"}]}}},
+    })
+    scoped = rc.access_rules_for("/profiles/shopper")
+    assert scoped.rules_for("click", "shop.test", "/cart")       # from the global set
+    assert scoped.rules_for("click", "shop.test", "/checkout")   # from the profile
+
+
+def test_denylist_unions_and_still_wins_inside_a_profile():
+    rc = BrowdenRuntimeConfiguration({
+        "denylist": {"blocked.test": [".*"]},
+        "read": {"website_overrides": {"*": [".*"]}},
+        "profiles": {"/profiles/research": {
+            "denylist": {"also-blocked.test": [".*"]},
+            "read": {"website_overrides": {"blocked.test": [".*"]}},
+        }},
+    })
+    scoped = rc.access_rules_for("/profiles/research")
+    # The global denial holds in the profile even though the profile allow-lists it.
+    assert scoped.is_denied("blocked.test", "/")
+    assert not scoped.read_policy.is_allowed("blocked.test", "/")
+    # The profile's own denial holds there...
+    assert scoped.is_denied("also-blocked.test", "/")
+    # ...and does not leak into any other profile.
+    assert not rc.access_rules_for("/profiles/other").is_denied("also-blocked.test", "/")
+
+
+def test_a_profile_can_turn_the_popularity_net_off_for_itself_only():
+    rc = BrowdenRuntimeConfiguration({
+        "read": {"tranco": {"enabled": True}, "website_overrides": {}},
+        "profiles": {"/profiles/offline": {"read": {"tranco": {"enabled": False}}}},
+    })
+    # google.com is rank #1 in the mini fixture: ranked everywhere it is checked.
+    assert rc.access_rules.read_policy.is_allowed("google.com", "/")
+    # The profile that switched Tranco off has no read grant left at all —
+    # turning the net off narrows, it does not open (nothing else allows a read).
+    assert not rc.access_rules_for("/profiles/offline").read_policy.is_allowed("google.com", "/")
+
+
+def test_a_profile_inherits_global_read_settings_it_does_not_restate():
+    rc = BrowdenRuntimeConfiguration({
+        "read": {"tranco": {"enabled": True, "top_n": 1000}},
+        "profiles": {"/profiles/p": {"read": {"website_overrides": {"unranked.test": [".*"]}}}},
+    })
+    scoped = rc.access_rules_for("/profiles/p")
+    assert scoped.read_policy.is_allowed("google.com", "/")       # inherited Tranco
+    assert scoped.read_policy.is_allowed("unranked.test", "/")    # its own override
+
+
+def test_profile_keys_are_canonicalized_like_session_paths():
+    # Compared as paths, never as strings: the separator is the platform's, so a
+    # literal "<home>/.cache/..." would only ever match on POSIX.
+    cache = Path.home() / ".cache" / "browden"
+    rc = BrowdenRuntimeConfiguration({"profiles": {
+        "~/.cache/browden/scratch": {"read": {"website_overrides": {"ok.test": [".*"]}}}}})
+    assert [Path(p) for p in rc.profile_dirs()] == [(cache / "scratch").resolve()]
+    # Every spelling of that one directory finds it.
+    for spelling in ("~/.cache/browden/scratch", str(cache / "scratch"),
+                     str(cache / "x" / ".." / "scratch")):
+        assert rc.access_rules_for(spelling).read_policy.is_allowed("ok.test", "/"), spelling
+    # A different directory does not.
+    assert not rc.access_rules_for(str(cache / "other")).read_policy.is_allowed("ok.test", "/")
+
+
+def test_an_unusable_profile_path_falls_back_to_the_global_set():
+    # A gate must never crash on a odd path — and the fallback is the narrow
+    # direction, since a profile's rules only ever add to the global ones.
+    rc = _profiles(p={"read": {"website_overrides": {"ok.test": [".*"]}}})
+    assert rc.access_rules_for("some\x00garbage") is rc.access_rules
 
 
 # The shipped sample (configs/samples/read_only_on_popular_websites.yaml) is

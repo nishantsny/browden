@@ -1,0 +1,63 @@
+# Profile-scoped rules: the same rule grammar, scoped to one browser profile.
+#
+# A profile is Chrome's --user-data-dir: one browsing identity, with its own
+# cookies, extensions and logged-in sessions. browden runs one Chrome per
+# profile, so profiles are where "the credentialed browser" and "a scratch
+# browser for reading" actually differ — and this is how the policy can tell
+# them apart, instead of every loosening applying to all of them at once.
+#
+# Composition, in one line: a profile's rules are the GLOBAL rules plus its own.
+#   * A profile with no block below gets exactly the global rules (which is
+#     every config written before `profiles:` existed — nothing changes).
+#   * Adding a rule under one profile never widens another.
+#   * The denylist is unioned like everything else and still wins over all of it.
+
+# ---------------------------------------------------------------------------
+# Global: the floor every profile gets.
+# ---------------------------------------------------------------------------
+denylist:
+  # Never, in any profile: account/security settings pages on any host.
+  "*": ['^/(account|settings)/(security|password).*']
+
+read:
+  enabled: true
+  tranco:
+    enabled: true            # reads are allowed on the top-1m most-visited sites
+    top_n: 1000000
+
+# No write actions at the top level: nothing may click or type anywhere by
+# default. Each profile opts itself in below.
+
+profiles:
+
+  # -------------------------------------------------------------------------
+  # The credentialed profile — the one holding real logins. Narrow on purpose:
+  # it can read what any profile can read, and click exactly one control.
+  # -------------------------------------------------------------------------
+  ~/.cache/browden/chrome-profile:
+    click:
+      secure.splitwise.com:
+        - path: ['^/expenses.*']
+          label: 'Save'
+
+  # -------------------------------------------------------------------------
+  # A scratch profile for research: log into nothing here, and it may read the
+  # whole ranked web. Note what is NOT restated — the global denylist and the
+  # Tranco settings above apply here too.
+  # -------------------------------------------------------------------------
+  ~/.cache/browden/chrome-research:
+    read:
+      website_overrides:
+        # Two hosts Tranco doesn't rank, readable only in this profile.
+        docs.internal.example: ['.*']
+        wiki.internal.example: ['^/pages/.*']
+
+  # -------------------------------------------------------------------------
+  # A profile pointed at a local dev server. `http://` (not https) is opened by
+  # naming the host explicitly — a blanket rule never re-enables plaintext —
+  # and only this profile can reach it.
+  # -------------------------------------------------------------------------
+  ~/.cache/browden/chrome-dev:
+    read:
+      website_overrides:
+        localhost: ['.*']

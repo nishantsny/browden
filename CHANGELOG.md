@@ -16,6 +16,17 @@ All notable changes to browden are documented here. The format follows
   action and returns no page content, so it isn't read-gated; reads stay gated on
   the tab's live URL at read time. A tab that is gone returns the usual tab-gone
   envelope (#137).
+- **Profile-scoped allowlist rules (#139).** A `profiles:` block scopes the
+  *whole existing rule grammar* — `denylist`, `read`, and every write action —
+  to one browser profile directory, so loosening rules for one kind of work no
+  longer loosens them everywhere. A profile's rules are additive over the global
+  ones (a profile with no block gets exactly the global rules, so existing
+  configs are unchanged), the denylist is unioned and still wins, and `infra`
+  stays global and is rejected inside a profile block. Keys are canonicalized
+  the way the session layer canonicalizes a caller's `profile_dir`, so
+  `~/.cache/browden/p` and its resolved path name one profile; a relative key
+  fails the load rather than sitting inert. Per-profile edits hot-reload like
+  every other rule (#143).
 
 ### Changed
 - **Unknown top-level config sections are refused.** A section that is not
