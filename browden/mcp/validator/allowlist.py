@@ -16,6 +16,12 @@ DEFAULT_MAX_TABS_PER_SESSION = 20
 # cleanup pass (tools never sweep), and a tab idle for an hour can wait.
 DEFAULT_REAP_INTERVAL_SECONDS = 7200
 
+# The write actions browden gates, by config section name: `click` (the click
+# tool), `write-text` (insert_text) and `press-key` (press_key). The schema
+# refuses any other top-level section, so a new write tool is added here before
+# a config can authorize it.
+WRITE_ACTIONS = ("click", "write-text", "press-key")
+
 # canonical_host is imported (not redefined) so the denylist/overrides normalize
 # hosts identically to the Tranco check — a trailing dot or leading www. must not
 # make the two gates disagree (finding H3).

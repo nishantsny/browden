@@ -17,6 +17,15 @@ All notable changes to browden are documented here. The format follows
   the tab's live URL at read time. A tab that is gone returns the usual tab-gone
   envelope (#137).
 
+### Changed
+- **Unknown top-level config sections are refused.** A section that is not
+  `denylist`, `read`, `infra` or a write action (`click`, `write-text`,
+  `press-key`) now fails the load with `unknown section '<name>'` and the list
+  of allowed ones. Before, any such key was accepted as a write action no gate
+  ever consults, so a typo like `clik:` loaded cleanly and silently authorized
+  nothing. At startup this is a config error; on hot reload the last-good
+  config stays in force, as for any invalid edit.
+
 ## [1.2.1] — 2026-07-29
 
 ### Fixed

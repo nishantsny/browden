@@ -7,6 +7,7 @@ from browden.configs.loader import (
     load_allowlist,
     resolve_allowlist_path,
 )
+from browden.mcp.validator.allowlist import WRITE_ACTIONS
 
 
 # -- load_allowlist -----------------------------------------------------------
@@ -122,6 +123,16 @@ def test_load_press_key_rule_keys(tmp_path):
     assert rule.keys == frozenset({"Enter", "ArrowDown"})
 
 
+@pytest.mark.parametrize("action", WRITE_ACTIONS)
+def test_every_write_action_section_loads(tmp_path, action):
+    # The schema refuses unknown top-level sections, so each gated write action
+    # must stay accepted by name.
+    f = tmp_path / "allowlist.yaml"
+    f.write_text(f'{action}:\n  x.com:\n    label: ".*"\n')
+    al = load_allowlist(f)
+    assert al.rules_for(action, "x.com", "/")
+
+
 def test_empty_host_override_loads_for_file_scheme(tmp_path):
     # "" is a valid override host (the authority-less host of file:/// URLs), so
     # an operator can scope which local-file paths reads may reach.
@@ -199,6 +210,11 @@ def test_load_page_scoped_rules(tmp_path):
     # denylist block
     ("denylist: 5\n", "denylist: expected a mapping"),
     ('denylist:\n  "*": []\n', "non-empty list"),
+    # top-level sections: only the known write actions + denylist/read/infra
+    ('clik:\n  amazon.com:\n    label: ".*"\n', "unknown section 'clik'"),
+    ('insert_text:\n  amazon.com:\n    label: ".*"\n', "unknown section 'insert_text'"),
+    ("5: {}\n", "unknown section 5"),
+    ("bogus: {}\n", r"allowed: click, denylist, infra, press-key, read, write-text\)"),
     # write action
     ('click:\n  amazon.com:\n    paths: [".*"]\n    typo: x\n', "unknown keys"),
     ('click:\n  amazon.com:\n    label: 7\n', "label: must be a regex string"),

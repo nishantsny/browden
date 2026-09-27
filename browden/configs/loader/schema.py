@@ -13,7 +13,7 @@ The expected shape (see configs/samples/read_only_on_popular_websites.yaml):
       website_overrides:          # host -> path regexes; "*" host = any host
         <host>: [<path regex>, ...]
 
-    <write action>:               # e.g. click
+    <write action>:               # click | write-text | press-key
       <host>:
         label: <regex>               # REQUIRED: visible text must fully match
                                      #   (use '.*' to allow any control on the host)
@@ -24,10 +24,18 @@ The expected shape (see configs/samples/read_only_on_popular_websites.yaml):
       max_tabs_per_session: <positive int>
       reap_interval_seconds: <positive int>   # how often idle tabs are swept
 
+Any other top-level key is refused: an unknown section would be kept as rules
+no gate ever consults, so a typo like `clik:` would silently authorize nothing.
+
 Validation is structural plus regex compilation; semantics (default-deny,
 denylist-wins ordering, www-stripping, ...) live in ActionAllowlist/ReadPolicy.
 """
 import re
+
+from ...mcp.validator.allowlist import WRITE_ACTIONS
+
+# Top-level sections that are not write actions, each checked by its own branch.
+_OTHER_SECTIONS = ("denylist", "read", "infra")
 
 
 class ConfigError(ValueError):
@@ -192,10 +200,12 @@ def validate_allowlist_data(data, *, source: str = "allowlist") -> dict:
             _check_read(rules, f"{source}: read")
             continue
 
-        # Everything else is a write action: host -> (path regexes | object form).
+        # Everything else must be a write action: host -> (path regexes | object form).
         action = key
-        if not isinstance(action, str) or not action:
-            raise ConfigError(f"{source}: action names must be non-empty strings, got {action!r}")
+        if action not in WRITE_ACTIONS:
+            raise ConfigError(
+                f"{source}: unknown section {action!r} "
+                f"(allowed: {', '.join(sorted((*_OTHER_SECTIONS, *WRITE_ACTIONS)))})")
         if not isinstance(rules, dict):
             raise ConfigError(
                 f"{source}: section {action!r} must be a mapping of host -> rule, "
