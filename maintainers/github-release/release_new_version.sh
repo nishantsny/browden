@@ -173,10 +173,23 @@ log "Preparing e2e venv ($E2E_VENV): release tree + dev extras"
 [ -x "$E2E_VENV/bin/python" ] || uv venv "$E2E_VENV"
 uv pip install --quiet --python "$E2E_VENV/bin/python" -e "$RELEASE_DIR[dev]"
 
+# The run writes a lot of throwaway state to the temp dir: pytest's per-test
+# tmp_path dirs (each holding a Chrome profile) and Chrome's own
+# com.google.Chrome.* / .org.chromium.* scratch dirs, which a killed Chrome
+# leaks. /tmp shares the root filesystem here, so repeated runs can fill the
+# disk. Every child (pytest, the harness's server, Chrome) honors TMPDIR, so the
+# run gets a private one: removed on a green run, kept on a red one for its logs
+# (mcp_server.log per test) until the next run sweeps it. The live service's
+# Chrome never sees this TMPDIR.
+E2E_TMP_ROOT="${TMPDIR:-/tmp}"
+rm -rf "$E2E_TMP_ROOT"/browden-e2e.*
+E2E_TMP="$(mktemp -d "$E2E_TMP_ROOT/browden-e2e.XXXXXX")"
+
 log "Running e2e (headless) from $RELEASE_DIR: ${E2E_ARGS[*]}"
 cd "$RELEASE_DIR"
-BROWDEN_HEADLESS=1 "$E2E_VENV/bin/python" -m pytest "${E2E_ARGS[@]}" -q \
-    || die "e2e FAILED — the new code is LIVE but did not pass e2e. Investigate or roll back to $before."
+TMPDIR="$E2E_TMP" BROWDEN_HEADLESS=1 "$E2E_VENV/bin/python" -m pytest "${E2E_ARGS[@]}" -q \
+    || die "e2e FAILED — the new code is LIVE but did not pass e2e. Investigate or roll back to $before. Run artifacts kept in $E2E_TMP."
+rm -rf "$E2E_TMP"
 
 log "DEPLOY OK — $SERVICE live at $after, e2e green."
 deploy_ok=1   # deploy + e2e passed; the release stage may now proceed
