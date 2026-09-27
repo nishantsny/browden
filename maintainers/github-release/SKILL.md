@@ -98,3 +98,5 @@ too so you fail fast (before a ~7-minute run) and can offer to fix it.
   branch-protected, that the workflow is allowed to push it), then `gh run rerun`.
 - The deploy script honors `BROWDEN_RELEASE_DIR`, `BROWDEN_SERVICE`,
   `BROWDEN_PORT`, `BROWDEN_ALLOWLIST`, `BROWDEN_E2E_VENV`.
+  The e2e venv is built fresh per run inside the run's temp dir unless
+  `BROWDEN_E2E_VENV` names a persistent one.

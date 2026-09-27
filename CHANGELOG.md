@@ -58,6 +58,13 @@ All notable changes to browden are documented here. The format follows
   lifted into `_check_section` (with `_check_infra` / `_check_write_action`),
   which is also where an unknown section is refused. No config behaves
   differently; groundwork for profile-scoped rules (#139) (#142).
+- **Deploy script's e2e venv is no longer kept between runs (maintainers).**
+  `release_new_version.sh` used to build the post-deploy e2e venv at
+  `~/.cache/browden/e2e-venv` and keep it forever (~110 MB). It now lives in
+  the run's private `browden-e2e.*` temp dir, so it is removed after a green run
+  and kept with the logs after a red one until the next run sweeps it. Setting
+  `BROWDEN_E2E_VENV` still gives a persistent venv, which the script never
+  removes.
 
 ## [1.2.1] — 2026-07-29
 

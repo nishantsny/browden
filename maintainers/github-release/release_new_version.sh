@@ -29,7 +29,7 @@
 #   BROWDEN_ALLOWLIST    allowlist config the service loads (~/.browden/allowlist.yaml)
 #   BROWDEN_SERVICE      systemd --user unit name           (browden.service)
 #   BROWDEN_PORT         port to health-check              (derived from the unit's MCP_PORT)
-#   BROWDEN_E2E_VENV     cached venv used to run e2e         (~/.cache/browden/e2e-venv)
+#   BROWDEN_E2E_VENV     persistent venv to run e2e from     (default: a fresh one per run)
 #
 # Usage:
 #   ~/scripts/deploy.sh                          # deploy + run the whole e2e suite
@@ -162,16 +162,12 @@ log "$SERVICE is active and listening on $PORT (now running $after)"
 
 # ---- 5. post-deploy e2e smoke test ---------------------------------------
 # The live service venv is runtime-only (no test deps), so run e2e from a
-# dedicated, cached venv into which the release tree is installed EDITABLE —
-# pytest therefore exercises the just-deployed source, and the production venv is
-# never mutated. The harness spawns its OWN isolated Chrome/profile
+# dedicated venv into which the release tree is installed EDITABLE — pytest
+# therefore exercises the just-deployed source, and the production venv is never
+# mutated. The harness spawns its OWN isolated Chrome/profile
 # (XDG_CACHE_HOME under a tmpdir), so it never touches the live service's profile.
 # BROWDEN_HEADLESS=1 is exported in the real env because the subprocess-spawning
 # harness tests don't inherit conftest's monkeypatched value.
-E2E_VENV="${BROWDEN_E2E_VENV:-$HOME/.cache/browden/e2e-venv}"
-log "Preparing e2e venv ($E2E_VENV): release tree + dev extras"
-[ -x "$E2E_VENV/bin/python" ] || uv venv "$E2E_VENV"
-uv pip install --quiet --python "$E2E_VENV/bin/python" -e "$RELEASE_DIR[dev]"
 
 # The run writes a lot of throwaway state to the temp dir: pytest's per-test
 # tmp_path dirs (each holding a Chrome profile) and Chrome's own
@@ -184,6 +180,16 @@ uv pip install --quiet --python "$E2E_VENV/bin/python" -e "$RELEASE_DIR[dev]"
 E2E_TMP_ROOT="${TMPDIR:-/tmp}"
 rm -rf "$E2E_TMP_ROOT"/browden-e2e.*
 E2E_TMP="$(mktemp -d "$E2E_TMP_ROOT/browden-e2e.XXXXXX")"
+
+# The e2e venv lives in that private dir too, so it shares its lifetime: gone
+# after a green run, kept alongside the logs after a red one. uv builds it from
+# its package cache, so a fresh venv per run costs seconds, not a download.
+# BROWDEN_E2E_VENV opts into a persistent venv at a path of your choosing; the
+# script reuses it and never removes it.
+E2E_VENV="${BROWDEN_E2E_VENV:-$E2E_TMP/venv}"
+log "Preparing e2e venv ($E2E_VENV): release tree + dev extras"
+[ -x "$E2E_VENV/bin/python" ] || uv venv "$E2E_VENV"
+uv pip install --quiet --python "$E2E_VENV/bin/python" -e "$RELEASE_DIR[dev]"
 
 log "Running e2e (headless) from $RELEASE_DIR: ${E2E_ARGS[*]}"
 cd "$RELEASE_DIR"
