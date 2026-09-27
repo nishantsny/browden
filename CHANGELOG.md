@@ -25,6 +25,14 @@ All notable changes to browden are documented here. The format follows
   ever consults, so a typo like `clik:` loaded cleanly and silently authorized
   nothing. At startup this is a config error; on hot reload the last-good
   config stays in force, as for any invalid edit.
+- **Access rules split out of the runtime configuration (internal).**
+  `BrowdenAccessRuleSet` (`validator/access_rule_set.py`) now holds the
+  denylist, the read gate and the write-action rules; `BrowdenRuntimeConfiguration`
+  keeps the process-wide `infra` caps and reaches the rules through
+  `.access_rules`. Write actions are read by name from `WRITE_ACTIONS` rather
+  than by excluding reserved keys, so a new top-level section can never be
+  mistaken for one. No config behaves differently; groundwork for per-profile
+  rules (#139) (#140).
 
 ## [1.2.1] — 2026-07-29
 
