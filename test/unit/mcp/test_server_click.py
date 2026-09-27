@@ -3,17 +3,17 @@
 The session is mocked, but the three gates (host allowlist, generic predicate,
 per-site label) run for real. The shipped allowlist.yaml keeps click
 commented out (default-deny), so gate tests that need an enabled host patch in
-_ENABLED_ALLOWLIST — the exact config the commented-out block would enable.
+_ENABLED_CONFIGURATION — the exact config the commented-out block would enable.
 """
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from browden.configs.loader import AllowlistRefresher
-from browden.mcp.validator import ActionAllowlist, ValidationError
+from browden.configs.loader import RuntimeConfigurationRefresher
+from browden.mcp.validator import BrowdenRuntimeConfiguration, ValidationError
 
 # Mirror of allowlist.yaml with the showcase click block uncommented.
-_ENABLED_ALLOWLIST = ActionAllowlist({
+_ENABLED_CONFIGURATION = BrowdenRuntimeConfiguration({
     "read": {"website_overrides": {"*": [".*"]}},
     "click": {
         "amazon.com": {"paths": [".*"], "label": r"(?i)\badd to cart\b"},
@@ -21,7 +21,7 @@ _ENABLED_ALLOWLIST = ActionAllowlist({
 })
 
 # Same, but amazon.com is also on the denylist — the denylist must win.
-_DENIED_ALLOWLIST = ActionAllowlist({
+_DENIED_CONFIGURATION = BrowdenRuntimeConfiguration({
     "denylist": {"amazon.com": [".*"]},
     "click": {
         "amazon.com": {"paths": [".*"], "label": r"(?i)\badd to cart\b"},
@@ -64,7 +64,7 @@ async def test_happy_path_clicks():
     importlib.reload(server)
     session = _session(url="https://www.amazon.com/dp/B0FBRRM2VQ", elements=[_atc_node()])
     with patch.object(server._store, "route", return_value=session), \
-         patch.object(server, "_refresher", AllowlistRefresher.static(_ENABLED_ALLOWLIST)):
+         patch.object(server, "_refresher", RuntimeConfigurationRefresher.static(_ENABLED_CONFIGURATION)):
         result = await server.click("#add-to-cart-button", "h1")
     assert result["clicked"] is True
     session.click.assert_awaited_once_with("#add-to-cart-button", id="h1")
@@ -78,7 +78,7 @@ async def test_denylist_vetoes_click_even_when_click_host_is_allowed():
     __import__("importlib").reload(server)
     session = _session(url="https://www.amazon.com/dp/B0FBRRM2VQ", elements=[_atc_node()])
     with patch.object(server._store, "route", return_value=session), \
-         patch.object(server, "_refresher", AllowlistRefresher.static(_DENIED_ALLOWLIST)):
+         patch.object(server, "_refresher", RuntimeConfigurationRefresher.static(_DENIED_CONFIGURATION)):
         with pytest.raises(ValidationError, match="denylist"):
             await server.click("#add-to-cart-button", "h1")
     session.query_selector_all.assert_not_awaited()
@@ -91,7 +91,7 @@ async def test_host_not_allowed_is_rejected():
     __import__("importlib").reload(server)
     session = _session(url="https://evil.example.com/p", elements=[_atc_node()])
     with patch.object(server._store, "route", return_value=session), \
-         patch.object(server, "_refresher", AllowlistRefresher.static(_ENABLED_ALLOWLIST)):
+         patch.object(server, "_refresher", RuntimeConfigurationRefresher.static(_ENABLED_CONFIGURATION)):
         with pytest.raises(ValidationError, match="not allowed on this page"):
             await server.click("#x", "h1")
     session.click.assert_not_awaited()
@@ -106,7 +106,7 @@ async def test_buy_now_rejected_by_site_label():
     session = _session(url="https://www.amazon.com/dp/X",
                        elements=[_atc_node(value="Buy Now")])
     with patch.object(server._store, "route", return_value=session), \
-         patch.object(server, "_refresher", AllowlistRefresher.static(_ENABLED_ALLOWLIST)):
+         patch.object(server, "_refresher", RuntimeConfigurationRefresher.static(_ENABLED_CONFIGURATION)):
         with pytest.raises(ValidationError, match="does not match any click label"):
             await server.click("#buy-now", "h1")
     session.click.assert_not_awaited()
@@ -119,7 +119,7 @@ async def test_allow_all_host_clicks_any_real_control():
     # clicks. Integrity still holds: it must be a real, non-decoy control.
     import browden.mcp.server as server
     __import__("importlib").reload(server)
-    allow_all = ActionAllowlist({
+    allow_all = BrowdenRuntimeConfiguration({
         "read": {"website_overrides": {"*": [".*"]}},
         "click": {"amazon.com": {"paths": [".*"], "label": ".*"}},  # explicit allow-any
     })
@@ -127,7 +127,7 @@ async def test_allow_all_host_clicks_any_real_control():
                        elements=[{"tag": "button", "id": None, "classes": [],
                                   "attributes": {}, "text": "Place your order"}])
     with patch.object(server._store, "route", return_value=session), \
-         patch.object(server, "_refresher", AllowlistRefresher.static(allow_all)):
+         patch.object(server, "_refresher", RuntimeConfigurationRefresher.static(allow_all)):
         result = await server.click("#place-order", "h1")
     assert result["clicked"] is True
     session.click.assert_awaited_once_with("#place-order", id="h1")
@@ -139,7 +139,7 @@ async def test_allow_all_host_still_rejects_decoy():
     # intent-independent and always applies.
     import browden.mcp.server as server
     __import__("importlib").reload(server)
-    allow_all = ActionAllowlist({
+    allow_all = BrowdenRuntimeConfiguration({
         "read": {"website_overrides": {"*": [".*"]}},
         "click": {"amazon.com": {"paths": [".*"], "label": ".*"}},
     })
@@ -147,7 +147,7 @@ async def test_allow_all_host_still_rejects_decoy():
                        elements=[_atc_node(value="Place your order",
                                            **{"data-target-audience": "ai-agent"})])
     with patch.object(server._store, "route", return_value=session), \
-         patch.object(server, "_refresher", AllowlistRefresher.static(allow_all)):
+         patch.object(server, "_refresher", RuntimeConfigurationRefresher.static(allow_all)):
         with pytest.raises(ValidationError, match="decoy"):
             await server.click("#decoy", "h1")
     session.click.assert_not_awaited()
@@ -160,7 +160,7 @@ async def test_ambiguous_selector_is_rejected():
     session = _session(url="https://www.amazon.com/dp/X",
                        elements=[_atc_node(), _atc_node()])
     with patch.object(server._store, "route", return_value=session), \
-         patch.object(server, "_refresher", AllowlistRefresher.static(_ENABLED_ALLOWLIST)):
+         patch.object(server, "_refresher", RuntimeConfigurationRefresher.static(_ENABLED_CONFIGURATION)):
         with pytest.raises(ValidationError, match="ambiguous"):
             await server.click(".a-button-input", "h1")
     session.click.assert_not_awaited()
@@ -174,7 +174,7 @@ async def test_label_mismatch_for_site_is_rejected():
     session = _session(url="https://www.amazon.com/dp/X",
                        elements=[_atc_node(value="Add to bag")])
     with patch.object(server._store, "route", return_value=session), \
-         patch.object(server, "_refresher", AllowlistRefresher.static(_ENABLED_ALLOWLIST)):
+         patch.object(server, "_refresher", RuntimeConfigurationRefresher.static(_ENABLED_CONFIGURATION)):
         with pytest.raises(ValidationError, match="does not match any click label"):
             await server.click("#x", "h1")
     session.click.assert_not_awaited()
@@ -182,7 +182,7 @@ async def test_label_mismatch_for_site_is_rejected():
 
 # Anchor clicks are gated by *where the href goes* against the READ allowlist.
 # Here amazon.com and wholefoodsmarket.com are readable; nothing else is.
-_ANCHOR_ALLOWLIST = ActionAllowlist({
+_ANCHOR_CONFIGURATION = BrowdenRuntimeConfiguration({
     "read": {"enabled": True, "tranco": {"enabled": False},
              "website_overrides": {"amazon.com": [".*"], "wholefoodsmarket.com": [".*"]}},
     "click": {"amazon.com": {"paths": [".*"], "label": ".*"}},  # allow any control text
@@ -201,7 +201,7 @@ async def test_anchor_same_site_relative_clicks():
     session = _session(url="https://www.amazon.com/checkout/p/x/spc",
                        elements=[_anchor_node("/checkout/next")])
     with patch.object(server._store, "route", return_value=session), \
-         patch.object(server, "_refresher", AllowlistRefresher.static(_ANCHOR_ALLOWLIST)):
+         patch.object(server, "_refresher", RuntimeConfigurationRefresher.static(_ANCHOR_CONFIGURATION)):
         result = await server.click("a.next", "h1")
     assert result["clicked"] is True
 
@@ -215,7 +215,7 @@ async def test_anchor_cross_domain_but_allowlisted_clicks():
     session = _session(url="https://www.amazon.com/checkout/p/x/spc",
                        elements=[_anchor_node("https://www.wholefoodsmarket.com/cart")])
     with patch.object(server._store, "route", return_value=session), \
-         patch.object(server, "_refresher", AllowlistRefresher.static(_ANCHOR_ALLOWLIST)):
+         patch.object(server, "_refresher", RuntimeConfigurationRefresher.static(_ANCHOR_CONFIGURATION)):
         result = await server.click("a.wf", "h1")
     assert result["clicked"] is True
 
@@ -227,7 +227,7 @@ async def test_anchor_target_off_read_allowlist_rejected():
     session = _session(url="https://www.amazon.com/checkout/p/x/spc",
                        elements=[_anchor_node("https://evil.example/x")])
     with patch.object(server._store, "route", return_value=session), \
-         patch.object(server, "_refresher", AllowlistRefresher.static(_ANCHOR_ALLOWLIST)):
+         patch.object(server, "_refresher", RuntimeConfigurationRefresher.static(_ANCHOR_CONFIGURATION)):
         with pytest.raises(ValidationError, match="not on the read allowlist"):
             await server.click("a.evil", "h1")
     session.click.assert_not_awaited()
@@ -242,7 +242,7 @@ async def test_anchor_javascript_href_clicks_without_target_check():
     session = _session(url="https://www.amazon.com/checkout/p/x/spc",
                        elements=[_anchor_node("javascript:void(0)", text="Edit")])
     with patch.object(server._store, "route", return_value=session), \
-         patch.object(server, "_refresher", AllowlistRefresher.static(_ANCHOR_ALLOWLIST)):
+         patch.object(server, "_refresher", RuntimeConfigurationRefresher.static(_ANCHOR_CONFIGURATION)):
         result = await server.click("a.edit", "h1")
     assert result["clicked"] is True
 
@@ -254,7 +254,7 @@ async def test_anchor_mailto_scheme_rejected():
     session = _session(url="https://www.amazon.com/checkout/p/x/spc",
                        elements=[_anchor_node("mailto:help@amazon.com", text="Contact")])
     with patch.object(server._store, "route", return_value=session), \
-         patch.object(server, "_refresher", AllowlistRefresher.static(_ANCHOR_ALLOWLIST)):
+         patch.object(server, "_refresher", RuntimeConfigurationRefresher.static(_ANCHOR_CONFIGURATION)):
         with pytest.raises(ValidationError, match="non-navigational scheme"):
             await server.click("a.mail", "h1")
     session.click.assert_not_awaited()

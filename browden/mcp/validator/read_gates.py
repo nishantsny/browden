@@ -11,7 +11,8 @@ admitted (special-cased in :func:`validate_url`).
 from urllib.parse import urlparse, urlunparse
 
 from ...common.logger import logger
-from .allowlist import ActionAllowlist, Allowlist, ReadPolicy
+from .allowlist import Allowlist, ReadPolicy
+from .runtime_configuration import BrowdenRuntimeConfiguration
 from .errors import ValidationError
 
 # Browser-internal "blank" / new-tab URLs a not-yet-navigated tab reports. Always
@@ -82,7 +83,7 @@ def validate_url(url: str, gate: "Allowlist | ReadPolicy") -> str:
     return urlunparse(p)
 
 
-def ensure_url_allowed(allowlist: ActionAllowlist, url: str) -> bool:
+def ensure_url_allowed(runtime_configuration: BrowdenRuntimeConfiguration, url: str) -> bool:
     """Return whether the READ policy admits ``url`` (never raises).
 
     The read counterpart of :func:`check_action_host`: it runs a tab's live URL
@@ -93,7 +94,7 @@ def ensure_url_allowed(allowlist: ActionAllowlist, url: str) -> bool:
     ``about:blank`` always returns ``True`` (``validate_url`` special-cases it).
     """
     try:
-        validate_url(url, allowlist.read_policy)
+        validate_url(url, runtime_configuration.read_policy)
         return True
     except ValidationError:
         return False

@@ -140,8 +140,8 @@ uv pip install --quiet --python "$VENV_PY" -e "$RELEASE_DIR"
 log "Validating $CONFIG under the release venv"
 "$VENV_PY" - "$CONFIG" <<'PY'
 import sys
-from browden.configs.loader import load_allowlist
-load_allowlist(sys.argv[1])
+from browden.configs.loader import load_runtime_configuration
+load_runtime_configuration(sys.argv[1])
 print("config loads OK")
 PY
 

@@ -1,5 +1,5 @@
 """Re-export validator symbols for convenient access."""
-from .allowlist import ActionAllowlist, Allowlist, ReadPolicy
+from .allowlist import Allowlist, ReadPolicy
 from .errors import SessionBusyError, ValidationError, tab_gone_envelope
 from .intent import (
     ACTIVATION_KEYS,
@@ -12,6 +12,7 @@ from .intent import (
     label_matches,
 )
 from .popularity import PopularityAllowlist
+from .runtime_configuration import BrowdenRuntimeConfiguration
 from .tranco import TrancoList
 from .read_gates import ensure_url_allowed, validate_url
 from .write_gates import (
@@ -23,7 +24,7 @@ from .write_gates import (
 
 __all__ = [
     "ACTIVATION_KEYS",
-    "ActionAllowlist",
+    "BrowdenRuntimeConfiguration",
     "Allowlist",
     "PopularityAllowlist",
     "ReadPolicy",

@@ -254,14 +254,14 @@ async def test_new_blank_tab_hands_the_session_a_live_reap_interval(monkeypatch)
     snapshotted when the session happened to be created.
     """
     import browden.mcp.server as server
-    from browden.configs.loader import AllowlistRefresher
-    from browden.mcp.validator import ActionAllowlist
+    from browden.configs.loader import RuntimeConfigurationRefresher
+    from browden.mcp.validator import BrowdenRuntimeConfiguration
     importlib.reload(server)
 
     session = _fake_session(new_blank_tab={"id": "pre-h1"})
     with patch.object(server._store, "get_or_create_session", return_value=session) as get_session:
-        monkeypatch.setattr(server, "_refresher", AllowlistRefresher.static(
-            ActionAllowlist({"infra": {"reap_interval_seconds": 600}})))
+        monkeypatch.setattr(server, "_refresher", RuntimeConfigurationRefresher.static(
+            BrowdenRuntimeConfiguration({"infra": {"reap_interval_seconds": 600}})))
         await server.new_blank_tab(profile_dir=None)
 
         interval = get_session.call_args.kwargs["reap_interval_seconds"]
@@ -269,8 +269,8 @@ async def test_new_blank_tab_hands_the_session_a_live_reap_interval(monkeypatch)
 
         # A hot reload swaps the allowlist in place; the same getter must now
         # report the new cadence, with no new session and no restart.
-        monkeypatch.setattr(server, "_refresher", AllowlistRefresher.static(
-            ActionAllowlist({"infra": {"reap_interval_seconds": 30}})))
+        monkeypatch.setattr(server, "_refresher", RuntimeConfigurationRefresher.static(
+            BrowdenRuntimeConfiguration({"infra": {"reap_interval_seconds": 30}})))
         assert interval() == 30
 
 

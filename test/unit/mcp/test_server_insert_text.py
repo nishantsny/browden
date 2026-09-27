@@ -8,11 +8,11 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from browden.configs.loader import AllowlistRefresher
-from browden.mcp.validator import ActionAllowlist, ValidationError
+from browden.configs.loader import RuntimeConfigurationRefresher
+from browden.mcp.validator import BrowdenRuntimeConfiguration, ValidationError
 
 # amazon.com may type into fields whose visible label reads like "Grocery Tip …".
-_ENABLED = ActionAllowlist({
+_ENABLED = BrowdenRuntimeConfiguration({
     "read": {"website_overrides": {"*": [".*"]}},
     "write-text": {
         "amazon.com": {"paths": [".*"], "label": r"(?i)grocery tip.*"},
@@ -52,7 +52,7 @@ async def test_happy_path_fills():
     __import__("importlib").reload(server)
     session = _session(url="https://www.amazon.com/checkout", elements=[_field()])
     with patch.object(server._store, "route", return_value=session), \
-         patch.object(server, "_refresher", AllowlistRefresher.static(_ENABLED)):
+         patch.object(server, "_refresher", RuntimeConfigurationRefresher.static(_ENABLED)):
         result = await server.insert_text("#tip", "0", "h1")
     assert result["inserted"] is True
     session.insert_text.assert_awaited_once_with("#tip", "0", id="h1")
@@ -63,13 +63,13 @@ async def test_write_text_is_a_separate_section_from_click():
     # A host enabled for `click` is NOT thereby enabled for `insert_text`.
     import browden.mcp.server as server
     __import__("importlib").reload(server)
-    click_only = ActionAllowlist({
+    click_only = BrowdenRuntimeConfiguration({
         "read": {"website_overrides": {"*": [".*"]}},
         "click": {"amazon.com": {"paths": [".*"], "label": ".*"}},
     })
     session = _session(url="https://www.amazon.com/checkout", elements=[_field()])
     with patch.object(server._store, "route", return_value=session), \
-         patch.object(server, "_refresher", AllowlistRefresher.static(click_only)):
+         patch.object(server, "_refresher", RuntimeConfigurationRefresher.static(click_only)):
         with pytest.raises(ValidationError, match="not allowed on this page"):
             await server.insert_text("#tip", "0", "h1")
     session.insert_text.assert_not_awaited()
@@ -83,7 +83,7 @@ async def test_non_text_control_is_rejected():
                        elements=[{"tag": "button", "id": None, "classes": [],
                                   "attributes": {}, "text": "Grocery Tip"}])
     with patch.object(server._store, "route", return_value=session), \
-         patch.object(server, "_refresher", AllowlistRefresher.static(_ENABLED)):
+         patch.object(server, "_refresher", RuntimeConfigurationRefresher.static(_ENABLED)):
         with pytest.raises(ValidationError, match="fillable"):
             await server.insert_text("#b", "0", "h1")
     session.insert_text.assert_not_awaited()
@@ -98,7 +98,7 @@ async def test_field_label_mismatch_is_rejected():
     session = _session(url="https://www.amazon.com/checkout",
                        elements=[_field(placeholder="Card number")])
     with patch.object(server._store, "route", return_value=session), \
-         patch.object(server, "_refresher", AllowlistRefresher.static(_ENABLED)):
+         patch.object(server, "_refresher", RuntimeConfigurationRefresher.static(_ENABLED)):
         with pytest.raises(ValidationError, match="does not match any write-text rule"):
             await server.insert_text("#card", "0", "h1")
     session.insert_text.assert_not_awaited()
@@ -110,7 +110,7 @@ async def test_ambiguous_selector_is_rejected():
     __import__("importlib").reload(server)
     session = _session(url="https://www.amazon.com/checkout", elements=[_field(), _field()])
     with patch.object(server._store, "route", return_value=session), \
-         patch.object(server, "_refresher", AllowlistRefresher.static(_ENABLED)):
+         patch.object(server, "_refresher", RuntimeConfigurationRefresher.static(_ENABLED)):
         with pytest.raises(ValidationError, match="ambiguous"):
             await server.insert_text(".a-input-text", "0", "h1")
     session.insert_text.assert_not_awaited()

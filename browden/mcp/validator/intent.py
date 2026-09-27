@@ -1,7 +1,8 @@
 """Element-level guard for the write actions (``click`` and ``insert_text``).
 
-The per-action host allowlist (:class:`ActionAllowlist`) decides *where* an action
-may act and, via each host's optional ``label`` regex, *what* target may carry.
+The per-action host allowlist (in :class:`BrowdenRuntimeConfiguration`) decides
+*where* an action may act and, via each host's optional ``label`` regex, *what*
+target may carry.
 This module enforces only what the allowlist can't: element *integrity*. It
 answers "is this a real, visible, non-decoy control (a clickable one for
 ``click``, a text box for ``insert_text``)?" — never "is this the kind of action I

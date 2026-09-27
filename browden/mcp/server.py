@@ -10,11 +10,11 @@ from pathlib import Path
 
 from ..common.logger import logger
 from ..configs.loader import (
-    AllowlistRefresher,
+    RuntimeConfigurationRefresher,
     ConfigError,
     DEFAULT_RELOAD_INTERVAL_SECONDS,
     SAMPLE_ALLOWLIST,
-    load_allowlist,
+    load_runtime_configuration,
     resolve_allowlist_path,
 )
 from ..dependencies.mcp import FastMCP, Image
@@ -22,7 +22,7 @@ from ..web_navigator.selenium_chrome import SeleniumChromeBackend
 from .session_management.browser_session_store import BrowserSessionStore, UnknownTabError
 
 from .validator import (
-    ActionAllowlist,
+    BrowdenRuntimeConfiguration,
     SessionBusyError,
     ValidationError,
     check_action_host,
@@ -43,7 +43,7 @@ _INSTRUCTIONS = (
 
 
 @contextlib.asynccontextmanager
-async def _allowlist_lifespan(_server: FastMCP) -> AsyncIterator[None]:
+async def _runtime_configuration_lifespan(_server: FastMCP) -> AsyncIterator[None]:
     """Run the live allowlist's hot-reload poller for the server's lifetime.
 
     Delegates to the refresher (see ``configs/loader/refresher.py``): the poller
@@ -59,17 +59,17 @@ mcp = FastMCP(
     instructions=_INSTRUCTIONS,
     host=os.environ.get("MCP_HOST", DEFAULT_HOST),
     port=int(os.environ.get("MCP_PORT", DEFAULT_PORT)),
-    lifespan=_allowlist_lifespan,
+    lifespan=_runtime_configuration_lifespan,
 )
 
 # Import-time default: a *static* refresher over the repo sample (reads open,
 # writes deny-all), so unit tests and library imports see a deterministic policy
 # and watch no file. main() re-resolves (CLI > env > user config > sample) and
 # replaces this with a file-watching refresher before serving. Every tool reads
-# the live policy off ``_refresher.allowlist``, which the refresher hot-reloads
+# the live policy off ``_refresher.runtime_configuration``, which the refresher hot-reloads
 # in place via a lock-free atomic swap (see configs/loader/refresher.py).
-_refresher = AllowlistRefresher.static(
-    load_allowlist(SAMPLE_ALLOWLIST) if SAMPLE_ALLOWLIST.exists() else ActionAllowlist({}))
+_refresher = RuntimeConfigurationRefresher.static(
+    load_runtime_configuration(SAMPLE_ALLOWLIST) if SAMPLE_ALLOWLIST.exists() else BrowdenRuntimeConfiguration({}))
 
 logger.info("Browden MCP module initialized")
 
@@ -179,7 +179,7 @@ async def list_tabs() -> list[dict]:
         # last tab can't be closed) and drop it from the listing.
         kept: list[dict] = []
         for tab in await session.list_tabs():
-            if ensure_url_allowed(_refresher.allowlist, tab.get("url") or ""):
+            if ensure_url_allowed(_refresher.runtime_configuration, tab.get("url") or ""):
                 kept.append(tab)
                 continue
             logger.warning(f"list_tabs: closing non-allowlisted tab {tab.get('url')!r} (id={tab.get('id')})")
@@ -210,11 +210,11 @@ async def new_blank_tab(profile_dir: str | None = None) -> dict:
     try:
         session = _store.get_or_create_session(
             _backend_for(profile_dir),
-            max_sessions=_refresher.allowlist.max_browser_sessions,
+            max_sessions=_refresher.runtime_configuration.max_browser_sessions,
             # A getter, not a value: the session's reaper re-reads it every tick,
             # so an infra.reap_interval_seconds edit lands without a restart.
-            reap_interval_seconds=lambda: _refresher.allowlist.reap_interval_seconds)
-        result = await session.new_blank_tab(max_tabs=_refresher.allowlist.max_tabs_per_session)  # wire dict with composite id
+            reap_interval_seconds=lambda: _refresher.runtime_configuration.reap_interval_seconds)
+        result = await session.new_blank_tab(max_tabs=_refresher.runtime_configuration.max_tabs_per_session)  # wire dict with composite id
     except RuntimeError as e:
         return {"error": str(e)}
     logger.info("Tool finished: new_blank_tab")
@@ -263,7 +263,7 @@ async def _guard_landing(session, id: str, result: dict) -> dict:
     if not landed:
         return result  # a tab-gone envelope or similar — nothing navigated
     try:
-        validate_url(landed, _refresher.allowlist.read_policy)
+        validate_url(landed, _refresher.runtime_configuration.read_policy)
     except ValidationError:
         logger.warning(f"navigation landed off-allowlist at {landed!r}; bouncing to about:blank")
         await session.navigate("about:blank", id=id)
@@ -278,7 +278,7 @@ async def _guard_landing(session, id: str, result: dict) -> dict:
 async def navigate(url: str, id: str) -> dict:
     """Navigate the named tab to url. Url is gated by the per-host allowlist (query strings and fragments pass through)."""
     logger.info(f"Tool called: navigate (url={url!r}, id={id!r})")
-    url = validate_url(url, _refresher.allowlist.read_policy)
+    url = validate_url(url, _refresher.runtime_configuration.read_policy)
     session = _store.route(id)
     result = await session.navigate(url, id=id)  # wire dict (or the tab-gone envelope)
     result = await _guard_landing(session, id, result)  # re-gate the post-redirect landing
@@ -322,14 +322,14 @@ async def click(css_selector: str, id: str) -> dict:
     url = await session.document_url(id=id)
     if url is None:
         return tab_gone_envelope(id)
-    check_action_host(_refresher.allowlist, "click", url)  # raises if denied / host not allowed
+    check_action_host(_refresher.runtime_configuration, "click", url)  # raises if denied / host not allowed
 
     # Gates 2-3: fetch the element (limit=2 so ambiguity is detectable), then let
     # the validator judge integrity, anchor target, and the host's required label.
     found = await session.query_selector_all(css_selector, id=id, limit=2)
     if "error" in found:
         return found
-    validate_click_target(_refresher.allowlist, url, css_selector, found)  # raises on any failed gate
+    validate_click_target(_refresher.runtime_configuration, url, css_selector, found)  # raises on any failed gate
 
     result = await session.click(css_selector, id=id)
     logger.info("Tool finished: click")
@@ -368,14 +368,14 @@ async def insert_text(css_selector: str, value: str, id: str) -> dict:
     url = await session.document_url(id=id)
     if url is None:
         return tab_gone_envelope(id)
-    check_action_host(_refresher.allowlist, "write-text", url)  # raises if denied / host not allowed
+    check_action_host(_refresher.runtime_configuration, "write-text", url)  # raises if denied / host not allowed
 
     # Gates 2-3: fetch the element (limit=2 so ambiguity is detectable), then let
     # the validator judge integrity and the host's required label / field-id.
     found = await session.query_selector_all(css_selector, id=id, limit=2)
     if "error" in found:
         return found
-    validate_write_text_target(_refresher.allowlist, url, css_selector, found)  # raises on any failed gate
+    validate_write_text_target(_refresher.runtime_configuration, url, css_selector, found)  # raises on any failed gate
 
     result = await session.insert_text(css_selector, value, id=id)
     logger.info("Tool finished: insert_text")
@@ -413,14 +413,14 @@ async def press_key(css_selector: str, key: str, id: str) -> dict:
     url = await session.document_url(id=id)
     if url is None:
         return tab_gone_envelope(id)
-    check_action_host(_refresher.allowlist, "press-key", url)  # raises if denied / host not allowed
+    check_action_host(_refresher.runtime_configuration, "press-key", url)  # raises if denied / host not allowed
 
     # Gates 2-4: fetch the element (limit=2 so ambiguity is detectable), then let
     # the validator judge focusability, the control-key rule, and the page label+key.
     found = await session.query_selector_all(css_selector, id=id, limit=2)
     if "error" in found:
         return found
-    validate_press_key_target(_refresher.allowlist, url, css_selector, found, key)  # raises on any failed gate
+    validate_press_key_target(_refresher.runtime_configuration, url, css_selector, found, key)  # raises on any failed gate
 
     result = await session.press_key(css_selector, key, id=id)
     logger.info("Tool finished: press_key")
@@ -446,7 +446,7 @@ async def get_element_by_id(element_id: str, id: str,
     url = await session.document_url(id=id)
     if url is None:
         return tab_gone_envelope(id)
-    if not ensure_url_allowed(_refresher.allowlist, url):  # H2: gate the tab's live url before reading
+    if not ensure_url_allowed(_refresher.runtime_configuration, url):  # H2: gate the tab's live url before reading
         raise ValidationError(f"URL not on the read allowlist: {url}")
     result = await session.get_element_by_id(
         element_id, id=id, include_html=include_html, max_html_bytes=max_html_bytes)
@@ -465,7 +465,7 @@ async def get_elements_by_class_name(class_names: str, id: str,
     url = await session.document_url(id=id)
     if url is None:
         return tab_gone_envelope(id)
-    if not ensure_url_allowed(_refresher.allowlist, url):  # H2: gate the tab's live url before reading
+    if not ensure_url_allowed(_refresher.runtime_configuration, url):  # H2: gate the tab's live url before reading
         raise ValidationError(f"URL not on the read allowlist: {url}")
     result = await session.get_elements_by_class_name(
         class_names, id=id, limit=limit, offset=offset,
@@ -484,7 +484,7 @@ async def query_selector(css_selector: str, id: str,
     url = await session.document_url(id=id)
     if url is None:
         return tab_gone_envelope(id)
-    if not ensure_url_allowed(_refresher.allowlist, url):  # H2: gate the tab's live url before reading
+    if not ensure_url_allowed(_refresher.runtime_configuration, url):  # H2: gate the tab's live url before reading
         raise ValidationError(f"URL not on the read allowlist: {url}")
     result = await session.query_selector(
         css_selector, id=id, include_html=include_html, max_html_bytes=max_html_bytes)
@@ -503,7 +503,7 @@ async def query_selector_all(css_selector: str, id: str,
     url = await session.document_url(id=id)
     if url is None:
         return tab_gone_envelope(id)
-    if not ensure_url_allowed(_refresher.allowlist, url):  # H2: gate the tab's live url before reading
+    if not ensure_url_allowed(_refresher.runtime_configuration, url):  # H2: gate the tab's live url before reading
         raise ValidationError(f"URL not on the read allowlist: {url}")
     result = await session.query_selector_all(
         css_selector, id=id, limit=limit, offset=offset,
@@ -526,7 +526,7 @@ async def screenshot(id: str):  # -> dict | Image; unannotated: FastMCP can't sc
     url = await session.document_url(id=id)
     if url is None:
         return tab_gone_envelope(id)
-    if not ensure_url_allowed(_refresher.allowlist, url):  # H2: gate the tab's live url before reading
+    if not ensure_url_allowed(_refresher.runtime_configuration, url):  # H2: gate the tab's live url before reading
         raise ValidationError(f"URL not on the read allowlist: {url}")
     result = await session.screenshot(id=id)
     if isinstance(result, dict):  # tab gone — structured error, not an image
@@ -572,7 +572,7 @@ async def force_reload_tab(id: str) -> dict:
     url = await session.document_url(id=id)
     if url is None:
         return tab_gone_envelope(id)
-    if not ensure_url_allowed(_refresher.allowlist, url):  # H2: gate the tab's live url before reading
+    if not ensure_url_allowed(_refresher.runtime_configuration, url):  # H2: gate the tab's live url before reading
         raise ValidationError(f"URL not on the read allowlist: {url}")
     result = await session.force_reload_tab(id=id)
     result = await _guard_landing(session, id, result)  # a reload can 302 off-list too
@@ -585,8 +585,8 @@ def main(argv: list[str] | None = None) -> None:
 
     Replaces the module default with a file-watching refresher over the config
     the operator chose, so every tool (the internal consumers of
-    ``_refresher.allowlist``) gates against it — and picks up edits live, since
-    ``_allowlist_lifespan`` runs the refresher's poller while the server serves.
+    ``_refresher.runtime_configuration``) gates against it — and picks up edits live, since
+    ``_runtime_configuration_lifespan`` runs the refresher's poller while the server serves.
     """
     global _refresher
     parser = argparse.ArgumentParser(
@@ -606,7 +606,7 @@ def main(argv: list[str] | None = None) -> None:
     interval = float(os.environ.get(
         "BROWDEN_RELOAD_INTERVAL", DEFAULT_RELOAD_INTERVAL_SECONDS))
     try:
-        _refresher = AllowlistRefresher.from_path(path, interval=interval)
+        _refresher = RuntimeConfigurationRefresher.from_path(path, interval=interval)
     except ConfigError as e:
         parser.error(str(e))
     logger.info(f"Loaded allowlist config from {path}")

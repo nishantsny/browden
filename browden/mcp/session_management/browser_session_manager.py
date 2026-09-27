@@ -44,7 +44,7 @@ from collections.abc import Callable
 
 from ...common.logger import logger
 from ...dom import query, serialize
-from ..validator.allowlist import DEFAULT_REAP_INTERVAL_SECONDS
+from ..validator.runtime_configuration import DEFAULT_REAP_INTERVAL_SECONDS
 from ..validator.errors import SessionBusyError, tab_gone_envelope
 from ...web_navigator.interface import TabNotFoundError
 from ...web_navigator.tab_id import format_tab_id, split_tab_id

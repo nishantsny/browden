@@ -15,9 +15,9 @@ from unittest.mock import patch
 
 import pytest
 
-from browden.configs.loader import AllowlistRefresher
+from browden.configs.loader import RuntimeConfigurationRefresher
 from browden.mcp.session_management.browser_session_manager import BrowserSessionManager
-from browden.mcp.validator import ActionAllowlist, ValidationError
+from browden.mcp.validator import BrowdenRuntimeConfiguration, ValidationError
 
 HTML = """<html><body>
   <button id="add"
@@ -145,12 +145,12 @@ async def test_invalidate_is_not_read_gated_but_reads_still_are(session, tmp_pat
     primed = await session.query_selector("#marker", id=page["id"])
     assert primed["found"] is True  # readable while the policy still admits it
 
-    refuses_this_page = ActionAllowlist({
+    refuses_this_page = BrowdenRuntimeConfiguration({
         "read": {"enabled": True, "tranco": {"enabled": False},
                  "website_overrides": {"": ["^/definitely-not-this-path/.*"]}},
     })
     with patch.object(server._store, "route", return_value=session), \
-         patch.object(server, "_refresher", AllowlistRefresher.static(refuses_this_page)):
+         patch.object(server, "_refresher", RuntimeConfigurationRefresher.static(refuses_this_page)):
         assert await server.invalidate_dom_cache(id=page["id"]) == {
             "id": page["id"], "invalidated": True}
 

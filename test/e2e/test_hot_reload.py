@@ -4,7 +4,7 @@ The server re-stats its allowlist file every ~10s and atomically swaps in a
 freshly-loaded policy on change, so an operator can tighten or loosen the gate
 without a restart. These drive a live server process and edit the very file it
 watches, then poll a gated ``navigate`` until (or to confirm it never does) the
-new policy is observable — exercising loader -> AllowlistRefresher.maybe_reload
+new policy is observable — exercising loader -> RuntimeConfigurationRefresher.maybe_reload
 -> the swapped ReadPolicy -> validate_url -> the navigate tool.
 
 Two properties, end to end:
