@@ -33,6 +33,13 @@ All notable changes to browden are documented here. The format follows
   than by excluding reserved keys, so a new top-level section can never be
   mistaken for one. No config behaves differently; groundwork for per-profile
   rules (#139) (#140).
+- **Gates are handed the access rules, not the whole configuration (internal).**
+  `ensure_url_allowed`, `check_action_host` and the `validate_*_target` gates
+  take a `BrowdenAccessRuleSet`, and `BrowdenRuntimeConfiguration` no longer
+  forwards `read_policy` / `denylist` / `is_denied` / `section` / `rules_for`:
+  `.access_rules` is the only route to a decision. No gate's order or outcome
+  changes; groundwork for handing each request its own profile's rules (#139)
+  (#141).
 
 ## [1.2.1] — 2026-07-29
 

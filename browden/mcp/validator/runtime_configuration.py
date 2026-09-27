@@ -9,7 +9,6 @@ from pathlib import Path
 import yaml
 
 from .access_rule_set import BrowdenAccessRuleSet
-from .allowlist import Allowlist, PageRule, ReadPolicy
 from .tranco import TRANCO_FILENAME
 
 # Defaults for the `infra` section. They live here, with the rest of the config
@@ -36,9 +35,8 @@ class BrowdenRuntimeConfiguration:
       :class:`BrowdenAccessRuleSet` (which documents the grammar), reachable as
       :attr:`access_rules`.
 
-    The delegating members below (``read_policy``, ``denylist``, ``is_denied``,
-    ``section``, ``rules_for``) forward to that rule set, so existing callers
-    are unchanged by the split.
+    :attr:`access_rules` is the only way to a decision: a gate is always handed
+    the rule set that governs the request it is deciding, never the container.
     """
 
     def __init__(self, sections: dict[str, object], tranco_path: Path | None = None):
@@ -67,27 +65,3 @@ class BrowdenRuntimeConfiguration:
     def access_rules(self) -> BrowdenAccessRuleSet:
         """The rule set every gate decides against."""
         return self._access_rules
-
-    @property
-    def read_policy(self) -> ReadPolicy:
-        """The read/navigate gate (denylist + master switch + Tranco + overrides)."""
-        return self._access_rules.read_policy
-
-    @property
-    def denylist(self) -> Allowlist:
-        """The always-deny list, so write actions can veto denied hosts too."""
-        return self._access_rules.denylist
-
-    def is_denied(self, host: str, path: str) -> bool:
-        """True if ``(host, path)`` is on the denylist (refused for every action)."""
-        return self._access_rules.is_denied(host, path)
-
-    def section(self, action: str) -> Allowlist:
-        """Return the host/page-admission allowlist for ``action`` (labels ignored);
-        an empty (deny-all) one if unlisted."""
-        return self._access_rules.section(action)
-
-    def rules_for(self, action: str, host: str, path: str,
-                  query: str = "", fragment: str = "") -> list[PageRule]:
-        """The page rules for ``action`` on ``host`` that match this page, in order."""
-        return self._access_rules.rules_for(action, host, path, query, fragment)

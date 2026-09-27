@@ -1,6 +1,6 @@
 """Element-level guard for the write actions (``click`` and ``insert_text``).
 
-The per-action host allowlist (in :class:`BrowdenRuntimeConfiguration`) decides
+The per-action host allowlist (in :class:`BrowdenAccessRuleSet`) decides
 *where* an action may act and, via each host's optional ``label`` regex, *what*
 target may carry.
 This module enforces only what the allowlist can't: element *integrity*. It
