@@ -1,8 +1,8 @@
 """End-to-end: the frame-navigation tools against a real (headless) Chrome.
 
 Drives ``BrowserSessionManager`` directly (the same path the MCP tools take, minus
-the server-layer allowlist gates — those are unit-tested in
-``test/unit/mcp/validator/test_read_gates.py``). Proves the core mechanic: browden's
+the server-layer allowlist gates — those run end to end in
+``test_iframe_gates.py``, and as units in ``test_read_gates.py``). Proves the core mechanic: browden's
 DOM-read tools see only the *focused* document, and ``enter_frame`` /
 ``switch_to_default_content`` move that focus so the existing read tools can inspect
 an iframe's contents — and that the focus survives the window-refocus every op

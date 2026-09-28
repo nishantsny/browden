@@ -23,6 +23,31 @@ from ...dependencies.selenium import (
 from ..interface import TabNotFoundError, WebNavigatorBackend
 from ..utils.network_utils import get_free_port
 
+# The URL the gates judge the focused document by. Normally that's its own
+# ``document.URL``. A frame whose document was written by its parent rather than
+# loaded (``about:srcdoc``, or an ``about:blank`` frame filled in by script) has
+# no URL of its own; it inherits the origin of the document that wrote it, so it
+# is judged by that document's URL, walking up while the parent is also such a
+# frame. The walk reads ``parent.document``, which the browser allows only when
+# the two are same-origin; if it throws (a sandboxed frame with an opaque origin,
+# or a blank frame another origin wrote), the frame keeps its own ``about:`` URL,
+# which the gates refuse. A top-level ``about:blank`` tab has no parent and is
+# reported as itself.
+_EFFECTIVE_DOCUMENT_URL_JS = """
+const inherited = (u) => /^about:(blank|srcdoc)([?#]|$)/.test(u);
+let w = window;
+let url = document.URL;
+while (inherited(url) && w !== w.parent) {
+  try {
+    w = w.parent;
+    url = w.document.URL;
+  } catch (e) {
+    return document.URL;
+  }
+}
+return url;
+"""
+
 # W3C `key` value -> the Selenium `Keys` constant that dispatches it. Covers
 # exactly the control keys the press-key gate authorizes (validator.ACTIVATION_KEYS);
 # a key that reaches here outside this map is a caller/gate mismatch and raises.
@@ -563,8 +588,8 @@ class SeleniumChromeBackend(WebNavigatorBackend):
     def enter_frame(self, css_selector: str) -> dict:
         """Switch the focused tab into the iframe at ``css_selector`` and record it.
 
-        Returns the frame's actual ``document.URL`` (so the caller can gate the
-        *landed* document) and the tab's top-level URL (for the same-origin check).
+        Returns the landed frame's URL, the same one ``document_url`` reports (so
+        the caller can gate the *landed* document), and the tab's top-level URL (for the same-origin check).
         The selector is pushed onto this tab's frame path so the focus survives the
         window-refocus every later op performs (see ``_replay_frames``).
         """
@@ -576,7 +601,7 @@ class SeleniumChromeBackend(WebNavigatorBackend):
         top_url = drv.current_url  # top-level context URL — unchanged by the switch below
         drv.switch_to.frame(el)
         self._frame_paths.setdefault(self._focused, []).append(css_selector)
-        return {"frame_url": drv.execute_script("return document.URL"), "top_url": top_url}
+        return {"frame_url": drv.execute_script(_EFFECTIVE_DOCUMENT_URL_JS), "top_url": top_url}
 
     def switch_to_parent_frame(self) -> dict:
         """Move the focused tab up one frame level (toward the top document).
@@ -590,7 +615,7 @@ class SeleniumChromeBackend(WebNavigatorBackend):
         path = self._frame_paths.get(self._focused)
         if path:
             path.pop()
-        return {"frame_url": drv.execute_script("return document.URL"), "top_url": drv.current_url}
+        return {"frame_url": drv.execute_script(_EFFECTIVE_DOCUMENT_URL_JS), "top_url": drv.current_url}
 
     def switch_to_default_content(self) -> dict:
         """Return the focused tab to its top document, forgetting the frame path.
@@ -601,7 +626,7 @@ class SeleniumChromeBackend(WebNavigatorBackend):
         drv = self._drv()
         drv.switch_to.default_content()
         self._frame_paths[self._focused] = []
-        return {"frame_url": drv.execute_script("return document.URL"), "top_url": drv.current_url}
+        return {"frame_url": drv.execute_script(_EFFECTIVE_DOCUMENT_URL_JS), "top_url": drv.current_url}
 
     def current_url(self) -> str:
         try:
@@ -616,7 +641,9 @@ class SeleniumChromeBackend(WebNavigatorBackend):
         address bar shows — this reflects whichever document the driver is currently
         focused on. So once focus is inside an iframe, the read/write gates see the
         frame's own URL rather than the top page's; when focus is at the top the two
-        are identical.
+        are identical. A frame the parent wrote (``about:srcdoc`` / a scripted
+        ``about:blank``) is reported by the URL of the same-origin document that
+        wrote it (see ``_EFFECTIVE_DOCUMENT_URL_JS``).
 
         Falls back to ``current_url`` when script can't run in the focused document
         (e.g. a ``chrome://`` internal page disallows ``execute_script``) — those URLs
@@ -624,7 +651,7 @@ class SeleniumChromeBackend(WebNavigatorBackend):
         """
         drv = self._drv()
         try:
-            return drv.execute_script("return document.URL")
+            return drv.execute_script(_EFFECTIVE_DOCUMENT_URL_JS)
         except NoSuchWindowException:
             raise TabNotFoundError("there is no active tab") from None
         except Exception:
