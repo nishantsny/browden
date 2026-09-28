@@ -6,6 +6,7 @@ import time
 import urllib.error
 import urllib.request
 from pathlib import Path
+from urllib.parse import urljoin
 
 from ...common.logger import logger
 from ...common.tab import TabInfo
@@ -21,6 +22,31 @@ from ...dependencies.selenium import (
 )
 from ..interface import TabNotFoundError, WebNavigatorBackend
 from ..utils.network_utils import get_free_port
+
+# The URL the gates judge the focused document by. Normally that's its own
+# ``document.URL``. A frame whose document was written by its parent rather than
+# loaded (``about:srcdoc``, or an ``about:blank`` frame filled in by script) has
+# no URL of its own; it inherits the origin of the document that wrote it, so it
+# is judged by that document's URL, walking up while the parent is also such a
+# frame. The walk reads ``parent.document``, which the browser allows only when
+# the two are same-origin; if it throws (a sandboxed frame with an opaque origin,
+# or a blank frame another origin wrote), the frame keeps its own ``about:`` URL,
+# which the gates refuse. A top-level ``about:blank`` tab has no parent and is
+# reported as itself.
+_EFFECTIVE_DOCUMENT_URL_JS = """
+const inherited = (u) => /^about:(blank|srcdoc)([?#]|$)/.test(u);
+let w = window;
+let url = document.URL;
+while (inherited(url) && w !== w.parent) {
+  try {
+    w = w.parent;
+    url = w.document.URL;
+  } catch (e) {
+    return document.URL;
+  }
+}
+return url;
+"""
 
 # W3C `key` value -> the Selenium `Keys` constant that dispatches it. Covers
 # exactly the control keys the press-key gate authorizes (validator.ACTIVATION_KEYS);
@@ -320,6 +346,14 @@ class SeleniumChromeBackend(WebNavigatorBackend):
         self._driver = None
         self._chrome_proc = None
         self._profile_dir = Path(profile_dir).expanduser()
+        # Per-tab iframe focus. handle -> ordered list of iframe CSS selectors
+        # (the path from the top document to the currently-focused frame). Empty /
+        # absent means the tab is focused on its top document. switch_to.window
+        # (select_tab) resets Chrome's frame context to top on every focus, so this
+        # path is REPLAYED after each focus (_replay_frames) to keep a tab "inside"
+        # its frame across the window-focus that nearly every op performs.
+        self._frame_paths: dict[str, list[str]] = {}
+        self._focused: str | None = None  # the handle select_tab last focused
 
     def get_profile_dir(self) -> Path:
         return self._profile_dir
@@ -461,6 +495,7 @@ class SeleniumChromeBackend(WebNavigatorBackend):
             raise ValueError("Cannot close the last tab")
         _switch(drv, handle)
         drv.close()
+        self._frame_paths.pop(handle, None)  # forget the closed tab's frame focus
         # drv.close() leaves the driver focused on the now-dead handle. The next
         # command — or _drv()'s health check, which reads current_window_handle —
         # would then mistake the session for dead and relaunch the whole browser,
@@ -472,9 +507,41 @@ class SeleniumChromeBackend(WebNavigatorBackend):
 
     def select_tab(self, handle: str) -> None:
         _switch(self._drv(), handle)
+        # switch_to.window just reset the frame context to this window's top
+        # document; restore whatever frame this tab was focused into.
+        self._focused = handle
+        self._replay_frames(handle)
+
+    def _replay_frames(self, handle: str) -> None:
+        """Re-enter the frame path recorded for ``handle`` after a window focus.
+
+        ``switch_to.window`` (in ``select_tab``) always lands on the top document,
+        so a tab that the agent switched into an iframe must be walked back down its
+        recorded selector path before any DOM op runs — otherwise the soup cache
+        would read the *top* page's ``page_source`` and the agent would silently
+        lose the frame. If any hop no longer resolves to exactly one frame (the page
+        changed under us), we forget the path and stay at the top document rather
+        than act in the wrong context.
+        """
+        path = self._frame_paths.get(handle)
+        if not path:
+            return
+        drv = self._drv()
+        drv.switch_to.default_content()
+        try:
+            for selector in path:
+                matches = drv.find_elements(By.CSS_SELECTOR, selector)
+                if len(matches) != 1:
+                    raise NoSuchElementException(f"frame path hop {selector!r} no longer resolves")
+                drv.switch_to.frame(matches[0])
+        except Exception as e:
+            logger.info(f"Frame path for tab {handle} no longer valid ({e}); reset to top document")
+            drv.switch_to.default_content()
+            self._frame_paths[handle] = []
 
     def navigate(self, url: str) -> TabInfo:
         drv = self._drv()
+        self._reset_frames(drv)  # a new top document — drop any recorded frame focus
         try:
             drv.get(url)
         except NoSuchWindowException:
@@ -489,9 +556,77 @@ class SeleniumChromeBackend(WebNavigatorBackend):
 
     def reload(self) -> TabInfo:
         drv = self._drv()
+        self._reset_frames(drv)  # a reload re-fetches the top document — frame focus is gone
         drv.refresh()
         _wait_for_title(drv)
         return self._tabinfo(drv, selected=True)
+
+    def _reset_frames(self, drv) -> None:
+        """Drop the focused tab's frame path and return the driver to the top document."""
+        if self._focused is not None:
+            self._frame_paths[self._focused] = []
+        drv.switch_to.default_content()
+
+    # -- frame navigation ---------------------------------------------------
+
+    def get_frame_src(self, css_selector: str) -> dict:
+        """Resolve the single visible iframe at ``css_selector``; return its absolute src.
+
+        Runs WITHOUT switching, so the caller can gate the frame's *declared* target
+        before entering it. ``src`` is ``None`` for a src-less frame (e.g. one using
+        ``srcdoc``). Reuses the click/insert integrity check, and additionally
+        refuses a selector that resolves to a non-frame element.
+        """
+        drv = self._drv()
+        el = self._resolve_one_visible(drv, css_selector)
+        tag = (el.tag_name or "").lower()
+        if tag not in ("iframe", "frame"):
+            raise ValueError(f"{css_selector!r} is a <{tag}>, not an iframe/frame")
+        src = el.get_attribute("src") or ""
+        return {"src": urljoin(drv.current_url, src) if src else None}
+
+    def enter_frame(self, css_selector: str) -> dict:
+        """Switch the focused tab into the iframe at ``css_selector`` and record it.
+
+        Returns the landed frame's URL, the same one ``document_url`` reports (so
+        the caller can gate the *landed* document), and the tab's top-level URL (for the same-origin check).
+        The selector is pushed onto this tab's frame path so the focus survives the
+        window-refocus every later op performs (see ``_replay_frames``).
+        """
+        drv = self._drv()
+        el = self._resolve_one_visible(drv, css_selector)
+        tag = (el.tag_name or "").lower()
+        if tag not in ("iframe", "frame"):
+            raise ValueError(f"{css_selector!r} is a <{tag}>, not an iframe/frame")
+        top_url = drv.current_url  # top-level context URL — unchanged by the switch below
+        drv.switch_to.frame(el)
+        self._frame_paths.setdefault(self._focused, []).append(css_selector)
+        return {"frame_url": drv.execute_script(_EFFECTIVE_DOCUMENT_URL_JS), "top_url": top_url}
+
+    def switch_to_parent_frame(self) -> dict:
+        """Move the focused tab up one frame level (toward the top document).
+
+        Returns the landed frame's ``document.URL`` and the tab's top-level URL so
+        the caller can re-gate the ancestor — it may have been navigated to an
+        untrusted page since we descended.
+        """
+        drv = self._drv()
+        drv.switch_to.parent_frame()
+        path = self._frame_paths.get(self._focused)
+        if path:
+            path.pop()
+        return {"frame_url": drv.execute_script(_EFFECTIVE_DOCUMENT_URL_JS), "top_url": drv.current_url}
+
+    def switch_to_default_content(self) -> dict:
+        """Return the focused tab to its top document, forgetting the frame path.
+
+        Returns the top document's ``document.URL`` (== ``top_url``) so the caller
+        can re-gate it — another process may have moved the top page meanwhile.
+        """
+        drv = self._drv()
+        drv.switch_to.default_content()
+        self._frame_paths[self._focused] = []
+        return {"frame_url": drv.execute_script(_EFFECTIVE_DOCUMENT_URL_JS), "top_url": drv.current_url}
 
     def current_url(self) -> str:
         try:
@@ -506,7 +641,9 @@ class SeleniumChromeBackend(WebNavigatorBackend):
         address bar shows — this reflects whichever document the driver is currently
         focused on. So once focus is inside an iframe, the read/write gates see the
         frame's own URL rather than the top page's; when focus is at the top the two
-        are identical.
+        are identical. A frame the parent wrote (``about:srcdoc`` / a scripted
+        ``about:blank``) is reported by the URL of the same-origin document that
+        wrote it (see ``_EFFECTIVE_DOCUMENT_URL_JS``).
 
         Falls back to ``current_url`` when script can't run in the focused document
         (e.g. a ``chrome://`` internal page disallows ``execute_script``) — those URLs
@@ -514,7 +651,7 @@ class SeleniumChromeBackend(WebNavigatorBackend):
         """
         drv = self._drv()
         try:
-            return drv.execute_script("return document.URL")
+            return drv.execute_script(_EFFECTIVE_DOCUMENT_URL_JS)
         except NoSuchWindowException:
             raise TabNotFoundError("there is no active tab") from None
         except Exception:

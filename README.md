@@ -136,8 +136,15 @@ verbatim; it is globally unique and routes itself to the right profile (multiple
 | `screenshot` | PNG of the tab's current viewport |
 | `invalidate_dom_cache` | Drop a tab's cached DOM so the next read re-fetches the live HTML (no page load — JS-built state survives) |
 | `force_reload_tab` | Reload a tab and refresh its cached DOM |
+| `switch_to_frame` | Focus a tab on the `<iframe>` matched by a CSS selector, so the DOM-read tools and `screenshot` see the frame's contents instead of the top page. **Same-origin frames only**: the frame's `src` must be readable before the switch, and the landed document must be readable **and** same-origin with the top page after it, or the tab goes back to its top document. A frame the page wrote itself (`srcdoc`, or an `about:blank` frame filled in by script) is judged by the page that wrote it. |
+| `switch_to_parent_frame` | Move a tab's focus up one frame level. The landed frame is checked again (readable and same-origin), since it may have navigated while focus was deeper; if it fails, the tab goes back to its top document. |
+| `switch_to_default_content` | Return a tab's focus to its top document, checking that the top page is still readable. |
 | `click` | **A write action, off by default** — click a control on a host listed in the `click` allowlist; each host declares a **required** `label` regex the control's visible text must fully match (`.*` to allow any). No host is listed out of the box. |
 | `insert_text` | **A write action, off by default** — type text into a single visible, non-readonly text field (`<textarea>`, a text `<input>`, or a `contenteditable`) on a host listed in the separate `write-text` allowlist section; the field's visible label (placeholder / aria-label / associated `<label>`) must fully match that host's **required** `label` regex. |
+
+Frame focus sticks to the tab until you move it or the tab navigates or
+reloads. While a tab is inside a frame, every read and write tool is judged by
+the frame's own URL, not the top page's.
 
 ## Profiles
 

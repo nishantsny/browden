@@ -30,6 +30,7 @@ from .validator import (
     check_action_host,
     ensure_url_allowed,
     tab_gone_envelope,
+    validate_and_ensure_same_origin,
     validate_click_target,
     validate_press_key_target,
     validate_url,
@@ -443,6 +444,115 @@ async def press_key(css_selector: str, key: str, id: str) -> dict:
 
     result = await session.press_key(css_selector, key, id=id)
     logger.info("Tool finished: press_key")
+    return result
+
+
+# -- frame navigation tools -------------------------------------------------
+#
+# The DOM-read tools observe only the *focused* document. These move a tab's
+# frame focus so those tools can inspect an iframe's contents; the focus persists
+# (browden replays it across the window-refocus every op performs) until moved
+# back or reset by a navigate/reload.
+
+@mcp.tool()
+@_tool
+async def switch_to_frame(css_selector: str, id: str) -> dict:
+    """Switch a tab's focus INTO the iframe matched by css_selector (same-origin only).
+
+    browden's DOM-read tools (query_selector, get_element_by_id, screenshot, …) see
+    only the focused document, so an iframe's contents are invisible until you focus
+    it here. After this succeeds those tools observe the frame; call
+    ``switch_to_default_content`` (or ``switch_to_parent_frame``) to leave. A
+    navigate/reload also resets the focus to the top document.
+
+    Gates, all default-deny: the tab's top URL must be on the read allowlist; the
+    iframe's declared ``src`` is checked *before* switching; and *after* switching
+    the frame's actual ``document.URL`` must be read-allowed AND same-origin with the
+    top page — cross-origin frames are refused. On any failure the driver is returned
+    to the top document and nothing inside the frame is inspected.
+    """
+    logger.info(f"Tool called: switch_to_frame (css_selector={css_selector!r}, id={id!r})")
+    session = _store.route(id)
+
+    # The tab's profile decides the rules; every gate below uses this one set.
+    access_rules = _access_rules_for(session)
+
+    # The focused document must itself be readable before we descend into a frame.
+    here = await session.document_url(id=id)
+    if here is None:
+        return tab_gone_envelope(id)
+    if not ensure_url_allowed(access_rules, here):
+        raise ValidationError(f"URL not on the read allowlist: {here}")
+
+    # Pre-switch gate: refuse to even enter a frame whose DECLARED src is disallowed
+    # (defense-in-depth; src may be None for a srcdoc frame — then rely on the post gate).
+    pre = await session.frame_src(css_selector, id=id)
+    if "error" in pre:
+        return pre
+    src = pre.get("src")
+    if src:
+        validate_url(src, access_rules.read_policy)  # raises → never switch
+
+    # Switch in, then gate the ACTUAL landed document (authoritative) + same-origin.
+    entered = await session.enter_frame(css_selector, id=id)
+    if "error" in entered:
+        return entered
+    try:
+        validate_and_ensure_same_origin(entered["top_url"], entered["frame_url"], access_rules.read_policy)
+    except ValidationError:
+        await session.switch_to_default_content(id=id)  # back out; take no action inside
+        raise
+    logger.info("Tool finished: switch_to_frame")
+    return entered
+
+
+@mcp.tool()
+@_tool
+async def switch_to_parent_frame(id: str) -> dict:
+    """Switch a tab's focus up one frame level, toward the top document.
+
+    Re-gated like every other tool call, not just on entry: an ancestor frame may
+    have been navigated to an untrusted page by another process while we were deeper
+    in the tree, so the landed document must be read-allowed AND same-origin with the
+    top page. On refusal the driver retreats to the top document and the call raises.
+    """
+    logger.info(f"Tool called: switch_to_parent_frame (id={id!r})")
+    session = _store.route(id)
+    access_rules = _access_rules_for(session)
+    result = await session.switch_to_parent_frame(id=id)
+    if "error" in result:
+        return result
+    try:
+        validate_and_ensure_same_origin(result["top_url"], result["frame_url"],
+                                        access_rules.read_policy)
+    except ValidationError:
+        await session.switch_to_default_content(id=id)  # retreat to the top document
+        raise
+    logger.info("Tool finished: switch_to_parent_frame")
+    return result
+
+
+@mcp.tool()
+@_tool
+async def switch_to_default_content(id: str) -> dict:
+    """Switch a tab's focus back to its top-level document, exiting all iframes.
+
+    Re-gated like every other tool call: another process may have moved the top page
+    to an untrusted URL since we descended, so the landed top document is re-checked
+    against the read allowlist. On refusal the call raises — the driver is already at
+    the top document (there is nowhere safer to retreat to), and the read tools
+    likewise refuse to read it.
+    """
+    logger.info(f"Tool called: switch_to_default_content (id={id!r})")
+    session = _store.route(id)
+    access_rules = _access_rules_for(session)
+    result = await session.switch_to_default_content(id=id)
+    if "error" in result:
+        return result
+    # frame_url == top_url here (the top document); this reduces to a read-allowed check.
+    validate_and_ensure_same_origin(result["top_url"], result["frame_url"],
+                                    access_rules.read_policy)
+    logger.info("Tool finished: switch_to_default_content")
     return result
 
 

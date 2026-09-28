@@ -42,6 +42,13 @@ All notable changes to browden are documented here. The format follows
   `allow_all`: additive rules, the unioned denylist, inherited `read` settings,
   canonical keys, `infra` staying global, and what `allow_all` keeps (the
   Tranco net and the scheme gate) (#145).
+- **iframe inspection (#117).** New `switch_to_frame`, `switch_to_parent_frame`
+  and `switch_to_default_content` tools focus a tab on an `<iframe>`, so the
+  existing DOM-read tools (`query_selector`, `get_element_by_id`, `screenshot`,
+  …) can inspect its contents, which were previously invisible (the tools only
+  ever saw the top document). The frame focus is replayed across the
+  window-refocus that nearly every op performs, and reset on `navigate` /
+  reload (#118).
 
 ### Changed
 - **Unknown top-level config sections are refused.** A section that is not
@@ -99,6 +106,25 @@ All notable changes to browden are documented here. The format follows
   and kept with the logs after a red one until the next run sweeps it. Setting
   `BROWDEN_E2E_VENV` still gives a persistent venv, which the script never
   removes.
+
+### Security
+- **`switch_to_frame` is same-origin only and gates the frame as its own
+  document.** The iframe's declared `src` is checked against the read allowlist
+  *before* switching, and the frame's actual `document.URL` must be read-allowed
+  **and** same-origin with the top page *after* switching. Cross-origin frames
+  are refused: the click/write host gate keys off the tab's top URL, so it can't
+  govern a different-origin document (a frame-aware write gate is deferred). On
+  any failure the driver returns to the top document and nothing is inspected.
+  `switch_to_parent_frame` / `switch_to_default_content` **re-verify the
+  landed document on every call**, not just on entry: another process may have
+  navigated an ancestor (or the top page) to an untrusted URL while we were
+  deeper in the tree, so the document returned to is re-gated (read-allowed +
+  same-origin); on refusal the driver retreats to the top document and the call
+  raises. Every frame tool judges against the tab's own profile's rules. A
+  frame the page wrote itself (`srcdoc`, or an `about:blank` frame filled in by
+  script) has no URL of its own and is judged by the URL of the same-origin page
+  that wrote it; one the browser keeps from reading that page (a sandboxed
+  frame's opaque origin) keeps its `about:` URL and is refused (#118).
 
 ## [1.2.1] — 2026-07-29
 
