@@ -2,7 +2,7 @@ import pytest
 
 from browden.mcp.validator import (
     BrowdenAccessRuleSet,
-    Allowlist,
+    HostRuleMatcher,
     ReadPolicy,
     ValidationError,
     ensure_url_allowed,
@@ -11,9 +11,9 @@ from browden.mcp.validator import (
 
 
 @pytest.fixture
-def amazon_only() -> Allowlist:
+def amazon_only() -> HostRuleMatcher:
     """Restrictive allowlist matching the original production policy."""
-    return Allowlist.create_allowlist(
+    return HostRuleMatcher.create_allowlist(
         {
             "amazon.com": [
                 "^/$",
@@ -26,8 +26,8 @@ def amazon_only() -> Allowlist:
 
 
 @pytest.fixture
-def wildcard() -> Allowlist:
-    return Allowlist.create_allowlist({"*": [".*"]})
+def wildcard() -> HostRuleMatcher:
+    return HostRuleMatcher.create_allowlist({"*": [".*"]})
 
 
 def test_bare_domain_normalized(amazon_only):
@@ -98,12 +98,12 @@ def test_wildcard_host_allows_unknown(wildcard):
 
 
 def test_wildcard_host_only_used_when_specific_host_absent():
-    al = Allowlist.create_allowlist({"amazon.com": ["^/$"], "*": [".*"]})
+    matcher = HostRuleMatcher.create_allowlist({"amazon.com": ["^/$"], "*": [".*"]})
     # Specific host has its own (narrow) rules — fallback NOT used.
     with pytest.raises(ValidationError):
-        validate_url("https://amazon.com/orders", al)
+        validate_url("https://amazon.com/orders", matcher)
     # Unknown host falls through to wildcard.
-    assert validate_url("https://other.example.com/anything", al) == "https://other.example.com/anything"
+    assert validate_url("https://other.example.com/anything", matcher) == "https://other.example.com/anything"
 
 
 def test_validate_url_passes_browser_internal_tabs_through(amazon_only):

@@ -102,7 +102,7 @@ class PageRule:
                      *, full_match: bool) -> bool:
         """True if this rule governs ``(path, query, fragment)``.
 
-        ``full_match`` mirrors :class:`Allowlist`: an allow rule fullmatches (so
+        ``full_match`` mirrors :class:`HostRuleMatcher`: an allow rule fullmatches (so
         ``^/products`` does not also admit ``/products-secret-admin``); a deny
         rule prefix-matches (so ``^/checkout`` still blocks ``/checkout/pay``).
         """
@@ -190,7 +190,7 @@ def _coerce_section(rules: object, *, want_label: bool, where: str) -> "dict[str
 def _as_page_rules(page_rules: object) -> list[PageRule]:
     """Accept either a ready ``[PageRule]`` or the legacy ``[path regex]`` list.
 
-    Direct :class:`Allowlist` construction (and its tests) still pass a bare list
+    Direct :class:`HostRuleMatcher` construction (and its tests) still pass a bare list
     of path-regex strings; wrap that into a single ``match_on: path`` rule so the
     class has one internal representation. A list already holding PageRules (the
     runtime-configuration path, via :func:`_coerce_page_rules`) passes through.
@@ -201,8 +201,10 @@ def _as_page_rules(page_rules: object) -> list[PageRule]:
     return rs
 
 
-class Allowlist:
-    """Per-host page-rule allowlist. Use host key '*' for a wildcard fallback."""
+class HostRuleMatcher:
+    """Matches a (host, page) against per-host page rules — the engine behind the
+    denylist, the read overrides and each write action. Use host key '*' for a
+    wildcard fallback."""
 
     def __init__(self, rules: "dict[str, list[PageRule]]", *, full_match: bool):
         # full_match decides how a page regex is applied. An *allow* list
@@ -221,14 +223,14 @@ class Allowlist:
         }
 
     @classmethod
-    def create_allowlist(cls, rules: "dict[str, list[PageRule]]") -> "Allowlist":
+    def create_allowlist(cls, rules: "dict[str, list[PageRule]]") -> "HostRuleMatcher":
         """An ALLOW list: each page regex must fullmatch the whole target, so
         ``^/products`` does not also admit ``/products-secret-admin`` (spell a
         prefix rule as ``^/products/.*``)."""
         return cls(rules, full_match=True)
 
     @classmethod
-    def create_denylist(cls, rules: "dict[str, list[PageRule]]") -> "Allowlist":
+    def create_denylist(cls, rules: "dict[str, list[PageRule]]") -> "HostRuleMatcher":
         """A DENY list: each page regex prefix-matches (start-anchored) so it
         blocks broadly — ``^/checkout`` still denies ``/checkout/pay``."""
         return cls(rules, full_match=False)
@@ -288,7 +290,7 @@ class ReadPolicy:
     """
 
     def __init__(self, *, enabled: bool, tranco: PopularityAllowlist | None,
-                 overrides: Allowlist, denylist: Allowlist, allow_all: bool = False):
+                 overrides: HostRuleMatcher, denylist: HostRuleMatcher, allow_all: bool = False):
         self._enabled = enabled
         self._tranco = tranco
         self._overrides = overrides

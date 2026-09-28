@@ -82,6 +82,11 @@ All notable changes to browden are documented here. The format follows
   lifted into `_check_section` (with `_check_infra` / `_check_write_action`),
   which is also where an unknown section is refused. No config behaves
   differently; groundwork for profile-scoped rules (#139) (#142).
+- **`Allowlist` renamed to `HostRuleMatcher` (internal).** The class that matches
+  a (host, page) against per-host page rules backs the denylist and the read
+  overrides as well as the write actions, so "allowlist" misdescribed it. Its
+  factories (`create_allowlist` / `create_denylist`), module and behavior are
+  unchanged (#154).
 - **Schema test for a mistyped section inside a profile (internal).** Pins that
   `profiles: {<dir>: {clik: ...}}` fails the load with
   `profiles.<dir>: unknown section 'clik'`, as a top-level typo does (#153).

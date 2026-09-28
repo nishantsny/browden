@@ -8,7 +8,7 @@ process-wide — the ``infra`` caps live on
 import re
 from pathlib import Path
 
-from .allowlist import WRITE_ACTIONS, Allowlist, PageRule, ReadPolicy, _coerce_section
+from .allowlist import WRITE_ACTIONS, HostRuleMatcher, PageRule, ReadPolicy, _coerce_section
 from .intent import ACTIVATION_KEYS
 from .popularity import PopularityAllowlist
 from .tranco import DEFAULT_TOP_N, canonical_host
@@ -25,7 +25,7 @@ def _merge_host_rules(base: "dict[str, list[PageRule]]",
     """Union two coerced ``host -> [PageRule]`` maps; a host in both keeps both.
 
     Rules are additive by construction (a host is allowed if ANY of its rules
-    matches — see :meth:`Allowlist.is_allowed`), so a union is exactly "the
+    matches — see :meth:`HostRuleMatcher.is_allowed`), so a union is exactly "the
     profile's rules on top of the global floor". Host keys are canonicalized
     here, before the union, or ``amazon.com`` in one map and ``www.amazon.com``
     in the other would look like two hosts and one of them would be dropped when
@@ -196,8 +196,8 @@ class BrowdenAccessRuleSet:
         self._override_rules = override_rules
         self._action_rules = action_rules
 
-        # A denylist blocks broadly: prefix match, not fullmatch (see Allowlist).
-        self._denylist = Allowlist.create_denylist(deny_rules)
+        # A denylist blocks broadly: prefix match, not fullmatch (see HostRuleMatcher).
+        self._denylist = HostRuleMatcher.create_denylist(deny_rules)
         self._read_policy = self._build_read_policy(
             read_cfg, override_rules, self._denylist, tranco_path, allow_all=allow_all)
         # action -> canonical host -> ordered page rules (label + field_ids).
@@ -206,13 +206,13 @@ class BrowdenAccessRuleSet:
             for action, host_rules in action_rules.items()}
         # section() keeps a page-admission view (labels ignored) for callers
         # that only ask "may this action touch this host+page at all".
-        self._sections: dict[str, Allowlist] = {
-            action: Allowlist.create_allowlist(host_rules)
+        self._sections: dict[str, HostRuleMatcher] = {
+            action: HostRuleMatcher.create_allowlist(host_rules)
             for action, host_rules in action_rules.items()}
 
     @staticmethod
     def _build_read_policy(read_cfg: dict, override_rules: "dict[str, list[PageRule]]",
-                           denylist: Allowlist, tranco_path: Path | None,
+                           denylist: HostRuleMatcher, tranco_path: Path | None,
                            *, allow_all: bool = False) -> ReadPolicy:
         """Assemble the ReadPolicy from the ``read`` block (fail-closed if absent).
 
@@ -237,7 +237,7 @@ class BrowdenAccessRuleSet:
             snapshot = tranco_path if (tranco_path and tranco_path.exists()) else None
             tranco = PopularityAllowlist(tranco_top_n=int(tranco_cfg.get("top_n", DEFAULT_TOP_N)), path=snapshot)
         return ReadPolicy(enabled=enabled, tranco=tranco,
-                          overrides=Allowlist.create_allowlist(override_rules),
+                          overrides=HostRuleMatcher.create_allowlist(override_rules),
                           denylist=denylist, allow_all=allow_all)
 
     @property
@@ -246,7 +246,7 @@ class BrowdenAccessRuleSet:
         return self._read_policy
 
     @property
-    def denylist(self) -> Allowlist:
+    def denylist(self) -> HostRuleMatcher:
         """The always-deny list, so write actions can veto denied hosts too."""
         return self._denylist
 
@@ -254,12 +254,12 @@ class BrowdenAccessRuleSet:
         """True if ``(host, path)`` is on the denylist (refused for every action)."""
         return self._denylist.is_allowed(host, path)
 
-    def section(self, action: str) -> Allowlist:
+    def section(self, action: str) -> HostRuleMatcher:
         """Return the host/page-admission allowlist for ``action`` (labels ignored);
         an empty (deny-all) one if unlisted. Under ``allow_all``, every host."""
         if self._allow_all:
-            return Allowlist.create_allowlist({"*": [_ANY_PAGE_ANY_CONTROL]})
-        return self._sections.get(action) or Allowlist.create_allowlist({})
+            return HostRuleMatcher.create_allowlist({"*": [_ANY_PAGE_ANY_CONTROL]})
+        return self._sections.get(action) or HostRuleMatcher.create_allowlist({})
 
     def rules_for(self, action: str, host: str, path: str,
                   query: str = "", fragment: str = "") -> list[PageRule]:

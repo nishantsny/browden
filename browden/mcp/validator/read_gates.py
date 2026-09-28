@@ -11,7 +11,7 @@ admitted (special-cased in :func:`validate_url`).
 from urllib.parse import urlparse, urlunparse
 
 from ...common.logger import logger
-from .allowlist import Allowlist, ReadPolicy
+from .allowlist import HostRuleMatcher, ReadPolicy
 from .access_rule_set import BrowdenAccessRuleSet
 from .errors import ValidationError
 
@@ -26,7 +26,7 @@ _ALWAYS_ALLOWED = frozenset({
 })
 
 
-def validate_url(url: str, gate: "Allowlist | ReadPolicy") -> str:
+def validate_url(url: str, gate: "HostRuleMatcher | ReadPolicy") -> str:
     """Normalize and gate a navigate/write-target URL against ``gate``.
 
     A not-yet-navigated tab's URL (``about:blank`` or the browser new-tab page,
@@ -41,13 +41,13 @@ def validate_url(url: str, gate: "Allowlist | ReadPolicy") -> str:
     ``localhost: [".*"]`` re-enables ``http://localhost`` and ``"": ["^/x/.*"]``
     re-enables ``file://`` paths, while a blanket ``"*": [".*"]`` does not silently
     re-open non-https everywhere. Gates without that notion (a write-action
-    :class:`Allowlist`) keep their prior scheme-agnostic behavior.
+    :class:`HostRuleMatcher`) keep their prior scheme-agnostic behavior.
 
     Otherwise: prepends ``https://`` to a bare host, requires a host (a navigate/
     write target must resolve to one — except ``file://``, which is authority-less
     and gated on its path), then requires ``gate`` (anything with
     ``is_allowed(host, path)`` — the read :class:`ReadPolicy` or a write-action
-    :class:`Allowlist` section) to admit it. Raises :class:`ValidationError` on a
+    :class:`HostRuleMatcher` section) to admit it. Raises :class:`ValidationError` on a
     disallowed scheme, a missing host, or a blocked ``(host, path)``; returns the
     normalized URL when allowed — query strings and fragments pass through
     unchanged, so '?', '#', '&' and spaces survive.
@@ -62,7 +62,7 @@ def validate_url(url: str, gate: "Allowlist | ReadPolicy") -> str:
     # Scheme gate: only the read policy carries scheme intent (it exposes
     # override_has_host). A non-https scheme is admitted only for a host the
     # operator explicitly overrode, so a blanket "*": [".*"] does not silently
-    # re-open file:// or plaintext http everywhere. A write-action Allowlist has
+    # re-open file:// or plaintext http everywhere. A write-action HostRuleMatcher has
     # no such method and keeps its scheme-agnostic behavior.
     override_has_host = getattr(gate, "override_has_host", None)
     if override_has_host is not None and scheme != "https" and not override_has_host(host):
