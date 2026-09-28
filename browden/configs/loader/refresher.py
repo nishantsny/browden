@@ -13,7 +13,11 @@ validator functions. A reload never mutates in place — it builds a fresh
 configuration off to the side and rebinds ``self._runtime_configuration``, a
 single GIL-atomic attribute store.
 No reader observes a torn policy; a call already in flight simply finishes
-against the reference it read, so the swap needs no lock. Because the poller
+against the reference it read, so the swap needs no lock. That holds only
+because every tool reads the configuration **once per request** and decides the
+whole request against that one reference — a tool that read it twice, with an
+``await`` in between, could be judged half by the old rules and half by the new
+(see docs/design/write-gate-atomicity.md). Because the poller
 runs as an ``asyncio`` task on the *same* event loop as the tools, the rebind
 can't even interleave with a tool mid-statement.
 """

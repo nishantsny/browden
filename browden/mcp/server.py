@@ -25,15 +25,15 @@ from .session_management.browser_session_store import BrowserSessionStore, Unkno
 from .validator import (
     BrowdenAccessRuleSet,
     BrowdenRuntimeConfiguration,
+    ReadPolicy,
     SessionBusyError,
     ValidationError,
-    check_action_host,
+    click_gate,
     ensure_url_allowed,
+    press_key_gate,
     tab_gone_envelope,
-    validate_click_target,
-    validate_press_key_target,
     validate_url,
-    validate_write_text_target,
+    write_text_gate,
 )
 
 DEFAULT_HOST = "127.0.0.1"
@@ -261,18 +261,19 @@ async def select_tab(id: str) -> dict:
     return result
 
 
-async def _guard_landing(session, id: str, result: dict) -> dict:
+async def _guard_landing(session, id: str, result: dict, read_policy: ReadPolicy) -> dict:
     """Re-check where a navigation/reload actually came to rest.
 
     ``validate_url`` only gates the *input* URL, but ``drv.get``/``refresh``
     follow 3xx / meta / JS redirects to any final URL — an open redirect on an
     allowlisted site, or a server-side 302, can land the tab on an unchecked
     host. Re-gate the landing (``result["url"]``) with the *same* ``validate_url``
-    the navigate input passed through, so it is judged by exactly the same policy
-    on the way out as on the way in. A landing that fails — an off-allowlist host
-    or a scheme the policy doesn't admit (``chrome://`` / ``data:`` / ``blob:`` /
-    …) — bounces the tab to ``about:blank`` and returns an error envelope rather
-    than leaving it silently parked off-list.
+    the navigate input passed through, and the *same* ``read_policy`` object the
+    caller gated the way in with, so a hot reload between the two can't judge the
+    landing by different rules than the request. A landing that fails — an
+    off-allowlist host or a scheme the policy doesn't admit (``chrome://`` /
+    ``data:`` / ``blob:`` / …) — bounces the tab to ``about:blank`` and returns an
+    error envelope rather than leaving it silently parked off-list.
 
     ``about:blank`` needs no special-case here: ``validate_url`` allows it
     explicitly (it is the inert empty state and our own bounce target), so a tab
@@ -282,7 +283,7 @@ async def _guard_landing(session, id: str, result: dict) -> dict:
     if not landed:
         return result  # a tab-gone envelope or similar — nothing navigated
     try:
-        validate_url(landed, _access_rules_for(session).read_policy)
+        validate_url(landed, read_policy)
     except ValidationError:
         logger.warning(f"navigation landed off-allowlist at {landed!r}; bouncing to about:blank")
         await session.navigate("about:blank", id=id)
@@ -298,9 +299,10 @@ async def navigate(url: str, id: str) -> dict:
     """Navigate the named tab to url. Url is gated by the per-host allowlist (query strings and fragments pass through)."""
     logger.info(f"Tool called: navigate (url={url!r}, id={id!r})")
     session = _store.route(id)  # routed first: the profile decides the rules
-    url = validate_url(url, _access_rules_for(session).read_policy)
+    read_policy = _access_rules_for(session).read_policy  # read once for the whole request
+    url = validate_url(url, read_policy)
     result = await session.navigate(url, id=id)  # wire dict (or the tab-gone envelope)
-    result = await _guard_landing(session, id, result)  # re-gate the post-redirect landing
+    result = await _guard_landing(session, id, result, read_policy)  # re-gate the post-redirect landing
     logger.info("Tool finished: navigate")
     return result
 
@@ -335,22 +337,9 @@ async def click(css_selector: str, id: str) -> dict:
     """
     logger.info(f"Tool called: click (css_selector={css_selector!r}, id={id!r})")
     session = _store.route(id)
-
-    # Gate 1: per-action host allowlist (denylist veto + the click section),
-    # checked against the tab's live URL before the element is ever queried.
-    url = await session.document_url(id=id)
-    if url is None:
-        return tab_gone_envelope(id)
-    check_action_host(_access_rules_for(session), "click", url)  # raises if denied / host not allowed
-
-    # Gates 2-3: fetch the element (limit=2 so ambiguity is detectable), then let
-    # the validator judge integrity, anchor target, and the host's required label.
-    found = await session.query_selector_all(css_selector, id=id, limit=2)
-    if "error" in found:
-        return found
-    validate_click_target(_access_rules_for(session), url, css_selector, found)  # raises on any failed gate
-
-    result = await session.click(css_selector, id=id)
+    # The rules are read once; the session runs every gate and the click in one
+    # driver-lock hold (see docs/design/write-gate-atomicity.md).
+    result = await session.click(css_selector, id=id, gate=click_gate(_access_rules_for(session)))
     logger.info("Tool finished: click")
     return result
 
@@ -381,22 +370,10 @@ async def insert_text(css_selector: str, value: str, id: str) -> dict:
     """
     logger.info(f"Tool called: insert_text (css_selector={css_selector!r}, id={id!r})")
     session = _store.route(id)
-
-    # Gate 1: per-action host allowlist ('write-text'; denylist vetoes first),
-    # checked against the tab's live URL before the element is ever queried.
-    url = await session.document_url(id=id)
-    if url is None:
-        return tab_gone_envelope(id)
-    check_action_host(_access_rules_for(session), "write-text", url)  # raises if denied / host not allowed
-
-    # Gates 2-3: fetch the element (limit=2 so ambiguity is detectable), then let
-    # the validator judge integrity and the host's required label / field-id.
-    found = await session.query_selector_all(css_selector, id=id, limit=2)
-    if "error" in found:
-        return found
-    validate_write_text_target(_access_rules_for(session), url, css_selector, found)  # raises on any failed gate
-
-    result = await session.insert_text(css_selector, value, id=id)
+    # The rules are read once; the session runs every gate and the typing in one
+    # driver-lock hold (see docs/design/write-gate-atomicity.md).
+    result = await session.insert_text(css_selector, value, id=id,
+                                       gate=write_text_gate(_access_rules_for(session)))
     logger.info("Tool finished: insert_text")
     return result
 
@@ -426,22 +403,10 @@ async def press_key(css_selector: str, key: str, id: str) -> dict:
     """
     logger.info(f"Tool called: press_key (css_selector={css_selector!r}, key={key!r}, id={id!r})")
     session = _store.route(id)
-
-    # Gate 1: per-action host allowlist ('press-key'; denylist vetoes first),
-    # checked against the tab's live URL before the element is ever queried.
-    url = await session.document_url(id=id)
-    if url is None:
-        return tab_gone_envelope(id)
-    check_action_host(_access_rules_for(session), "press-key", url)  # raises if denied / host not allowed
-
-    # Gates 2-4: fetch the element (limit=2 so ambiguity is detectable), then let
-    # the validator judge focusability, the control-key rule, and the page label+key.
-    found = await session.query_selector_all(css_selector, id=id, limit=2)
-    if "error" in found:
-        return found
-    validate_press_key_target(_access_rules_for(session), url, css_selector, found, key)  # raises on any failed gate
-
-    result = await session.press_key(css_selector, key, id=id)
+    # The rules are read once; the session runs every gate and the key press in
+    # one driver-lock hold (see docs/design/write-gate-atomicity.md).
+    result = await session.press_key(css_selector, key, id=id,
+                                     gate=press_key_gate(_access_rules_for(session), key))
     logger.info("Tool finished: press_key")
     return result
 
@@ -591,10 +556,11 @@ async def force_reload_tab(id: str) -> dict:
     url = await session.document_url(id=id)
     if url is None:
         return tab_gone_envelope(id)
-    if not ensure_url_allowed(_access_rules_for(session), url):  # H2: gate the tab's live url before reading
+    access_rules = _access_rules_for(session)  # read once for the whole request
+    if not ensure_url_allowed(access_rules, url):  # H2: gate the tab's live url before reading
         raise ValidationError(f"URL not on the read allowlist: {url}")
     result = await session.force_reload_tab(id=id)
-    result = await _guard_landing(session, id, result)  # a reload can 302 off-list too
+    result = await _guard_landing(session, id, result, access_rules.read_policy)  # a reload can 302 off-list too
     logger.info("Tool finished: force_reload_tab")
     return result
 

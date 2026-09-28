@@ -5,9 +5,10 @@ per-site label) run for real. The shipped allowlist.yaml keeps click
 commented out (default-deny), so gate tests that need an enabled host patch in
 _ENABLED_CONFIGURATION — the exact config the commented-out block would enable.
 """
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import MagicMock, patch
 
 import pytest
+from gated_write_fake import gated_write
 
 from browden.configs.loader import RuntimeConfigurationRefresher
 from browden.mcp.validator import BrowdenRuntimeConfiguration, ValidationError
@@ -36,11 +37,8 @@ def _atc_node(value="Add to cart", text="", **attrs):
 
 def _session(*, url, elements):
     s = MagicMock()
-    s.document_url = AsyncMock(return_value=url)
-    s.query_selector_all = AsyncMock(
-        return_value={"total_count": len(elements), "elements": elements})
-    s.click = AsyncMock(
-        return_value={"clicked": True, "url": url, "title": "Cart"})
+    s.click = gated_write(url=url, elements=elements,
+                          result={"clicked": True, "url": url, "title": "Cart"})
     return s
 
 
@@ -54,7 +52,7 @@ async def test_shipped_default_denies_click_everywhere():
     with patch.object(server._store, "route", return_value=session):
         with pytest.raises(ValidationError, match="not allowed on this page"):
             await server.click("#add-to-cart-button", "h1")
-    session.click.assert_not_awaited()
+    assert session.click.performed == []
 
 
 @pytest.mark.asyncio
@@ -67,13 +65,14 @@ async def test_happy_path_clicks():
          patch.object(server, "_refresher", RuntimeConfigurationRefresher.static(_ENABLED_CONFIGURATION)):
         result = await server.click("#add-to-cart-button", "h1")
     assert result["clicked"] is True
-    session.click.assert_awaited_once_with("#add-to-cart-button", id="h1")
+    assert session.click.performed == [("#add-to-cart-button",)]
 
 
 @pytest.mark.asyncio
 async def test_denylist_vetoes_click_even_when_click_host_is_allowed():
-    # amazon.com is on the click allowlist AND the denylist — denylist wins, so
-    # the element is never even inspected.
+    # amazon.com is on the click allowlist AND the denylist — denylist wins.
+    # (That the element is then never even read is pinned at the session level,
+    # in test_write_gate_atomicity.py.)
     import browden.mcp.server as server
     __import__("importlib").reload(server)
     session = _session(url="https://www.amazon.com/dp/B0FBRRM2VQ", elements=[_atc_node()])
@@ -81,8 +80,7 @@ async def test_denylist_vetoes_click_even_when_click_host_is_allowed():
          patch.object(server, "_refresher", RuntimeConfigurationRefresher.static(_DENIED_CONFIGURATION)):
         with pytest.raises(ValidationError, match="denylist"):
             await server.click("#add-to-cart-button", "h1")
-    session.query_selector_all.assert_not_awaited()
-    session.click.assert_not_awaited()
+    assert session.click.performed == []
 
 
 @pytest.mark.asyncio
@@ -94,7 +92,7 @@ async def test_host_not_allowed_is_rejected():
          patch.object(server, "_refresher", RuntimeConfigurationRefresher.static(_ENABLED_CONFIGURATION)):
         with pytest.raises(ValidationError, match="not allowed on this page"):
             await server.click("#x", "h1")
-    session.click.assert_not_awaited()
+    assert session.click.performed == []
 
 
 @pytest.mark.asyncio
@@ -109,7 +107,7 @@ async def test_buy_now_rejected_by_site_label():
          patch.object(server, "_refresher", RuntimeConfigurationRefresher.static(_ENABLED_CONFIGURATION)):
         with pytest.raises(ValidationError, match="does not match any click label"):
             await server.click("#buy-now", "h1")
-    session.click.assert_not_awaited()
+    assert session.click.performed == []
 
 
 @pytest.mark.asyncio
@@ -130,7 +128,7 @@ async def test_allow_all_host_clicks_any_real_control():
          patch.object(server, "_refresher", RuntimeConfigurationRefresher.static(allow_all)):
         result = await server.click("#place-order", "h1")
     assert result["clicked"] is True
-    session.click.assert_awaited_once_with("#place-order", id="h1")
+    assert session.click.performed == [("#place-order",)]
 
 
 @pytest.mark.asyncio
@@ -150,7 +148,7 @@ async def test_allow_all_host_still_rejects_decoy():
          patch.object(server, "_refresher", RuntimeConfigurationRefresher.static(allow_all)):
         with pytest.raises(ValidationError, match="decoy"):
             await server.click("#decoy", "h1")
-    session.click.assert_not_awaited()
+    assert session.click.performed == []
 
 
 @pytest.mark.asyncio
@@ -163,7 +161,7 @@ async def test_ambiguous_selector_is_rejected():
          patch.object(server, "_refresher", RuntimeConfigurationRefresher.static(_ENABLED_CONFIGURATION)):
         with pytest.raises(ValidationError, match="ambiguous"):
             await server.click(".a-button-input", "h1")
-    session.click.assert_not_awaited()
+    assert session.click.performed == []
 
 
 @pytest.mark.asyncio
@@ -177,7 +175,7 @@ async def test_label_mismatch_for_site_is_rejected():
          patch.object(server, "_refresher", RuntimeConfigurationRefresher.static(_ENABLED_CONFIGURATION)):
         with pytest.raises(ValidationError, match="does not match any click label"):
             await server.click("#x", "h1")
-    session.click.assert_not_awaited()
+    assert session.click.performed == []
 
 
 # Anchor clicks are gated by *where the href goes* against the READ allowlist.
@@ -230,7 +228,7 @@ async def test_anchor_target_off_read_allowlist_rejected():
          patch.object(server, "_refresher", RuntimeConfigurationRefresher.static(_ANCHOR_CONFIGURATION)):
         with pytest.raises(ValidationError, match="not on the read allowlist"):
             await server.click("a.evil", "h1")
-    session.click.assert_not_awaited()
+    assert session.click.performed == []
 
 
 @pytest.mark.asyncio
@@ -257,7 +255,7 @@ async def test_anchor_mailto_scheme_rejected():
          patch.object(server, "_refresher", RuntimeConfigurationRefresher.static(_ANCHOR_CONFIGURATION)):
         with pytest.raises(ValidationError, match="non-navigational scheme"):
             await server.click("a.mail", "h1")
-    session.click.assert_not_awaited()
+    assert session.click.performed == []
 
 
 @pytest.mark.asyncio
@@ -268,4 +266,4 @@ async def test_page_gone_returns_error():
     with patch.object(server._store, "route", return_value=session):
         result = await server.click("#x", "h1")
     assert "error" in result and result["id"] == "h1"
-    session.click.assert_not_awaited()
+    assert session.click.performed == []

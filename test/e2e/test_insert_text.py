@@ -12,6 +12,7 @@ import urllib.parse
 import pytest
 
 from browden.mcp.session_management.browser_session_manager import BrowserSessionManager
+from gates import OPEN_GATE
 
 HTML = """<html><body>
   <input id="tip" type="number" value="5" placeholder="Grocery Tip">
@@ -38,7 +39,7 @@ async def test_fill_clears_and_replaces_number_input(session):
     blank = await session.new_blank_tab(max_tabs=10)
     page = await session.navigate(DATA_URL, id=blank["id"])
 
-    res = await session.insert_text("#tip", "0", id=page["id"])
+    res = await session.insert_text("#tip", "0", id=page["id"], gate=OPEN_GATE)
     assert res["inserted"] is True
     assert res["value"] == "0"
     assert res["id"] == page["id"]
@@ -55,7 +56,7 @@ async def test_fill_replaces_textarea_content(session):
     blank = await session.new_blank_tab(max_tabs=10)
     page = await session.navigate(DATA_URL, id=blank["id"])
 
-    await session.insert_text("#note", "leave at door", id=page["id"])
+    await session.insert_text("#note", "leave at door", id=page["id"], gate=OPEN_GATE)
 
     echo = await session.query_selector("#noteecho", id=page["id"])
     assert echo["found"] is True
@@ -70,4 +71,4 @@ async def test_fill_refuses_ambiguous_selector(session):
     # Two <output> elements match — the backend refuses rather than type into an
     # arbitrary one (the DOM moved under a snapshot that had validated one match).
     with pytest.raises(ValueError, match="matched 2 live elements"):
-        await session.insert_text("output", "x", id=page["id"])
+        await session.insert_text("output", "x", id=page["id"], gate=OPEN_GATE)

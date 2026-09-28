@@ -46,6 +46,7 @@ from ...common.logger import logger
 from ...dom import query, serialize
 from ..validator.runtime_configuration import DEFAULT_REAP_INTERVAL_SECONDS
 from ..validator.errors import SessionBusyError, tab_gone_envelope
+from ..validator.write_gates import WriteGate
 from ...web_navigator.interface import TabNotFoundError
 from ...web_navigator.tab_id import format_tab_id, split_tab_id
 from ...web_navigator.registry import TabRegistry
@@ -296,54 +297,71 @@ class BrowserSessionManager:
         return url
 
     # -- write tools --------------------------------------------------------
+    #
+    # A write is decided and performed in ONE driver-lock hold: focus the tab,
+    # read its URL, gate 1, parse its live HTML, gates 2+, act. Nothing — a
+    # concurrent navigate on the same tab, a config hot-reload — can land between
+    # the decision and the action. There is no ungated write path: every write
+    # method requires the ``gate``. See docs/design/write-gate-atomicity.md.
 
-    async def click(self, css_selector: str, *, id: str) -> dict:
-        """Click the (already policy-validated) add-to-cart element on ``id``.
+    def _gated_write(self, handle: str, id: str, css_selector: str, gate: WriteGate,
+                     act, done: str) -> dict:
+        """Run ``gate`` against ``handle``'s live page, then ``act()``; log ``done``.
 
-        The caller (the ``click`` MCP tool) has already gated the host and
-        verified the element is a genuine add-to-cart control on the cached
-        snapshot. Here we re-find it live and click; the soup cache is then
-        invalidated because the DOM has changed.
+        Runs off the loop, inside the caller's single driver-lock hold.
+
+        The element is judged on a fresh parse of the live HTML, never the soup
+        cache: a cached snapshot can predate what the page shows now. It is not
+        stored back — the write invalidates the tab's cache on success anyway.
+        """
+        self._backend.select_tab(handle)
+        url = self._backend.document_url()
+        gate.check_page(url)  # gate 1 — before the DOM is even read
+        soup = SoupCache.parse(self._backend.get_tab_html())
+        try:
+            paginated = query.css_all(soup, css_selector, 2, 0)  # limit=2: ambiguity is detectable
+        except query.InvalidSelector as e:
+            return {"error": f"invalid CSS selector: {e}", "id": id}
+        found = self._list_envelope(id, False, paginated, False, serialize.DEFAULT_MAX_HTML_BYTES)
+        gate.check_element(url, css_selector, found)  # gates 2+
+        result = act()
+        logger.info(done)
+        result["id"] = id
+        return result
+
+    async def click(self, css_selector: str, *, id: str, gate: WriteGate) -> dict:
+        """Click ``css_selector`` on ``id`` if ``gate`` authorizes it, in one driver hold.
+
+        The soup cache is then invalidated because the DOM has changed.
         """
         def work(handle):
-            self._backend.select_tab(handle)
-            result = self._backend.click_element(css_selector)
-            logger.info(f"click: activated {css_selector!r} on tab {id}")
-            result["id"] = id
-            return result
+            return self._gated_write(handle, id, css_selector, gate,
+                                     lambda: self._backend.click_element(css_selector),
+                                     f"click: activated {css_selector!r} on tab {id}")
         return await self._with_tab(id, work, invalidate=True)
 
-    async def insert_text(self, css_selector: str, value: str, *, id: str) -> dict:
-        """Type ``value`` into the (already policy-validated) text field on ``id``.
+    async def insert_text(self, css_selector: str, value: str, *, id: str, gate: WriteGate) -> dict:
+        """Type ``value`` into ``css_selector`` on ``id`` if ``gate`` authorizes it, in one driver hold.
 
-        The caller (the ``insert_text`` MCP tool) has gated the host, verified the element
-        is a fillable text control, and matched the field's visible label on the
-        cached snapshot. Here we re-find it live and set its value; the soup cache
-        is then invalidated because the DOM has changed.
+        The soup cache is then invalidated because the DOM has changed.
         """
         def work(handle):
-            self._backend.select_tab(handle)
-            result = self._backend.insert_text_element(css_selector, value)
-            logger.info(f"insert_text: set {css_selector!r} on tab {id}")
-            result["id"] = id
-            return result
+            return self._gated_write(handle, id, css_selector, gate,
+                                     lambda: self._backend.insert_text_element(css_selector, value),
+                                     f"insert_text: set {css_selector!r} on tab {id}")
         return await self._with_tab(id, work, invalidate=True)
 
-    async def press_key(self, css_selector: str, key: str, *, id: str) -> dict:
-        """Press ``key`` on the (already policy-validated) focused element on ``id``.
+    async def press_key(self, css_selector: str, key: str, *, id: str, gate: WriteGate) -> dict:
+        """Press ``key`` on ``css_selector`` on ``id`` if ``gate`` authorizes it, in one driver hold.
 
-        The caller (the ``press_key`` MCP tool) has gated the host, verified the
-        element is a focusable control, matched the page label, and checked the key
-        is one the rule authorizes. Here we re-find it live, focus it and dispatch
-        the key; the soup cache is invalidated because the key may have changed the
-        DOM (activated a control, moved a selection).
+        ``gate`` must be the one built for this same ``key`` (``press_key_gate``).
+        The soup cache is invalidated because the key may have changed the DOM
+        (activated a control, moved a selection).
         """
         def work(handle):
-            self._backend.select_tab(handle)
-            result = self._backend.press_key_element(css_selector, key)
-            logger.info(f"press_key: sent {key!r} to {css_selector!r} on tab {id}")
-            result["id"] = id
-            return result
+            return self._gated_write(handle, id, css_selector, gate,
+                                     lambda: self._backend.press_key_element(css_selector, key),
+                                     f"press_key: sent {key!r} to {css_selector!r} on tab {id}")
         return await self._with_tab(id, work, invalidate=True)
 
     # -- DOM-query tools ----------------------------------------------------

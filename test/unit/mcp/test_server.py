@@ -2,6 +2,7 @@ import importlib
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from gated_write_fake import gated_write
 
 
 
@@ -573,17 +574,15 @@ async def test_click_is_authorized_per_profile(monkeypatch):
             "text": "Add to cart"}
 
     async def click_in(profile_dir):
-        session = _profiled_session(
-            profile_dir,
-            document_url="https://shop.test/cart",
-            query_selector_all={"total_count": 1, "elements": [node]},
-            click={"clicked": True})
+        session = _profiled_session(profile_dir)
+        session.click = gated_write(url="https://shop.test/cart", elements=[node],
+                                    result={"clicked": True})
         with patch.object(server._store, "route", return_value=session):
             return await server.click("#atc", "h1"), session
 
     result, session = await click_in("/profiles/shopper")
     assert result["clicked"] is True
-    session.click.assert_awaited_once()
+    assert session.click.performed == [("#atc",)]
 
     with pytest.raises(ValidationError, match="not allowed on this page"):
         await click_in("/profiles/reader")

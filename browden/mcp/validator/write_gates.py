@@ -6,12 +6,17 @@ Composes the three lower-level pieces — the per-action host allowlist (in the
 (:mod:`.intent`) — into the exact ordered checks each write tool must pass
 before it is allowed to touch the page.
 
-This keeps the server tool thin: the tool does only the I/O (fetch the tab's live
-URL, query the element) and hands the results here; every *access decision* lives
-in this module, next to the predicates it builds on. Each function raises
-:class:`ValidationError` on the first failing gate and returns ``None`` when the
-action is authorized.
+Every *access decision* lives in this module, next to the predicates it builds
+on. Each gate function raises :class:`ValidationError` on the first failing gate
+and returns ``None`` when the action is authorized.
+
+The tool does not run these itself. It binds them into a :class:`WriteGate`
+(``click_gate`` / ``write_text_gate`` / ``press_key_gate``) and hands that to the
+session, which runs it inside the same driver-lock hold that performs the action
+— see docs/design/write-gate-atomicity.md for why.
 """
+from collections.abc import Callable
+from dataclasses import dataclass
 from urllib.parse import urlparse
 
 from .access_rule_set import BrowdenAccessRuleSet
@@ -144,8 +149,8 @@ def validate_press_key_target(access_rules: BrowdenAccessRuleSet, url: str,
     ``url`` is the tab's live URL; ``found`` is the ``query_selector_all(limit=2)``
     result for ``css_selector``; ``key`` is the W3C ``key`` value the caller wants
     to send. Raises :class:`ValidationError` on the first failing gate; returns
-    ``None`` when the key press is authorized. Gate 1 (host + page section) is run
-    by :func:`check_action_host` in the tool, exactly as for ``click``.
+    ``None`` when the key press is authorized. Gate 1 (host + page section) is
+    :func:`check_action_host`, run first by the :class:`WriteGate`, exactly as for ``click``.
     """
     # Gate 2: the element must be a single, real, visible, non-decoy *focusable*
     # control (natively focusable or tabindex) — the keyboard analogue of the
@@ -175,3 +180,42 @@ def validate_press_key_target(access_rules: BrowdenAccessRuleSet, url: str,
         raise ValidationError(
             f"no press-key rule authorizes key {key!r} on this control for "
             f"{p.hostname or ''}{p.path or '/'} — refusing to press a key")
+
+
+@dataclass(frozen=True)
+class WriteGate:
+    """The full gate sequence for one write request, bound to one rule set.
+
+    Built once per request, from a single read of the access rules, and run by
+    the session *inside the driver-lock hold that performs the action*. So the
+    URL it judges, the element it judges, the rules it judges them by and the
+    page the action lands on are all the same — nothing (a concurrent
+    ``navigate``, a config hot-reload) can come between the decision and the
+    action. Both checks raise :class:`ValidationError` to refuse.
+    """
+    check_page: Callable[[str], None]                # gate 1: (url); runs before the DOM is read
+    check_element: Callable[[str, str, dict], None]  # gates 2+: (url, css_selector, found)
+
+
+def click_gate(access_rules: BrowdenAccessRuleSet) -> WriteGate:
+    """The ``click`` gates, bound to ``access_rules``."""
+    return WriteGate(
+        check_page=lambda url: check_action_host(access_rules, "click", url),
+        check_element=lambda url, css_selector, found: validate_click_target(
+            access_rules, url, css_selector, found))
+
+
+def write_text_gate(access_rules: BrowdenAccessRuleSet) -> WriteGate:
+    """The ``insert_text`` gates, bound to ``access_rules``."""
+    return WriteGate(
+        check_page=lambda url: check_action_host(access_rules, "write-text", url),
+        check_element=lambda url, css_selector, found: validate_write_text_target(
+            access_rules, url, css_selector, found))
+
+
+def press_key_gate(access_rules: BrowdenAccessRuleSet, key: str) -> WriteGate:
+    """The ``press_key`` gates for ``key``, bound to ``access_rules``."""
+    return WriteGate(
+        check_page=lambda url: check_action_host(access_rules, "press-key", url),
+        check_element=lambda url, css_selector, found: validate_press_key_target(
+            access_rules, url, css_selector, found, key))

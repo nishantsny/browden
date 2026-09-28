@@ -16,6 +16,19 @@ All notable changes to browden are documented here. The format follows
   version has no section (or an empty one) fails the workflow before `stable`
   is promoted.
 
+### Security
+- **Write actions are decided and performed as one unit
+  (GHSA-4mgj-cwrw-795x).** `click`, `insert_text` and `press_key` used to gate
+  the page, query the element, judge it and act in three separate driver-lock
+  holds, reading the live config twice. So a concurrent `navigate` on the same
+  tab could land the action on a page no write rule authorizes, and a config
+  hot-reload between the two reads could authorize an action neither config
+  allows. The session now runs every gate and the action in one hold, against
+  one read of the rules and a fresh parse of the live page rather than the DOM
+  cache. `navigate` and `force_reload_tab` likewise re-gate their landing with
+  the rules they started with. Design and tradeoffs:
+  `docs/design/write-gate-atomicity.md`.
+
 ## [1.3.1] — 2026-10-04
 
 ### Changed

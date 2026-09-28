@@ -14,6 +14,7 @@ import urllib.parse
 import pytest
 
 from browden.mcp.session_management.browser_session_manager import BrowserSessionManager
+from gates import OPEN_GATE
 
 HTML = """<html><body>
   <div id="picked"></div>
@@ -53,7 +54,7 @@ async def test_enter_activates_focusable_row(session):
 
     # A <li tabindex="0"> is not a <button>/<a>, so click can't reach it — but
     # press-key focuses it and Enter fires its keydown handler.
-    res = await session.press_key("#r1", "Enter", id=page["id"])
+    res = await session.press_key("#r1", "Enter", id=page["id"], gate=OPEN_GATE)
     assert res["pressed"] is True
     assert res["key"] == "Enter"
     assert res["id"] == page["id"]
@@ -70,7 +71,7 @@ async def test_arrow_key_moves_selection(session):
 
     # ArrowDown on the first row moves focus to the next (roving tabindex) — proves
     # a navigation key is delivered to the focused element, not just Enter.
-    await session.press_key("#r1", "ArrowDown", id=page["id"])
+    await session.press_key("#r1", "ArrowDown", id=page["id"], gate=OPEN_GATE)
     echo = await session.query_selector("#picked", id=page["id"])
     assert echo["element"]["text"] == "focus:Avocado"
 
@@ -83,7 +84,7 @@ async def test_unsupported_key_refused(session):
     # The backend only maps control keys; a character key never reaches Chrome here
     # (the MCP gate refuses it earlier too, but the primitive is defence in depth).
     with pytest.raises(ValueError, match="unsupported key"):
-        await session.press_key("#r1", "a", id=page["id"])
+        await session.press_key("#r1", "a", id=page["id"], gate=OPEN_GATE)
 
 
 @pytest.mark.asyncio
@@ -94,4 +95,4 @@ async def test_ambiguous_selector_refused(session):
     # Three .row elements match — the backend refuses rather than press a key on an
     # arbitrary one (the DOM moved under a snapshot that had validated one match).
     with pytest.raises(ValueError, match="matched 3 live elements"):
-        await session.press_key(".row", "Enter", id=page["id"])
+        await session.press_key(".row", "Enter", id=page["id"], gate=OPEN_GATE)
