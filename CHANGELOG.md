@@ -322,7 +322,11 @@ All notable changes to browden are documented here. The format follows
   navigated an ancestor (or the top page) to an untrusted URL while we were
   deeper in the tree, so the document returned to is re-gated (read-allowed +
   same-origin); on refusal the driver retreats to the top document and the call
-  raises. Every frame tool judges against the tab's own profile's rules (#118).
+  raises. Every frame tool judges against the tab's own profile's rules. A
+  frame the page wrote itself (`srcdoc`, or an `about:blank` frame filled in by
+  script) has no URL of its own and is judged by the URL of the same-origin page
+  that wrote it; one the browser keeps from reading that page (a sandboxed
+  frame's opaque origin) keeps its `about:` URL and is refused (#118).
 
 ## [1.2.1] — 2026-07-29
 
