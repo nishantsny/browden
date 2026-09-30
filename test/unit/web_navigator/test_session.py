@@ -10,7 +10,12 @@ from browden.mcp.session_management.browser_session_manager import (
     IDLE_TTL_SECONDS,
     BrowserSessionManager,
 )
-from browden.mcp.validator import SessionBusyError
+from browden.mcp.validator import ReadGate, SessionBusyError
+
+# These tests pin the session's locking, caching and tab tracking, not policy
+# (the read gate is pinned in test/unit/mcp/test_read_gate_atomicity.py), so
+# every read is handed a gate that admits any page.
+OPEN_READ_GATE = ReadGate(check_page=lambda url: None)
 
 PAGE_HTML = """
 <html><body>
@@ -80,6 +85,10 @@ class FakeBackend:
         self.calls.append(("select_tab", handle))
         self._check(handle)
         self.active = handle  # focus: subsequent focus-free ops act on this tab
+
+    def document_url(self):
+        self._check(self.active)
+        return f"https://example.test/{self.active}"
 
     def navigate(self, url):
         self.calls.append(("navigate", url))
@@ -174,14 +183,14 @@ async def test_navigate_new_page_close_page_invalidate_cache():
     backend = FakeBackend()
     s = make_session(backend)
 
-    await s.get_element_by_id("logo", id="ns-h1")
+    await s.get_element_by_id("logo", id="ns-h1", gate=OPEN_READ_GATE)
     assert "h1" in s._cache._entries
 
-    await s.navigate("https://www.amazon.com/", id="ns-h1")
+    await s.navigate("https://www.amazon.com/", id="ns-h1", gate=OPEN_READ_GATE)
     assert "h1" not in s._cache._entries  # navigate busted it
 
     await s.new_blank_tab(max_tabs=10)
-    await s.get_element_by_id("logo", id="ns-h2")
+    await s.get_element_by_id("logo", id="ns-h2", gate=OPEN_READ_GATE)
     assert "h2" in s._cache._entries
     await s.close_tab("ns-h2")
     assert "h2" not in s._cache._entries
@@ -192,14 +201,14 @@ async def test_navigate_new_page_close_page_invalidate_cache():
 @pytest.mark.asyncio
 async def test_get_element_by_id_found_and_missing_element():
     s = make_session(FakeBackend())
-    found = await s.get_element_by_id("logo", id="ns-h1")
+    found = await s.get_element_by_id("logo", id="ns-h1", gate=OPEN_READ_GATE)
     assert found["found"] is True
     assert found["element"]["id"] == "logo"
     assert found["element"]["classes"] == ["brand"]
     assert found["reloaded"] is False
     assert found["id"] == "ns-h1"
 
-    missing = await s.get_element_by_id("nope", id="ns-h1")
+    missing = await s.get_element_by_id("nope", id="ns-h1", gate=OPEN_READ_GATE)
     assert missing["found"] is False
     assert missing["element"] is None
 
@@ -207,7 +216,7 @@ async def test_get_element_by_id_found_and_missing_element():
 @pytest.mark.asyncio
 async def test_query_selector_all_envelope_and_pagination():
     s = make_session(FakeBackend())
-    env = await s.query_selector_all(".order-card.js-card", id="ns-h1", limit=2, offset=0)
+    env = await s.query_selector_all(".order-card.js-card", id="ns-h1", gate=OPEN_READ_GATE, limit=2, offset=0)
     assert env["total_count"] == 3
     assert env["returned"] == 2
     assert env["limit"] == 2
@@ -216,7 +225,7 @@ async def test_query_selector_all_envelope_and_pagination():
     assert len(env["elements"]) == 2
     assert all("order-card" in e["classes"] for e in env["elements"])
 
-    last = await s.query_selector_all(".order-card.js-card", id="ns-h1", limit=2, offset=2)
+    last = await s.query_selector_all(".order-card.js-card", id="ns-h1", gate=OPEN_READ_GATE, limit=2, offset=2)
     assert last["returned"] == 1
     assert last["next_offset"] is None
 
@@ -224,11 +233,11 @@ async def test_query_selector_all_envelope_and_pagination():
 @pytest.mark.asyncio
 async def test_invalid_css_returns_error_dict():
     s = make_session(FakeBackend())
-    err = await s.query_selector("div::::bad", id="ns-h1")
+    err = await s.query_selector("div::::bad", id="ns-h1", gate=OPEN_READ_GATE)
     assert "invalid CSS selector" in err["error"]
     assert err["id"] == "ns-h1"
 
-    err2 = await s.query_selector_all("??", id="ns-h1")
+    err2 = await s.query_selector_all("??", id="ns-h1", gate=OPEN_READ_GATE)
     assert "invalid CSS selector" in err2["error"]
 
 
@@ -236,12 +245,12 @@ async def test_invalid_css_returns_error_dict():
 async def test_force_reload_page_reloads_and_reports():
     backend = FakeBackend()
     s = make_session(backend)
-    out = await s.force_reload_tab(id="ns-h1")
+    out = await s.force_reload_tab(id="ns-h1", gate=OPEN_READ_GATE)
     assert out == {"id": "ns-h1", "url": "reloaded-url", "title": "reloaded-title", "reloaded": True}
     assert ("reload", "h1") in backend.calls
     assert "h1" in s._registry._last_access
 
-    out2 = await s.force_reload_tab(id="ns-h2")
+    out2 = await s.force_reload_tab(id="ns-h2", gate=OPEN_READ_GATE)
     assert out2["id"] == "ns-h2"
     assert ("reload", "h2") in backend.calls
 
@@ -254,7 +263,7 @@ async def test_screenshot_returns_png_bytes_and_touches_registry():
     sentinel = object()
     s._cache._entries["h1"] = sentinel  # type: ignore[assignment]
 
-    png = await s.screenshot(id="ns-h1")
+    png = await s.screenshot(id="ns-h1", gate=OPEN_READ_GATE)
 
     assert png == b"\x89PNG\r\n\x1a\nfakepng"
     assert ("select_tab", "h1") in backend.calls  # focused first
@@ -271,7 +280,7 @@ async def test_screenshot_on_dead_page_returns_error_and_drops_it():
     s._registry.touch("h6")
     s._cache._entries["h6"] = object()  # type: ignore[assignment]
 
-    res = await s.screenshot(id="ns-h6")
+    res = await s.screenshot(id="ns-h6", gate=OPEN_READ_GATE)
 
     assert res == {"id": "ns-h6",
                    "error": "tab ns-h6 is no longer open — call list_tabs for current tabs"}
@@ -290,7 +299,7 @@ async def test_dom_query_on_dead_page_returns_error_and_drops_it():
     s._registry.touch("h7")
     backend.missing.add("h7")
 
-    res = await s.query_selector_all(".order-card.js-card", id="ns-h7")
+    res = await s.query_selector_all(".order-card.js-card", id="ns-h7", gate=OPEN_READ_GATE)
     assert res == {"id": "ns-h7",
                    "error": "tab ns-h7 is no longer open — call list_tabs for current tabs"}
     assert "h7" not in s._cache._entries
@@ -346,7 +355,7 @@ async def test_force_reload_on_dead_page_returns_error():
     backend = FakeBackend()
     backend.missing.add("h9")
     s = make_session(backend)
-    res = await s.force_reload_tab(id="ns-h9")
+    res = await s.force_reload_tab(id="ns-h9", gate=OPEN_READ_GATE)
     assert res["id"] == "ns-h9"
     assert "no longer open" in res["error"]
 
@@ -369,7 +378,7 @@ async def test_force_reload_partial_failure_drops_supplied_page_id():
         raise TabNotFoundError(f"tab {backend.active!r} disappeared mid-reload")
     backend.get_tab_html = get_tab_html
 
-    res = await s.force_reload_tab(id="ns-h2")
+    res = await s.force_reload_tab(id="ns-h2", gate=OPEN_READ_GATE)
 
     assert res == {"id": "ns-h2",
                    "error": "tab ns-h2 is no longer open — call list_tabs for current tabs"}
@@ -385,7 +394,7 @@ async def test_navigate_on_dead_page_returns_error_and_drops_it():
     backend.missing.add("h5")
     s = make_session(backend)
     s._registry.touch("h5")
-    res = await s.navigate("https://www.amazon.com/", id="ns-h5")
+    res = await s.navigate("https://www.amazon.com/", id="ns-h5", gate=OPEN_READ_GATE)
     assert res == {"id": "ns-h5",
                    "error": "tab ns-h5 is no longer open — call list_tabs for current tabs"}
     assert "h5" not in s._registry._last_access
@@ -447,11 +456,14 @@ async def test_concurrent_reads_on_one_session_do_not_steal_each_others_focus():
     # the browser (a second read of the same tab would answer from the soup cache
     # and never reach the driver).
     handles = ("h1", "h2", "h3", "h4")
-    results = await asyncio.gather(*(s.query_selector("#who", id=f"ns-{h}") for h in handles))
+    results = await asyncio.gather(*(s.query_selector("#who", id=f"ns-{h}", gate=OPEN_READ_GATE) for h in handles))
 
     assert [r["element"]["text"] for r in results] == list(handles)
-    # Every read is focus-then-act, never focus-focus-read-read.
+    # Every read is focus-then-act, never focus-focus-read-read. (A gated read
+    # focuses its tab twice in a row — once to check the live URL, once inside
+    # the soup cache — within the same hold, so repeats are collapsed.)
     driver_calls = [c for c in backend.calls if c[0] in ("select_tab", "get_tab_html")]
+    driver_calls = [c for i, c in enumerate(driver_calls) if i == 0 or c != driver_calls[i - 1]]
     assert driver_calls == [call for h in handles
                             for call in (("select_tab", h), ("get_tab_html", h))]
 
@@ -507,7 +519,7 @@ async def test_tools_do_not_sweep():
     await s.list_tabs()
     await s.new_blank_tab(max_tabs=10)
     await s.select_tab("ns-h1")
-    await s.query_selector("#logo", id="ns-h1")
+    await s.query_selector("#logo", id="ns-h1", gate=OPEN_READ_GATE)
     await s.close_tab("ns-h2")
 
     # new_blank_tab's own cap check is the only list_handles here (one call),

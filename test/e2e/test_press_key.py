@@ -14,7 +14,7 @@ import urllib.parse
 import pytest
 
 from browden.mcp.session_management.browser_session_manager import BrowserSessionManager
-from gates import OPEN_GATE
+from gates import OPEN_GATE, OPEN_READ_GATE
 
 HTML = """<html><body>
   <div id="picked"></div>
@@ -50,7 +50,7 @@ def session(new_backend, tmp_path):
 @pytest.mark.asyncio
 async def test_enter_activates_focusable_row(session):
     blank = await session.new_blank_tab(max_tabs=10)
-    page = await session.navigate(DATA_URL, id=blank["id"])
+    page = await session.navigate(DATA_URL, id=blank["id"], gate=OPEN_READ_GATE)
 
     # A <li tabindex="0"> is not a <button>/<a>, so click can't reach it — but
     # press-key focuses it and Enter fires its keydown handler.
@@ -59,7 +59,7 @@ async def test_enter_activates_focusable_row(session):
     assert res["key"] == "Enter"
     assert res["id"] == page["id"]
 
-    echo = await session.query_selector("#picked", id=page["id"])
+    echo = await session.query_selector("#picked", id=page["id"], gate=OPEN_READ_GATE)
     assert echo["found"] is True
     assert echo["element"]["text"] == "picked:Egg"
 
@@ -67,19 +67,19 @@ async def test_enter_activates_focusable_row(session):
 @pytest.mark.asyncio
 async def test_arrow_key_moves_selection(session):
     blank = await session.new_blank_tab(max_tabs=10)
-    page = await session.navigate(DATA_URL, id=blank["id"])
+    page = await session.navigate(DATA_URL, id=blank["id"], gate=OPEN_READ_GATE)
 
     # ArrowDown on the first row moves focus to the next (roving tabindex) — proves
     # a navigation key is delivered to the focused element, not just Enter.
     await session.press_key("#r1", "ArrowDown", id=page["id"], gate=OPEN_GATE)
-    echo = await session.query_selector("#picked", id=page["id"])
+    echo = await session.query_selector("#picked", id=page["id"], gate=OPEN_READ_GATE)
     assert echo["element"]["text"] == "focus:Avocado"
 
 
 @pytest.mark.asyncio
 async def test_unsupported_key_refused(session):
     blank = await session.new_blank_tab(max_tabs=10)
-    page = await session.navigate(DATA_URL, id=blank["id"])
+    page = await session.navigate(DATA_URL, id=blank["id"], gate=OPEN_READ_GATE)
 
     # The backend only maps control keys; a character key never reaches Chrome here
     # (the MCP gate refuses it earlier too, but the primitive is defence in depth).
@@ -90,7 +90,7 @@ async def test_unsupported_key_refused(session):
 @pytest.mark.asyncio
 async def test_ambiguous_selector_refused(session):
     blank = await session.new_blank_tab(max_tabs=10)
-    page = await session.navigate(DATA_URL, id=blank["id"])
+    page = await session.navigate(DATA_URL, id=blank["id"], gate=OPEN_READ_GATE)
 
     # Three .row elements match — the backend refuses rather than press a key on an
     # arbitrary one (the DOM moved under a snapshot that had validated one match).

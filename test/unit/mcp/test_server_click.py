@@ -8,7 +8,7 @@ _ENABLED_CONFIGURATION — the exact config the commented-out block would enable
 from unittest.mock import MagicMock, patch
 
 import pytest
-from gated_write_fake import gated_write
+from gated_fakes import gated_write
 
 from browden.configs.loader import RuntimeConfigurationRefresher
 from browden.mcp.validator import BrowdenRuntimeConfiguration, ValidationError

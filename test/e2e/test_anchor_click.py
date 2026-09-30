@@ -15,7 +15,7 @@ import urllib.parse
 import pytest
 
 from browden.mcp.session_management.browser_session_manager import BrowserSessionManager
-from gates import OPEN_GATE
+from gates import OPEN_GATE, OPEN_READ_GATE
 
 HTML = """<html><body>
   <a id="edit" href="javascript:void(0)"
@@ -40,14 +40,14 @@ def session(new_backend, tmp_path):
 @pytest.mark.asyncio
 async def test_click_fires_anchor_onclick(session):
     blank = await session.new_blank_tab(max_tabs=10)
-    page = await session.navigate(DATA_URL, id=blank["id"])
+    page = await session.navigate(DATA_URL, id=blank["id"], gate=OPEN_READ_GATE)
 
     # The reveal control is an <a> (href="javascript:void(0)"). Clicking it must
     # fire its onclick — the field starts hidden and becomes shown.
     res = await session.click("#edit", id=page["id"], gate=OPEN_GATE)
     assert res["clicked"] is True
 
-    state = await session.query_selector("#state", id=page["id"])
+    state = await session.query_selector("#state", id=page["id"], gate=OPEN_READ_GATE)
     assert state["found"] is True
     assert state["element"]["text"] == "shown"
 
@@ -58,7 +58,7 @@ async def test_anchor_reveals_then_insert_text_zeroes_labelless_field(session):
     # number <input>, then type "0" into it. clear() wipes the "5" so the echo
     # reads "0", not "50".
     blank = await session.new_blank_tab(max_tabs=10)
-    page = await session.navigate(DATA_URL, id=blank["id"])
+    page = await session.navigate(DATA_URL, id=blank["id"], gate=OPEN_READ_GATE)
 
     await session.click("#edit", id=page["id"], gate=OPEN_GATE)
 
@@ -66,6 +66,6 @@ async def test_anchor_reveals_then_insert_text_zeroes_labelless_field(session):
     assert res["inserted"] is True
     assert res["value"] == "0"
 
-    echo = await session.query_selector("#amtecho", id=page["id"])
+    echo = await session.query_selector("#amtecho", id=page["id"], gate=OPEN_READ_GATE)
     assert echo["found"] is True
     assert echo["element"]["text"] == "0"

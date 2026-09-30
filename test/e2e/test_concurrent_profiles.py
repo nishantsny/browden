@@ -16,6 +16,7 @@ import urllib.parse
 import pytest
 
 from browden.mcp.session_management.browser_session_manager import BrowserSessionManager
+from gates import OPEN_READ_GATE
 
 N = 5
 
@@ -41,7 +42,7 @@ async def test_concurrent_navigation_across_distinct_profiles(sessions):
     # parallel rather than queueing behind one browser.
     async def _open(session, url):
         tab = await session.new_blank_tab(max_tabs=10)
-        return await session.navigate(url, id=tab["id"])
+        return await session.navigate(url, id=tab["id"], gate=OPEN_READ_GATE)
     pages = await asyncio.gather(*(_open(s, u) for s, u in zip(sessions, urls)))
 
     # Every concurrent request completed and landed on its own page.

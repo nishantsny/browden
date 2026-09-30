@@ -12,7 +12,7 @@ import urllib.parse
 import pytest
 
 from browden.mcp.session_management.browser_session_manager import BrowserSessionManager
-from gates import OPEN_GATE
+from gates import OPEN_GATE, OPEN_READ_GATE
 
 HTML = """<html><body>
   <input id="tip" type="number" value="5" placeholder="Grocery Tip">
@@ -37,7 +37,7 @@ def session(new_backend, tmp_path):
 @pytest.mark.asyncio
 async def test_fill_clears_and_replaces_number_input(session):
     blank = await session.new_blank_tab(max_tabs=10)
-    page = await session.navigate(DATA_URL, id=blank["id"])
+    page = await session.navigate(DATA_URL, id=blank["id"], gate=OPEN_READ_GATE)
 
     res = await session.insert_text("#tip", "0", id=page["id"], gate=OPEN_GATE)
     assert res["inserted"] is True
@@ -46,7 +46,7 @@ async def test_fill_clears_and_replaces_number_input(session):
 
     # The echo reflects the field's live value: clear() wiped the "5" and "0" was
     # typed (so the result is "0", not "50").
-    echo = await session.query_selector("#tipecho", id=page["id"])
+    echo = await session.query_selector("#tipecho", id=page["id"], gate=OPEN_READ_GATE)
     assert echo["found"] is True
     assert echo["element"]["text"] == "0"
 
@@ -54,11 +54,11 @@ async def test_fill_clears_and_replaces_number_input(session):
 @pytest.mark.asyncio
 async def test_fill_replaces_textarea_content(session):
     blank = await session.new_blank_tab(max_tabs=10)
-    page = await session.navigate(DATA_URL, id=blank["id"])
+    page = await session.navigate(DATA_URL, id=blank["id"], gate=OPEN_READ_GATE)
 
     await session.insert_text("#note", "leave at door", id=page["id"], gate=OPEN_GATE)
 
-    echo = await session.query_selector("#noteecho", id=page["id"])
+    echo = await session.query_selector("#noteecho", id=page["id"], gate=OPEN_READ_GATE)
     assert echo["found"] is True
     assert echo["element"]["text"] == "leave at door"
 
@@ -66,7 +66,7 @@ async def test_fill_replaces_textarea_content(session):
 @pytest.mark.asyncio
 async def test_fill_refuses_ambiguous_selector(session):
     blank = await session.new_blank_tab(max_tabs=10)
-    page = await session.navigate(DATA_URL, id=blank["id"])
+    page = await session.navigate(DATA_URL, id=blank["id"], gate=OPEN_READ_GATE)
 
     # Two <output> elements match — the backend refuses rather than type into an
     # arbitrary one (the DOM moved under a snapshot that had validated one match).

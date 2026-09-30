@@ -11,6 +11,7 @@ import urllib.parse
 import pytest
 
 from browden.mcp.session_management.browser_session_manager import BrowserSessionManager
+from gates import OPEN_READ_GATE
 
 DATA_URL = "data:text/html," + urllib.parse.quote(
     "<html><body><h1 id='h'>hi</h1></body></html>")
@@ -25,7 +26,7 @@ def session(new_backend, tmp_path):
 @pytest.mark.asyncio
 async def test_document_url_equals_top_url_when_not_in_a_frame(session):
     blank = await session.new_blank_tab(max_tabs=10)
-    page = await session.navigate(DATA_URL, id=blank["id"])
+    page = await session.navigate(DATA_URL, id=blank["id"], gate=OPEN_READ_GATE)
 
     doc = await session.document_url(id=page["id"])
 
@@ -41,7 +42,7 @@ async def test_document_url_none_for_a_closed_tab(session):
     # Two tabs so we can close one without hitting the last-tab guard.
     keep = await session.new_blank_tab(max_tabs=10)
     victim = await session.new_blank_tab(max_tabs=10)
-    await session.navigate(DATA_URL, id=victim["id"])
+    await session.navigate(DATA_URL, id=victim["id"], gate=OPEN_READ_GATE)
     await session.close_tab(id=victim["id"])
 
     assert await session.document_url(id=victim["id"]) is None

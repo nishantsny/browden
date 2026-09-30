@@ -25,9 +25,17 @@ All notable changes to browden are documented here. The format follows
   hot-reload between the two reads could authorize an action neither config
   allows. The session now runs every gate and the action in one hold, against
   one read of the rules and a fresh parse of the live page rather than the DOM
-  cache. `navigate` and `force_reload_tab` likewise re-gate their landing with
-  the rules they started with. Design and tradeoffs:
-  `docs/design/write-gate-atomicity.md`.
+  cache.
+- **Reads are gated on the page they actually read.** The DOM reads and
+  `screenshot` checked the tab's URL in one driver-lock hold and read it in
+  another. So a concurrent `navigate` to an allowed URL that redirects off-list
+  could hand the read the off-list page. Separately, a read whose cached
+  snapshot had expired reloaded the tab without re-checking where the reload
+  landed. The session now checks the live URL in the same hold as the read, and
+  gates the landing of every navigation and reload (including the cache's TTL
+  reload) before that hold ends. An off-list landing is bounced to
+  `about:blank` there, so no other request sees the tab off-list.
+- Design and tradeoffs for both: `docs/design/gate-atomicity.md`.
 
 ## [1.3.1] — 2026-10-04
 

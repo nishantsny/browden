@@ -7,7 +7,7 @@ integrity, per-field visible-label) run for real. write-text is a section
 from unittest.mock import MagicMock, patch
 
 import pytest
-from gated_write_fake import gated_write
+from gated_fakes import gated_write
 
 from browden.configs.loader import RuntimeConfigurationRefresher
 from browden.mcp.validator import BrowdenRuntimeConfiguration, ValidationError

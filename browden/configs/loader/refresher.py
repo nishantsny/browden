@@ -17,7 +17,7 @@ against the reference it read, so the swap needs no lock. That holds only
 because every tool reads the configuration **once per request** and decides the
 whole request against that one reference — a tool that read it twice, with an
 ``await`` in between, could be judged half by the old rules and half by the new
-(see docs/design/write-gate-atomicity.md). Because the poller
+(see docs/design/gate-atomicity.md). Because the poller
 runs as an ``asyncio`` task on the *same* event loop as the tools, the rebind
 can't even interleave with a tool mid-statement.
 """

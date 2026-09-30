@@ -13,7 +13,7 @@ and returns ``None`` when the action is authorized.
 The tool does not run these itself. It binds them into a :class:`WriteGate`
 (``click_gate`` / ``write_text_gate`` / ``press_key_gate``) and hands that to the
 session, which runs it inside the same driver-lock hold that performs the action
-— see docs/design/write-gate-atomicity.md for why.
+— see docs/design/gate-atomicity.md for why.
 """
 from collections.abc import Callable
 from dataclasses import dataclass
