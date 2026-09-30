@@ -45,6 +45,8 @@ too so you fail fast (before a ~7-minute run) and can offer to fix it.
    version, latest `git tag`, the `## [Unreleased]` + newest version section of
    `CHANGELOG.md`, and that `.github/workflows/release.yml` exists on main. If the
    worktree has local *tracked* changes, stop (the deploy would refuse anyway).
+   If a release-prep worktree or `release/v*` branch from an earlier run is left
+   over and its PR is merged, remove it now (see step 3).
 
 2. **Ask the user** (AskUserQuestion) — up front, because the single `--release`
    run needs the tag and a merged changelog before it can start:
@@ -56,12 +58,23 @@ too so you fail fast (before a ~7-minute run) and can offer to fix it.
 3. **Resolve the HARD RULE.** Against `origin/main`, check for `## [<version>]` in
    `CHANGELOG.md` and `pyproject` `version == <version>`.
    - Both satisfied → continue to step 4.
-   - Missing, and the user opted for a PR → create a branch off `origin/main` that
-     (a) sets `pyproject` `version` to `<version>` if needed and (b) moves the
-     `[Unreleased]` notes under a new `## [<version>] — <today>` heading (fix the
-     compare links if present). Open the PR. Then **STOP**: tell the user to merge
-     it to main and re-run `/release-browden`. Do not tag — the tag's commit must
-     already describe it on main.
+   - Missing, and the user opted for a PR → create a branch `release/v<version>`
+     off `origin/main` **in a temporary worktree**
+     (`git -C ~/projects/browser-guard worktree add -b release/v<version> <tmp>/wt-release origin/main`),
+     never in the release worktree, which must stay clean on `main` for the
+     deploy. In it, (a) set `pyproject` `version` to `<version>` and relock with
+     `uv lock --offline` (`uv.lock` pins the project's own version, and CI runs
+     `uv sync --locked`), and (b) move the `[Unreleased]` notes under a new
+     `## [<version>] — <today>` heading and fix the compare links. Mirror the
+     previous `release: cut vX.Y.Z` commit and PR. Open the PR. Then **STOP**:
+     tell the user to merge it to main and re-run `/release-browden`. Do not tag
+     — the tag's commit must already describe it on main.
+   - **Keep that temp worktree until the PR is merged**, since review fixes go
+     there. Once `gh pr view <n> --json state` says `MERGED`, remove it
+     (`git -C ~/projects/browser-guard worktree remove <path>`) and delete the
+     local `release/v<version>` branch (`-D`: the squash merge means `-d`
+     won't see it as merged). The follow-up `/release-browden` run does this in
+     step 1 if they are still around.
    - Missing, and the user declined → **STOP** and explain the release is blocked
      until the version is in the changelog on main.
 

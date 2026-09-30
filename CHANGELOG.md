@@ -7,6 +7,15 @@ All notable changes to browden are documented here. The format follows
 
 ## [Unreleased]
 
+### Changed
+- **Release skill: the version-bump PR is built in a temporary worktree
+  (maintainers).** `maintainers/github-release/SKILL.md` now says to prepare
+  the `release: cut vX.Y.Z` PR in its own `git worktree` (never the release
+  worktree, which must stay clean for the deploy), relock with
+  `uv lock --offline`, keep that worktree until the PR merges, and then remove
+  it along with the local `release/v*` branch. A later run's preflight clears
+  any leftover one.
+
 ## [1.3.0] — 2026-09-30
 
 ### Added
