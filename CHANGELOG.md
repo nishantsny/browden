@@ -102,6 +102,17 @@ All notable changes to browden are documented here. The format follows
   `BROWDEN_E2E_VENV` still gives a persistent venv, which the script never
   removes.
 
+### Fixed
+- **`mcp` is pinned below 2.** The dependency was `mcp[cli]>=1.0` with no
+  upper bound, so a fresh install resolved to mcp 2.x, which renamed `FastMCP`
+  and cannot import browden at all. It is now `mcp[cli]>=1.0,<2`; `uv.lock`
+  still pins 1.28.1, so locked installs are unchanged.
+- **Deploy script's e2e venv is built from `uv.lock` (maintainers).** It was
+  built with `uv pip install -e`, which ignores the lock and resolves every
+  dependency to its newest release, so the post-deploy e2e tested a set of
+  packages nothing else runs. It now uses `uv sync --locked --extra dev`, the
+  same install CI uses, and fails if the lock is stale.
+
 ## [1.2.1] — 2026-07-29
 
 ### Fixed

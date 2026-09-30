@@ -84,7 +84,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "beautifulsoup4", specifier = ">=4.12" },
-    { name = "mcp", extras = ["cli"], specifier = ">=1.0" },
+    { name = "mcp", extras = ["cli"], specifier = ">=1.0,<2" },
     { name = "psutil", marker = "extra == 'dev'", specifier = ">=5.9" },
     { name = "publicsuffix2", specifier = ">=2.2019" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=8" },

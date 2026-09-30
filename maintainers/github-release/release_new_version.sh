@@ -186,10 +186,15 @@ E2E_TMP="$(mktemp -d "$E2E_TMP_ROOT/browden-e2e.XXXXXX")"
 # its package cache, so a fresh venv per run costs seconds, not a download.
 # BROWDEN_E2E_VENV opts into a persistent venv at a path of your choosing; the
 # script reuses it and never removes it.
+#
+# It is built from uv.lock (`uv sync --locked`, as CI does), not by resolving
+# pyproject afresh: a fresh resolve takes the newest release of every
+# dependency, so the e2e would test a set nothing else runs — which is how an
+# mcp 2.x release broke the v1.3.0 e2e at collection. --locked also fails the
+# run if uv.lock is out of date with pyproject.
 E2E_VENV="${BROWDEN_E2E_VENV:-$E2E_TMP/venv}"
-log "Preparing e2e venv ($E2E_VENV): release tree + dev extras"
-[ -x "$E2E_VENV/bin/python" ] || uv venv "$E2E_VENV"
-uv pip install --quiet --python "$E2E_VENV/bin/python" -e "$RELEASE_DIR[dev]"
+log "Preparing e2e venv ($E2E_VENV): release tree + dev extras, from uv.lock"
+UV_PROJECT_ENVIRONMENT="$E2E_VENV" uv sync --quiet --locked --extra dev --project "$RELEASE_DIR"
 
 log "Running e2e (headless) from $RELEASE_DIR: ${E2E_ARGS[*]}"
 cd "$RELEASE_DIR"
