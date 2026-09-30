@@ -7,6 +7,8 @@ All notable changes to browden are documented here. The format follows
 
 ## [Unreleased]
 
+## [1.3.0] — 2026-09-30
+
 ### Added
 - **`invalidate_dom_cache` tool.** Drops a tab's cached DOM snapshot so the next
   read re-fetches the live HTML, without reloading the page — the fix for a
@@ -261,7 +263,8 @@ Initial public release.
   service manager (systemd / launchd / Task Scheduler).
 - Apache-2.0.
 
-[Unreleased]: https://github.com/nishantsny/browden/compare/v1.2.1...HEAD
+[Unreleased]: https://github.com/nishantsny/browden/compare/v1.3.0...HEAD
+[1.3.0]: https://github.com/nishantsny/browden/compare/v1.2.1...v1.3.0
 [1.2.1]: https://github.com/nishantsny/browden/compare/v1.2.0...v1.2.1
 [1.2.0]: https://github.com/nishantsny/browden/compare/v1.1.0...v1.2.0
 [1.1.0]: https://github.com/nishantsny/browden/compare/v1.0.0...v1.1.0
