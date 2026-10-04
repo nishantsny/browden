@@ -3,7 +3,7 @@ from unittest.mock import ANY, AsyncMock, MagicMock, patch
 
 import pytest
 from atomicity_harness import TAB, OnePageBackend, make_session
-from gated_fakes import gated_read, gated_write
+from gated_fakes import gated_list, gated_read, gated_write
 
 
 
@@ -531,19 +531,21 @@ async def test_read_tool_refuses_tab_on_non_allowlisted_host():
 
 @pytest.mark.asyncio
 async def test_list_tabs_closes_non_allowlisted_tabs():
-    # list_tabs closes tabs on non-allowlisted hosts (best-effort) and drops them
-    # from the listing; allowlisted tabs are kept and never closed.
+    # list_tabs hands the session the read gate; the session closes tabs on
+    # non-allowlisted hosts and drops them from the listing (in one hold — pinned
+    # in test_session.py), while allowlisted tabs are kept.
     import browden.mcp.server as server
     importlib.reload(server)
     keep = {"id": "pre-h1", "url": "https://www.google.com/", "title": "g",
             "selected": "True", "profile_dir": "/p"}
     drop = {"id": "pre-h2", "url": "https://secret-bank-xyz-99.test/acct", "title": "bank",
             "selected": "False", "profile_dir": "/p"}
-    session = _fake_session(list_tabs=[keep, drop], close_tab={"closed": "pre-h2"})
+    session = _fake_session()
+    session.list_tabs = gated_list(tabs=[keep, drop])
     server._store._sessions["pre"] = session
     result = await server.list_tabs()
-    assert result == [keep]                                 # non-allowlisted tab dropped
-    session.close_tab.assert_awaited_once_with("pre-h2")    # ...because it was closed
+    assert result == [keep]                       # non-allowlisted tab dropped
+    assert session.list_tabs.closed == ["pre-h2"]  # ...because the gate refused it
 
 
 # -- per-profile policy (#139) ------------------------------------------------
@@ -656,13 +658,13 @@ async def test_list_tabs_judges_each_profiles_tabs_by_its_own_rules(monkeypatch)
             "read": {"website_overrides": {"unranked.test": [".*"]}}}},
     })))
     tab = {"id": "x", "url": "https://unranked.test/x", "title": "t"}
-    allowed = _profiled_session("/profiles/research", list_tabs=[dict(tab, id="ok")],
-                                close_tab={"closed": "ok"})
-    refused = _profiled_session("/profiles/other", list_tabs=[dict(tab, id="closed")],
-                                close_tab={"closed": "closed"})
+    allowed = _profiled_session("/profiles/research")
+    allowed.list_tabs = gated_list(tabs=[dict(tab, id="ok")])
+    refused = _profiled_session("/profiles/other")
+    refused.list_tabs = gated_list(tabs=[dict(tab, id="closed")])
     with patch.object(server._store, "sessions", return_value=[allowed, refused]):
         listed = await server.list_tabs()
 
     assert [t["id"] for t in listed] == ["ok"]
-    refused.close_tab.assert_awaited_once_with("closed")
-    allowed.close_tab.assert_not_awaited()
+    assert refused.list_tabs.closed == ["closed"]
+    assert allowed.list_tabs.closed == []

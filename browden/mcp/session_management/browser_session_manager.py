@@ -214,12 +214,38 @@ class BrowserSessionManager:
 
     # -- navigation tools ---------------------------------------------------
 
-    async def list_tabs(self) -> list[dict]:
-        """Return this profile's open tabs as wire dicts, each with its composite id."""
-        tabs = await self._run_driver(self._backend.list_tabs)
-        logger.info(f"Listed {len(tabs)} tabs")
+    async def list_tabs(self, *, gate: ReadGate) -> list[dict]:
+        """Return this profile's open tabs that ``gate`` admits, as wire dicts.
+
+        H2: a tab parked on a URL the gate refuses is closed, not just hidden, so
+        the agent can neither read it nor learn it exists. The listing, the check
+        and the close all run in ONE driver-lock hold, so no other request can see
+        an off-list tab in between (docs/design/gate-atomicity.md). Closing is
+        best-effort: the last tab can't be closed, but it is still left out of the
+        listing.
+        """
+        def work():
+            kept, closed = [], []
+            for t in self._backend.list_tabs():
+                try:
+                    gate.check_page(t.url or "")
+                except ValidationError:
+                    logger.warning(f"list_tabs: closing non-allowlisted tab {t.url!r} (id={self._id(t.handle)})")
+                    try:
+                        self._backend.close_tab(t.handle)
+                        closed.append(t.handle)
+                    except Exception as e:
+                        logger.warning(f"list_tabs: could not close tab {self._id(t.handle)}: {e}")
+                    continue
+                kept.append(t)
+            return kept, closed
+
+        kept, closed = await self._run_driver(work)
+        for handle in closed:
+            self._drop(handle)
+        logger.info(f"Listed {len(kept)} tabs ({len(closed)} off-list closed)")
         result = []
-        for t in tabs:
+        for t in kept:
             self._registry.touch(t.handle)
             result.append(t.as_dict(id=self._id(t.handle)))
         return result
@@ -354,35 +380,6 @@ class BrowserSessionManager:
             if bounced is not None:
                 raise _Bounced(bounced)
         return gate_landing
-
-    async def document_url(self, *, id: str) -> str | None:
-        """Return ``id``'s FOCUSED-document URL (``document.URL``), or None if the tab is gone.
-
-        Reports the document the driver is focused on — the iframe's own URL when focus
-        is inside a frame, not just the top page. Focuses the tab first (``select_tab``),
-        which the frame-navigation tools use to replay the tab's frame focus, so this
-        reflects the current frame.
-
-        A standalone accessor, in its own hold. The read and write gates do NOT use
-        it: they read ``backend.document_url()`` inside the same hold as the read or
-        write they guard (``_check_live_url`` / ``_gated_write``), since a URL read in
-        a separate hold can be stale by the time the page is touched.
-
-        The one op that doesn't return a wire envelope, so it can't share ``_with_tab``
-        (which renders the tab-gone envelope): a gone tab is None here.
-        """
-        handle = self._handle(id)
-
-        def work():
-            self._backend.select_tab(handle)
-            return self._backend.document_url()
-        try:
-            url = await self._run_driver(work)
-        except TabNotFoundError:
-            self._drop(handle)
-            return None
-        self._registry.touch(handle)
-        return url
 
     # -- write tools --------------------------------------------------------
     #

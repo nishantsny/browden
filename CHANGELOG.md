@@ -25,6 +25,18 @@ All notable changes to browden are documented here. The format follows
   one invariant is checked: no off-list content left the browser, and no write
   landed on a page without a write rule. This replaces the separate read and
   write race lists. A new tool is covered by adding one entry.
+- **`list_tabs` gates and closes off-list tabs in the listing's own hold.**
+  The server used to list a profile's tabs, check each URL against the read
+  gate, and then close the off-list ones in separate driver holds. The session
+  now does all three in one hold, through the `ReadGate` the tool hands it. So
+  `server.py` no longer calls any gate predicate itself, and no other request
+  can run between the check and the close. The listing behaves the same: an
+  off-list tab is closed (best-effort; the last tab can't be) and never listed.
+- **The ungated `BrowserSessionManager.document_url()` is removed
+  (internal).** It read a tab's URL in a hold of its own, so a check built on it
+  was stale by the time anything acted. That's the separate-hold pattern
+  GHSA-4mgj-cwrw-795x fixed. The gates already read `backend.document_url()`
+  inside the hold they guard, and nothing in browden used the session method.
 
 ## [1.4.0] — 2026-10-04
 

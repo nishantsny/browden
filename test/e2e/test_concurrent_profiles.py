@@ -52,7 +52,7 @@ async def test_concurrent_navigation_across_distinct_profiles(sessions):
     # Isolation: each profile sees only its own tab, never a sibling's — proving
     # these are genuinely separate browser sessions, not one shared window.
     # session.list_tabs returns wire dicts with composite ids.
-    listed = await asyncio.gather(*(s.list_tabs() for s in sessions))
+    listed = await asyncio.gather(*(s.list_tabs(gate=OPEN_READ_GATE) for s in sessions))
     for i, my_pages in enumerate(listed):
         urls_seen = " ".join(p["url"] for p in my_pages)
         assert f"PROFILE_{i}" in urls_seen
