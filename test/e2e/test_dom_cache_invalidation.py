@@ -18,6 +18,7 @@ import pytest
 from browden.configs.loader import RuntimeConfigurationRefresher
 from browden.mcp.session_management.browser_session_manager import BrowserSessionManager
 from browden.mcp.validator import BrowdenRuntimeConfiguration, ValidationError
+from gates import OPEN_READ_GATE
 
 HTML = """<html><body>
   <button id="add"
@@ -43,8 +44,8 @@ def session(backend):
 async def _page_with_primed_cache(session):
     """Open the fixture page and prime its soup cache with one query."""
     blank = await session.new_blank_tab(max_tabs=10)
-    page = await session.navigate(DATA_URL, id=blank["id"])
-    primed = await session.query_selector("#marker", id=page["id"])
+    page = await session.navigate(DATA_URL, id=blank["id"], gate=OPEN_READ_GATE)
+    primed = await session.query_selector("#marker", id=page["id"], gate=OPEN_READ_GATE)
     assert primed["found"] is True  # the cache now holds a parse of the page
     return page
 
@@ -56,13 +57,13 @@ async def test_invalidate_makes_the_next_read_see_a_page_side_dom_change(session
     # The page mutates itself; browden's cached parse predates the change.
     backend.click_element("#add")
 
-    stale = await session.query_selector("#late", id=page["id"])
+    stale = await session.query_selector("#late", id=page["id"], gate=OPEN_READ_GATE)
     assert stale["found"] is False  # served from the pre-mutation snapshot
 
     res = await session.invalidate_dom_cache(id=page["id"])
     assert res == {"id": page["id"], "invalidated": True}
 
-    fresh = await session.query_selector("#late", id=page["id"])
+    fresh = await session.query_selector("#late", id=page["id"], gate=OPEN_READ_GATE)
     assert fresh["found"] is True
     assert fresh["element"]["text"] == "arrived"
     assert fresh["reloaded"] is False  # re-fetched, not reloaded
@@ -77,11 +78,11 @@ async def test_invalidate_keeps_live_dom_state_that_force_reload_discards(sessio
     backend.click_element("#add")
 
     await session.invalidate_dom_cache(id=page["id"])
-    assert (await session.query_selector("#late", id=page["id"]))["found"] is True
+    assert (await session.query_selector("#late", id=page["id"], gate=OPEN_READ_GATE))["found"] is True
 
-    reloaded = await session.force_reload_tab(id=page["id"])
+    reloaded = await session.force_reload_tab(id=page["id"], gate=OPEN_READ_GATE)
     assert reloaded["reloaded"] is True
-    gone = await session.query_selector("#late", id=page["id"])
+    gone = await session.query_selector("#late", id=page["id"], gate=OPEN_READ_GATE)
     assert gone["found"] is False  # the reload threw the JS-built node away
 
 
@@ -111,13 +112,13 @@ async def test_invalidate_drops_only_the_named_tabs_snapshot(session, backend):
 
     await session.invalidate_dom_cache(id=first["id"])
 
-    assert (await session.query_selector("#late", id=first["id"]))["found"] is True
-    assert (await session.query_selector("#late", id=second["id"]))["found"] is False
+    assert (await session.query_selector("#late", id=first["id"], gate=OPEN_READ_GATE))["found"] is True
+    assert (await session.query_selector("#late", id=second["id"], gate=OPEN_READ_GATE))["found"] is False
 
     # …and the sibling is exactly one invalidate away from catching up, so it was
     # holding a stale snapshot rather than having been broken by the first drop.
     await session.invalidate_dom_cache(id=second["id"])
-    assert (await session.query_selector("#late", id=second["id"]))["found"] is True
+    assert (await session.query_selector("#late", id=second["id"], gate=OPEN_READ_GATE))["found"] is True
 
 
 @pytest.mark.asyncio
@@ -141,8 +142,8 @@ async def test_invalidate_is_not_read_gated_but_reads_still_are(session, tmp_pat
     page_file = tmp_path / "page.html"
     page_file.write_text(HTML)
     blank = await session.new_blank_tab(max_tabs=10)
-    page = await session.navigate(f"file://{page_file}", id=blank["id"])
-    primed = await session.query_selector("#marker", id=page["id"])
+    page = await session.navigate(f"file://{page_file}", id=blank["id"], gate=OPEN_READ_GATE)
+    primed = await session.query_selector("#marker", id=page["id"], gate=OPEN_READ_GATE)
     assert primed["found"] is True  # readable while the policy still admits it
 
     refuses_this_page = BrowdenRuntimeConfiguration({

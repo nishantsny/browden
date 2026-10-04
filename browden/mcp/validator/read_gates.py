@@ -8,6 +8,8 @@ URL through :func:`validate_url` and turns the raise into ``False``. A
 not-yet-navigated tab (``about:blank`` or the browser new-tab page) is always
 admitted (special-cased in :func:`validate_url`).
 """
+from collections.abc import Callable
+from dataclasses import dataclass
 from urllib.parse import urlparse, urlunparse
 
 from ...common.logger import logger
@@ -98,3 +100,26 @@ def ensure_url_allowed(access_rules: BrowdenAccessRuleSet, url: str) -> bool:
         return True
     except ValidationError:
         return False
+
+
+@dataclass(frozen=True)
+class ReadGate:
+    """The read gate for one request, bound to one rule set.
+
+    Built once per request from a single read of the access rules, and run by
+    the session *inside the driver-lock hold that reads the page* — on the tab's
+    live URL before any content leaves the browser, and again on wherever a
+    navigation or reload in that same hold actually landed. So nothing (a
+    concurrent redirecting ``navigate``, a config hot-reload) can come between
+    the check and the read. ``check_page`` raises :class:`ValidationError` to
+    refuse. See docs/design/gate-atomicity.md.
+    """
+    check_page: Callable[[str], None]
+
+
+def read_gate(access_rules: BrowdenAccessRuleSet) -> ReadGate:
+    """The read gate, bound to ``access_rules``."""
+    def check_page(url: str) -> None:
+        if not ensure_url_allowed(access_rules, url):
+            raise ValidationError(f"URL not on the read allowlist: {url}")
+    return ReadGate(check_page=check_page)

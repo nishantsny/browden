@@ -45,7 +45,9 @@ from collections.abc import Callable
 from ...common.logger import logger
 from ...dom import query, serialize
 from ..validator.runtime_configuration import DEFAULT_REAP_INTERVAL_SECONDS
-from ..validator.errors import SessionBusyError, tab_gone_envelope
+from ..validator.errors import SessionBusyError, ValidationError, tab_gone_envelope
+from ..validator.read_gates import ReadGate
+from ..validator.write_gates import WriteGate
 from ...web_navigator.interface import TabNotFoundError
 from ...web_navigator.tab_id import format_tab_id, split_tab_id
 from ...web_navigator.registry import TabRegistry
@@ -261,26 +263,87 @@ class BrowserSessionManager:
             return {"selected": id}
         return await self._with_tab(id, work)
 
-    async def navigate(self, url: str, *, id: str) -> dict:
+    async def navigate(self, url: str, *, id: str, gate: ReadGate) -> dict:
+        """Navigate ``id`` to ``url`` (already gated by the caller) and gate the landing.
+
+        ``drv.get`` follows 3xx / meta / JS redirects to any final URL, so the
+        landing is re-checked with ``gate`` in the same hold, and an off-list
+        landing is bounced before any other request can see the tab there.
+        """
         def work(handle):
             self._backend.select_tab(handle)
             tab = self._backend.navigate(url)
             logger.info(f"Navigated tab {id} to {url!r}")
-            return tab.as_dict(id=self._id(tab.handle))
+            bounced = self._bounce_off_list_landing(handle, id, gate, tab.url)
+            return bounced or tab.as_dict(id=self._id(tab.handle))
         return await self._with_tab(id, work, invalidate=True)
+
+    # -- read gating ----------------------------------------------------------
+    #
+    # Like a write, a read is gated and performed in ONE driver-lock hold: focus
+    # the tab, check its live URL, then read. And wherever a navigation or reload
+    # in that hold lands, the landing is checked before the hold ends. So the page
+    # whose content leaves the browser is always one the gate admitted, and no
+    # other request ever sees a tab resting off-list. There is no ungated read
+    # path: every read method requires the ``gate``. See docs/design/gate-atomicity.md.
+
+    def _check_live_url(self, gate: ReadGate) -> str:
+        """Gate the focused tab's live document URL; return it. Runs off the loop."""
+        url = self._backend.document_url()
+        gate.check_page(url)
+        return url
+
+    def _bounce_off_list_landing(self, handle: str, id: str, gate: ReadGate, landed: str) -> dict | None:
+        """``None`` if ``gate`` admits ``landed``; else bounce the tab to about:blank.
+
+        An open redirect on an allowlisted site, or a server-side 302, can land a
+        navigation or reload on a host the gate never saw. Returns the error
+        envelope for a bounced landing, and drops any snapshot the landing left in
+        the soup cache. ``about:blank`` is always admitted, so the bounce itself
+        re-gates clean. Runs off the loop, inside the caller's hold.
+        """
+        try:
+            gate.check_page(landed)
+            return None
+        except ValidationError:
+            logger.warning(f"tab {id} landed off-allowlist at {landed!r}; bouncing to about:blank")
+            self._backend.navigate("about:blank")
+            self._cache.invalidate(handle)
+            return {"error": f"navigation left the allowlist (landed on {landed}) — "
+                             f"tab reset to about:blank",
+                    "id": id, "url": landed}
+
+    def _gated_soup(self, handle: str, gate: ReadGate):
+        """``(soup, reloaded)`` for ``handle``, gated on the page it came from. Runs off the loop.
+
+        The soup cache reloads a stale entry in the browser, and that reload can be
+        redirected, so a reload's landing is gated too: an off-list one is bounced
+        and the read refused.
+        """
+        self._backend.select_tab(handle)
+        self._check_live_url(gate)
+        soup, reloaded = self._cache.get_soup(handle, self._backend)
+        if reloaded:
+            landed = self._backend.document_url()
+            if self._bounce_off_list_landing(handle, self._id(handle), gate, landed) is not None:
+                raise ValidationError(f"URL not on the read allowlist: {landed}")
+        return soup, reloaded
 
     async def document_url(self, *, id: str) -> str | None:
         """Return ``id``'s FOCUSED-document URL (``document.URL``), or None if the tab is gone.
 
         Reports the document the driver is focused on — the iframe's own URL when focus
-        is inside a frame — so the read/write gates validate what is actually being
-        read/written, not just the top page. Focuses the tab first (``select_tab``),
+        is inside a frame, not just the top page. Focuses the tab first (``select_tab``),
         which the frame-navigation tools use to replay the tab's frame focus, so this
         reflects the current frame.
 
+        A standalone accessor, in its own hold. The read and write gates do NOT use
+        it: they read ``backend.document_url()`` inside the same hold as the read or
+        write they guard (``_check_live_url`` / ``_gated_write``), since a URL read in
+        a separate hold can be stale by the time the page is touched.
+
         The one op that doesn't return a wire envelope, so it can't share ``_with_tab``
-        (which renders the tab-gone envelope): a gone tab is None here, which the
-        caller — the per-action gate — turns into the envelope.
+        (which renders the tab-gone envelope): a gone tab is None here.
         """
         handle = self._handle(id)
 
@@ -296,63 +359,80 @@ class BrowserSessionManager:
         return url
 
     # -- write tools --------------------------------------------------------
+    #
+    # A write is decided and performed in ONE driver-lock hold: focus the tab,
+    # read its URL, gate 1, parse its live HTML, gates 2+, act. Nothing — a
+    # concurrent navigate on the same tab, a config hot-reload — can land between
+    # the decision and the action. There is no ungated write path: every write
+    # method requires the ``gate``. See docs/design/gate-atomicity.md.
 
-    async def click(self, css_selector: str, *, id: str) -> dict:
-        """Click the (already policy-validated) add-to-cart element on ``id``.
+    def _gated_write(self, handle: str, id: str, css_selector: str, gate: WriteGate,
+                     act, done: str) -> dict:
+        """Run ``gate`` against ``handle``'s live page, then ``act()``; log ``done``.
 
-        The caller (the ``click`` MCP tool) has already gated the host and
-        verified the element is a genuine add-to-cart control on the cached
-        snapshot. Here we re-find it live and click; the soup cache is then
-        invalidated because the DOM has changed.
+        Runs off the loop, inside the caller's single driver-lock hold.
+
+        The element is judged on a fresh parse of the live HTML, never the soup
+        cache: a cached snapshot can predate what the page shows now. It is not
+        stored back — the write invalidates the tab's cache on success anyway.
+        """
+        self._backend.select_tab(handle)
+        url = self._backend.document_url()
+        gate.check_page(url)  # gate 1 — before the DOM is even read
+        soup = SoupCache.parse(self._backend.get_tab_html())
+        try:
+            paginated = query.css_all(soup, css_selector, 2, 0)  # limit=2: ambiguity is detectable
+        except query.InvalidSelector as e:
+            return {"error": f"invalid CSS selector: {e}", "id": id}
+        found = self._list_envelope(id, False, paginated, False, serialize.DEFAULT_MAX_HTML_BYTES)
+        gate.check_element(url, css_selector, found)  # gates 2+
+        result = act()
+        logger.info(done)
+        result["id"] = id
+        return result
+
+    async def click(self, css_selector: str, *, id: str, gate: WriteGate) -> dict:
+        """Click ``css_selector`` on ``id`` if ``gate`` authorizes it, in one driver hold.
+
+        The soup cache is then invalidated because the DOM has changed.
         """
         def work(handle):
-            self._backend.select_tab(handle)
-            result = self._backend.click_element(css_selector)
-            logger.info(f"click: activated {css_selector!r} on tab {id}")
-            result["id"] = id
-            return result
+            return self._gated_write(handle, id, css_selector, gate,
+                                     lambda: self._backend.click_element(css_selector),
+                                     f"click: activated {css_selector!r} on tab {id}")
         return await self._with_tab(id, work, invalidate=True)
 
-    async def insert_text(self, css_selector: str, value: str, *, id: str) -> dict:
-        """Type ``value`` into the (already policy-validated) text field on ``id``.
+    async def insert_text(self, css_selector: str, value: str, *, id: str, gate: WriteGate) -> dict:
+        """Type ``value`` into ``css_selector`` on ``id`` if ``gate`` authorizes it, in one driver hold.
 
-        The caller (the ``insert_text`` MCP tool) has gated the host, verified the element
-        is a fillable text control, and matched the field's visible label on the
-        cached snapshot. Here we re-find it live and set its value; the soup cache
-        is then invalidated because the DOM has changed.
+        The soup cache is then invalidated because the DOM has changed.
         """
         def work(handle):
-            self._backend.select_tab(handle)
-            result = self._backend.insert_text_element(css_selector, value)
-            logger.info(f"insert_text: set {css_selector!r} on tab {id}")
-            result["id"] = id
-            return result
+            return self._gated_write(handle, id, css_selector, gate,
+                                     lambda: self._backend.insert_text_element(css_selector, value),
+                                     f"insert_text: set {css_selector!r} on tab {id}")
         return await self._with_tab(id, work, invalidate=True)
 
-    async def press_key(self, css_selector: str, key: str, *, id: str) -> dict:
-        """Press ``key`` on the (already policy-validated) focused element on ``id``.
+    async def press_key(self, css_selector: str, key: str, *, id: str, gate: WriteGate) -> dict:
+        """Press ``key`` on ``css_selector`` on ``id`` if ``gate`` authorizes it, in one driver hold.
 
-        The caller (the ``press_key`` MCP tool) has gated the host, verified the
-        element is a focusable control, matched the page label, and checked the key
-        is one the rule authorizes. Here we re-find it live, focus it and dispatch
-        the key; the soup cache is invalidated because the key may have changed the
-        DOM (activated a control, moved a selection).
+        ``gate`` must be the one built for this same ``key`` (``press_key_gate``).
+        The soup cache is invalidated because the key may have changed the DOM
+        (activated a control, moved a selection).
         """
         def work(handle):
-            self._backend.select_tab(handle)
-            result = self._backend.press_key_element(css_selector, key)
-            logger.info(f"press_key: sent {key!r} to {css_selector!r} on tab {id}")
-            result["id"] = id
-            return result
+            return self._gated_write(handle, id, css_selector, gate,
+                                     lambda: self._backend.press_key_element(css_selector, key),
+                                     f"press_key: sent {key!r} to {css_selector!r} on tab {id}")
         return await self._with_tab(id, work, invalidate=True)
 
     # -- DOM-query tools ----------------------------------------------------
 
-    async def get_element_by_id(self, element_id: str, *, id: str,
+    async def get_element_by_id(self, element_id: str, *, id: str, gate: ReadGate,
                                 include_html: bool = False,
                                 max_html_bytes: int = serialize.DEFAULT_MAX_HTML_BYTES) -> dict:
         def work(handle):
-            soup, reloaded = self._cache.get_soup(handle, self._backend)
+            soup, reloaded = self._gated_soup(handle, gate)
             el = query.by_id(soup, element_id)
             return {
                 "id": id,
@@ -362,21 +442,21 @@ class BrowserSessionManager:
             }
         return await self._with_tab(id, work, invalidate=False)
 
-    async def get_elements_by_class_name(self, class_names: str, *, id: str,
+    async def get_elements_by_class_name(self, class_names: str, *, id: str, gate: ReadGate,
                                          limit: int = query.LIMIT_DEFAULT, offset: int = 0,
                                          include_html: bool = False,
                                          max_html_bytes: int = serialize.DEFAULT_MAX_HTML_BYTES) -> dict:
         def work(handle):
-            soup, reloaded = self._cache.get_soup(handle, self._backend)
+            soup, reloaded = self._gated_soup(handle, gate)
             result = query.by_class(soup, class_names, limit, offset)
             return self._list_envelope(id, reloaded, result, include_html, max_html_bytes)
         return await self._with_tab(id, work, invalidate=False)
 
-    async def query_selector(self, css_selector: str, *, id: str,
+    async def query_selector(self, css_selector: str, *, id: str, gate: ReadGate,
                              include_html: bool = False,
                              max_html_bytes: int = serialize.DEFAULT_MAX_HTML_BYTES) -> dict:
         def work(handle):
-            soup, reloaded = self._cache.get_soup(handle, self._backend)
+            soup, reloaded = self._gated_soup(handle, gate)
             try:
                 el = query.css_one(soup, css_selector)
             except query.InvalidSelector as e:
@@ -389,12 +469,12 @@ class BrowserSessionManager:
             }
         return await self._with_tab(id, work, invalidate=False)
 
-    async def query_selector_all(self, css_selector: str, *, id: str,
+    async def query_selector_all(self, css_selector: str, *, id: str, gate: ReadGate,
                                  limit: int = query.LIMIT_DEFAULT, offset: int = 0,
                                  include_html: bool = False,
                                  max_html_bytes: int = serialize.DEFAULT_MAX_HTML_BYTES) -> dict:
         def work(handle):
-            soup, reloaded = self._cache.get_soup(handle, self._backend)
+            soup, reloaded = self._gated_soup(handle, gate)
             try:
                 result = query.css_all(soup, css_selector, limit, offset)
             except query.InvalidSelector as e:
@@ -402,7 +482,7 @@ class BrowserSessionManager:
             return self._list_envelope(id, reloaded, result, include_html, max_html_bytes)
         return await self._with_tab(id, work, invalidate=False)
 
-    async def screenshot(self, *, id: str) -> bytes | dict:
+    async def screenshot(self, *, id: str, gate: ReadGate) -> bytes | dict:
         """Capture a PNG screenshot of ``id``'s viewport.
 
         Read-only: it focuses the tab and grabs live pixels, so it neither uses
@@ -411,6 +491,7 @@ class BrowserSessionManager:
         """
         def work(handle):
             self._backend.select_tab(handle)
+            self._check_live_url(gate)
             png = self._backend.screenshot()
             logger.info(f"Captured screenshot of tab {id} ({len(png)} bytes)")
             return png
@@ -437,10 +518,18 @@ class BrowserSessionManager:
         # once work has succeeded), so a gone tab never reports a bogus success.
         return await self._with_tab(id, work, invalidate=True)
 
-    async def force_reload_tab(self, *, id: str) -> dict:
+    async def force_reload_tab(self, *, id: str, gate: ReadGate) -> dict:
+        """Reload ``id`` and refresh its cached DOM — gated before, and on the landing.
+
+        One hold: the live URL must pass ``gate`` before the reload, and a reload
+        redirected off-list is bounced (and its snapshot dropped) before the hold ends.
+        """
         def work(handle):
+            self._backend.select_tab(handle)
+            self._check_live_url(gate)
             _soup, tab_info = self._cache.force_reload(handle, self._backend)
-            return {"id": id, "url": tab_info.url, "title": tab_info.title, "reloaded": True}
+            bounced = self._bounce_off_list_landing(handle, id, gate, tab_info.url)
+            return bounced or {"id": id, "url": tab_info.url, "title": tab_info.title, "reloaded": True}
         return await self._with_tab(id, work, invalidate=False)
 
     # -- serialization helpers ---------------------------------------------

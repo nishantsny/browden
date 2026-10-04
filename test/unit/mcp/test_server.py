@@ -1,7 +1,9 @@
 import importlib
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import ANY, AsyncMock, MagicMock, patch
 
 import pytest
+from atomicity_harness import TAB, OnePageBackend, make_session
+from gated_fakes import gated_read, gated_write
 
 
 
@@ -283,7 +285,8 @@ async def test_navigate_tool_validates_then_delegates():
     session = _fake_session(navigate={"id": "pre-h1", "url": "https://amazon.com", "title": "t", "selected": "True", "profile_dir": "/p"})
     with patch.object(server._store, "route", return_value=session):
         result = await server.navigate("amazon.com", "pre-h1")
-    session.navigate.assert_awaited_once_with("https://amazon.com", id="pre-h1")  # normalized by validate_url
+    # normalized by validate_url; the session gates the landing with ``gate``
+    session.navigate.assert_awaited_once_with("https://amazon.com", id="pre-h1", gate=ANY)
     assert result["url"] == "https://amazon.com"
     assert result["id"] == "pre-h1"
 
@@ -317,15 +320,12 @@ async def test_navigate_bounces_when_redirect_lands_off_allowlist():
     # the tab is bounced to about:blank, and an error envelope is returned.
     import browden.mcp.server as server
     importlib.reload(server)
-    session = _fake_session(navigate={
-        "id": "pre-h1", "url": "https://nonexistent-xyz-9876.test/landing",
-        "title": "t", "selected": "True", "profile_dir": "/p"})
-    with patch.object(server._store, "route", return_value=session):
-        result = await server.navigate("amazon.com", "pre-h1")
+    backend = OnePageBackend("about:blank", {}, redirects={
+        "https://amazon.com": "https://nonexistent-xyz-9876.test/landing"})
+    with patch.object(server._store, "route", return_value=make_session(backend)):
+        result = await server.navigate("amazon.com", TAB)
     assert "error" in result and "allowlist" in result["error"]
-    # The tab was reset: navigate awaited again with about:blank.
-    assert any(c.args and c.args[0] == "about:blank"
-               for c in session.navigate.await_args_list)
+    assert backend.url == "about:blank"  # the tab was reset
 
 
 @pytest.mark.asyncio
@@ -350,14 +350,11 @@ async def test_navigate_bounces_when_landing_on_non_web_scheme():
     # is NOT waved through — it is re-gated like any other landing and bounced.
     import browden.mcp.server as server
     importlib.reload(server)
-    session = _fake_session(navigate={
-        "id": "pre-h1", "url": "chrome://settings/", "title": "t",
-        "selected": "True", "profile_dir": "/p"})
-    with patch.object(server._store, "route", return_value=session):
-        result = await server.navigate("amazon.com", "pre-h1")
+    backend = OnePageBackend("about:blank", {}, redirects={"https://amazon.com": "chrome://settings/"})
+    with patch.object(server._store, "route", return_value=make_session(backend)):
+        result = await server.navigate("amazon.com", TAB)
     assert "error" in result
-    assert any(c.args and c.args[0] == "about:blank"
-               for c in session.navigate.await_args_list)
+    assert backend.url == "about:blank"
 
 
 @pytest.mark.asyncio
@@ -420,8 +417,9 @@ async def test_force_reload_page_tool_requires_page_id():
 async def test_dom_tools_delegate_with_kwargs():
     import browden.mcp.server as server
     importlib.reload(server)
+    # The session gates the tab itself (with the ``gate`` it is handed), so the
+    # tool just delegates — the gate is pinned in test_read_gate_atomicity.py.
     session = _fake_session(
-        document_url="https://www.google.com/",  # read-allowed so the H2 gate passes
         get_element_by_id={"found": False, "element": None},
         query_selector_all={"total_count": 0, "elements": []},
         force_reload_tab={"reloaded": True},
@@ -433,10 +431,10 @@ async def test_dom_tools_delegate_with_kwargs():
         await server.query_selector_all(".a", "pre-h1", limit=3, offset=6)
         await server.force_reload_tab(id="pre-h2")
     session.get_element_by_id.assert_awaited_once_with(
-        "x", id="pre-h1", include_html=True, max_html_bytes=10)
+        "x", id="pre-h1", gate=ANY, include_html=True, max_html_bytes=10)
     session.query_selector_all.assert_awaited_once_with(
-        ".a", id="pre-h1", limit=3, offset=6, include_html=False, max_html_bytes=4096)
-    session.force_reload_tab.assert_awaited_once_with(id="pre-h2")
+        ".a", id="pre-h1", gate=ANY, limit=3, offset=6, include_html=False, max_html_bytes=4096)
+    session.force_reload_tab.assert_awaited_once_with(id="pre-h2", gate=ANY)
 
 
 @pytest.mark.asyncio
@@ -452,10 +450,11 @@ async def test_screenshot_tool_returns_image():
     import browden.mcp.server as server
     importlib.reload(server)
     png = b"\x89PNG\r\n\x1a\n" + b"fakepixels"
-    session = _fake_session(document_url="https://www.google.com/", screenshot=png)
+    session = _fake_session()
+    session.screenshot = gated_read(url="https://www.google.com/", result=png)
     with patch.object(server._store, "route", return_value=session):
         result = await server.screenshot("pre-h1")
-    session.screenshot.assert_awaited_once_with(id="pre-h1")
+    assert session.screenshot.performed == [((), {})]
     assert isinstance(result, server.Image)
     # The image carries the raw PNG bytes the session produced.
     assert result.data == png
@@ -463,16 +462,17 @@ async def test_screenshot_tool_returns_image():
 
 @pytest.mark.asyncio
 async def test_screenshot_tool_returns_tab_gone_envelope():
-    # A closed tab has no live URL; the read gate short-circuits with the standard
-    # tab-gone envelope before ever screenshotting (H2).
+    # A closed tab comes back from the session as the standard tab-gone envelope,
+    # which the tool passes through rather than wrapping as an image.
     import browden.mcp.server as server
     importlib.reload(server)
-    session = _fake_session(document_url=None)
+    session = _fake_session()
+    session.screenshot = gated_read(url=None, result=b"never")
     with patch.object(server._store, "route", return_value=session):
         result = await server.screenshot("pre-h9")
     assert result == {"error": "tab pre-h9 is no longer open — call list_tabs for current tabs",
                       "id": "pre-h9"}
-    session.screenshot.assert_not_called()
+    assert session.screenshot.performed == []
 
 
 @pytest.mark.asyncio
@@ -520,12 +520,13 @@ async def test_read_tool_refuses_tab_on_non_allowlisted_host():
     from browden.mcp.validator import ValidationError
     import browden.mcp.server as server
     importlib.reload(server)
-    session = _fake_session(document_url="https://nonexistent-xyz-99.test/secret",
-                            query_selector={"found": True})
+    session = _fake_session()
+    session.query_selector = gated_read(url="https://nonexistent-xyz-99.test/secret",
+                                        result={"found": True})
     with patch.object(server._store, "route", return_value=session):
         with pytest.raises(ValidationError, match="read allowlist"):
             await server.query_selector("body", id="pre-h1")
-    session.query_selector.assert_not_awaited()  # never reached the read
+    assert session.query_selector.performed == []  # never reached the read
 
 
 @pytest.mark.asyncio
@@ -573,17 +574,15 @@ async def test_click_is_authorized_per_profile(monkeypatch):
             "text": "Add to cart"}
 
     async def click_in(profile_dir):
-        session = _profiled_session(
-            profile_dir,
-            document_url="https://shop.test/cart",
-            query_selector_all={"total_count": 1, "elements": [node]},
-            click={"clicked": True})
+        session = _profiled_session(profile_dir)
+        session.click = gated_write(url="https://shop.test/cart", elements=[node],
+                                    result={"clicked": True})
         with patch.object(server._store, "route", return_value=session):
             return await server.click("#atc", "h1"), session
 
     result, session = await click_in("/profiles/shopper")
     assert result["clicked"] is True
-    session.click.assert_awaited_once()
+    assert session.click.performed == [("#atc",)]
 
     with pytest.raises(ValidationError, match="not allowed on this page"):
         await click_in("/profiles/reader")
@@ -603,10 +602,9 @@ async def test_reads_are_gated_by_the_tabs_own_profile(monkeypatch):
     })))
 
     async def read_in(profile_dir):
-        session = _profiled_session(
-            profile_dir,
-            document_url="https://unranked.test/x",
-            query_selector={"found": True, "element": {"tag": "body"}})
+        session = _profiled_session(profile_dir)
+        session.query_selector = gated_read(url="https://unranked.test/x",
+                                            result={"found": True, "element": {"tag": "body"}})
         with patch.object(server._store, "route", return_value=session):
             return await server.query_selector("body", "h1")
 
