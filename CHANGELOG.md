@@ -7,6 +7,15 @@ All notable changes to browden are documented here. The format follows
 
 ## [Unreleased]
 
+### Changed
+- **GitHub Release pages lead with the CHANGELOG section (maintainers).** The
+  `release` workflow used `--generate-notes` alone, so a Release page listed
+  only the titles of the PRs merged since the previous tag, and none of the
+  changelog's explanation or compatibility notes. It now puts the tag's
+  `## [X.Y.Z]` section first and keeps GitHub's PR list below it. A tag whose
+  version has no section (or an empty one) fails the workflow before `stable`
+  is promoted.
+
 ## [1.3.1] — 2026-10-04
 
 ### Changed

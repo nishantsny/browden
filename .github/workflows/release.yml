@@ -44,6 +44,20 @@ jobs:
             exit 1
           fi
 
+      - name: Refuse a tag with no CHANGELOG section
+        # The Release page shows this section, so extract it now: a tag whose version
+        # has no `## [X.Y.Z]` section fails here, BEFORE stable is promoted. The
+        # section ends at the next version heading, or at the link references below
+        # the oldest one.
+        run: |
+          v="${GITHUB_REF_NAME#v}"
+          awk -v h="## [$v]" 'index($0,h)==1{f=1;next} f&&(/^## \[/||/^\[[^]]+\]: /){exit} f' \
+            CHANGELOG.md > "$RUNNER_TEMP/release-notes.md"
+          if ! grep -q '[^[:space:]]' "$RUNNER_TEMP/release-notes.md"; then
+            echo "::error::CHANGELOG.md has no '## [$v]' section (or it is empty)"
+            exit 1
+          fi
+
       - name: Fast-forward stable to the tag
         # A plain (non-force) push is REJECTED on a non-fast-forward, so this can only
         # ADVANCE stable along main's line — never rewind or diverge it. Creates the
@@ -51,10 +65,15 @@ jobs:
         run: git push origin "${{ github.sha }}:refs/heads/stable"
 
       - name: Cut the GitHub Release
+        # The page leads with the tag's CHANGELOG section (the why, compatibility
+        # notes, maintainer warnings); --generate-notes appends GitHub's list of the
+        # PRs merged since the previous tag. `--notes` is the flag gh documents as
+        # prepending to generated notes.
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh release create "${{ github.ref_name }}" \
             --verify-tag \
             --title "${{ github.ref_name }}" \
+            --notes "$(cat "$RUNNER_TEMP/release-notes.md")" \
             --generate-notes
