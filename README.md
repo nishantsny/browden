@@ -5,10 +5,22 @@
 [![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue.svg)](https://www.python.org/downloads/)
 [![MCP server](https://img.shields.io/badge/MCP-server-1f6feb.svg)](https://modelcontextprotocol.io)
 
-**A local, cross-platform, read-only (configurable) MCP shell around a real Chrome browser.** It lets an LLM
-agent *look at* and *navigate* the web through your own browser. The agent can read pages,
-query the DOM, and take screenshots, but can never execute any write action. The MCP
-is configurable to allow button-clicks and text-fill, allowlisted per website and visible element.
+**A local, cross-platform MCP shell that puts mechanical gates between an LLM agent and a
+real Chrome browser.**
+
+We all want our systems to be highly intelligent and to act in our best interests. But
+intelligence has always been a double-edged sword: the same capability that makes an agent
+useful makes it suggestible, and a web page it reads can do the suggesting. What such a system
+needs is not a smarter minder — it is a sandbox. A good one is:
+
+- **mechanical** — it never relies on the intelligence it is containing;
+- **fine-grained** — it supports a myriad of controls, from read-only, through named write
+  actions on named controls, to full write access inside a dedicated profile of its own;
+- **auditable** — every decision it makes leaves a trail, and the policy it enforces is one
+  file you can read, diff and review before the agent ever runs.
+
+browden is that sandbox. It lets you turn an agent loose — on your own logged-in Chrome, or in
+a scratch profile — while every action it takes stays behind an extensible, default-deny gate.
 
 _Short demo video: https://youtu.be/q-W3Z9nlj58_
 
@@ -16,17 +28,45 @@ _Short demo video: https://youtu.be/q-W3Z9nlj58_
 
 **With great power comes great responsibility**: Only point this MCP to sites whose Terms of Service permit automated access.
 
-## When to use browden
+## The gates are not intelligent, on purpose
 
-browden is deliberately narrow: **safe, local, undetected, and read-only, with allowlisted writes**. 
-This allows your agent to run wild on your *own* logged-in Chrome. Use browden for your daily research needs + a few writes. 
-Defer to richer automation tools when you need to *drive* the browser rather than *read* it.
+A prompt injection works by *persuading*. browden's gates cannot be persuaded, because there
+is no model anywhere in them — only regexes over the host, the URL path, and the visible text
+of the control being acted on, each evaluated default-deny:
 
-**Typical usecases:**
+| Gate | What it mechanically checks | Default |
+| --- | --- | --- |
+| `denylist` | host → path regexes; checked first, wins over every grant below | — |
+| `read` | whether a host may be read at all: the [Tranco](https://tranco-list.eu/) top-sites snapshot plus your own `website_overrides` | the ranked web only |
+| scheme | `file://` and plaintext `http://` reach only hosts you name explicitly | https only |
+| `click`, `write-text`, `press-key`, `upload-file` | per host: which paths, and a regex the control's **visible label** must fully match | deny |
+| `allowed_upload_locations` | the only directories a file may be read from to send to a site | nothing uploadable |
 
-- Let an agent read and navigate your **logged-in** pages while it stays
+There are no coarse modes to choose between. Read-only *is* the default — name no write
+section and every write action default-denies — and you widen it one action, one host, one
+label at a time. "Let the agent click *Add to cart* on this one store, nothing else" is a
+three-line grant, and it is the entirety of what the agent can then do.
+
+## Letting it roam: scratch profiles
+
+Rules are scoped per **browser profile**, and a profile is a real Chrome `--user-data-dir`.
+One config therefore gives you two postures at once:
+
+- **Your logged-in profile, kept narrow.** The agent reads your authenticated pages and stays
   structurally unable to click "Buy", send mail, or delete anything.
-- You need a **prompt-injection perimeter** around the agent.
+- **A scratch profile with `allow_all: true`.** Every write action on every page it may read —
+  but in its own Chrome profile, with its own cookies and its own sessions, so nothing it does
+  there touches your logins.
+
+`allow_all` is the widest setting there is, and it is still not unconditional — which is the
+point. Reads stay bounded by the Tranco check, switched *on* for such a profile unless you
+explicitly say `read: {tranco: {enabled: false}}`, so broad browsing covers the established web
+while a typosquat or a domain registered yesterday still takes a deliberate act. The denylist
+still wins, the scheme gate is unmoved, and uploads still need `allowed_upload_locations`.
+Three mechanical floors remain under even the most permissive configuration. See
+[Scoping rules to a profile](#scoping-rules-to-a-profile) for the full mechanics.
+
+Defer to richer automation tools when you need to *drive* the browser rather than gate it.
 
 ## When NOT to use browden
 
