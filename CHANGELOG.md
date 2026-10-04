@@ -15,6 +15,15 @@ All notable changes to browden are documented here. The format follows
   `uv lock --offline`, keep that worktree until the PR merges, and then remove
   it along with the local `release/v*` branch. A later run's preflight clears
   any leftover one.
+- **Deploy script syncs the service's venv from `uv.lock` (maintainers).**
+  Step 2 used `uv pip install -e`, which resolves `pyproject`'s ranges: it
+  never moved an already-installed package to its locked version, so the live
+  service drifted from what CI and the e2e venv test (it was five packages
+  behind the lock). It now runs `uv sync --locked`, the same locked install
+  `setup/onetime_setup.py` and the e2e venv use. The sync is exact, so the
+  first deploy also removes a stale `browser-guard` 0.1.0 editable install
+  left over from the project's old name. A stale `uv.lock` now fails the
+  deploy before the service restarts.
 
 ## [1.3.0] — 2026-09-30
 

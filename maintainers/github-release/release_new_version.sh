@@ -6,7 +6,7 @@
 # Pipeline (fails fast — any step aborts with a non-zero exit):
 #   0. preflight  — release checkout / venv / config / systemctl all present
 #   1. fast-forward the release checkout to origin/$BROWDEN_DEPLOY_BRANCH (default main)
-#   2. sync the release venv to the pulled pyproject deps (uv pip install -e),
+#   2. sync the release venv to the pulled uv.lock (uv sync --locked),
 #      so a ff-pull that ADDED a runtime dependency doesn't crash-loop the
 #      service on import — same editable install setup/onetime_setup.py does
 #   3. validate the config loads under the JUST-PULLED code (before we restart,
@@ -129,12 +129,17 @@ fi
 # ---- 2. sync the release venv to the pulled pyproject deps ----------------
 # The service runs from the source tree, but its venv must carry the declared
 # runtime dependencies. A ff-pull that adds a new one (e.g. publicsuffix2) would
-# otherwise crash-loop the service on import. Editable + idempotent, this mirrors
-# ensure_venv() in setup/onetime_setup.py (runtime deps only — no [dev] extras,
-# keeping the production venv lean). Runs BEFORE config-validate/restart so both
-# execute against the synced venv.
-log "Syncing release venv to pyproject runtime deps (uv pip install -e)"
-uv pip install --quiet --python "$VENV_PY" -e "$RELEASE_DIR"
+# otherwise crash-loop the service on import. Like ensure_venv() in
+# setup/onetime_setup.py, this installs the exact set pinned in uv.lock (runtime
+# deps only — no [dev] extras, keeping the production venv lean), so the service
+# runs what CI and the e2e venv test. `uv pip install -e` used to resolve
+# pyproject's ranges instead: it never moved an already-satisfied package to its
+# locked version, and nothing but the `<2` pin kept it off mcp 2.x. --locked
+# fails the deploy here, before the restart, if uv.lock is stale; the sync is
+# exact, so packages the lock doesn't list are removed. Runs BEFORE
+# config-validate/restart so both execute against the synced venv.
+log "Syncing release venv to uv.lock runtime deps (uv sync --locked)"
+UV_PROJECT_ENVIRONMENT="${VENV_PY%/bin/python}" uv sync --quiet --locked --project "$RELEASE_DIR"
 
 # ---- 3. validate the config against the just-pulled code ------------------
 log "Validating $CONFIG under the release venv"
