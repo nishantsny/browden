@@ -8,14 +8,19 @@
 **A local, cross-platform MCP shell that puts mechanical gates between an LLM agent and a
 real Chrome browser.**
 
-We all want our systems to be highly intelligent and act in our best interests. But Intelligence has often been a double-edge sword. 
-Ideally, we want an excellent sandbox for the intelligent system. The sandbox must be 
-- mechanical: it must never relies on the underlying intelligence
-- fine-grained: it must support a myriad of controls, from read-only, specific write-access, and full-access in dedicated mini-sandboxes.
-- auditable: Every access must have indestructible paper trail.
+We all want our systems to be highly intelligent and to act in our best interests. But
+intelligence has always been a double-edged sword: the same capability that makes an agent
+useful makes it suggestible, and a web page it reads can do the suggesting. What such a system
+needs is not a smarter minder — it is a sandbox. A good one is:
 
-Introducing Guardian - it empowers admins to allows agents to roam-free while keep all agents actions (local or remote) behind an extensible and auditable gate. 
+- **mechanical** — it never relies on the intelligence it is containing;
+- **fine-grained** — it supports a myriad of controls, from read-only, through named write
+  actions on named controls, to full write access inside a dedicated profile of its own;
+- **auditable** — every decision it makes leaves a trail, and the policy it enforces is one
+  file you can read, diff and review before the agent ever runs.
 
+browden is that sandbox. It lets you turn an agent loose — on your own logged-in Chrome, or in
+a scratch profile — while every action it takes stays behind an extensible, default-deny gate.
 
 _Short demo video: https://youtu.be/q-W3Z9nlj58_
 
