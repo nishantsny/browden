@@ -67,6 +67,18 @@ class _AtTabCap(Exception):
     """
 
 
+class _Bounced(Exception):
+    """Internal: a reload landed off-list and was bounced. Never leaves this module.
+
+    Raised from the soup cache's ``on_reload`` hook (``_landing_hook``) to stop it
+    fetching the landed page; carries the bounce's error envelope back to the caller.
+    """
+
+    def __init__(self, envelope: dict):
+        super().__init__(envelope["error"])
+        self.envelope = envelope
+
+
 class BrowserSessionManager:
     def __init__(self, backend, *, namespace: str, clock=time.monotonic, start_reaper: bool = True,
                  reap_interval_seconds: Callable[[], float] = lambda: DEFAULT_REAP_INTERVAL_SECONDS):
@@ -317,17 +329,31 @@ class BrowserSessionManager:
         """``(soup, reloaded)`` for ``handle``, gated on the page it came from. Runs off the loop.
 
         The soup cache reloads a stale entry in the browser, and that reload can be
-        redirected, so a reload's landing is gated too: an off-list one is bounced
-        and the read refused.
+        redirected, so a reload's landing is gated too — before the page is fetched:
+        an off-list one is bounced and the read refused, and none of it leaves the
+        browser.
         """
         self._backend.select_tab(handle)
         self._check_live_url(gate)
-        soup, reloaded = self._cache.get_soup(handle, self._backend)
-        if reloaded:
-            landed = self._backend.document_url()
-            if self._bounce_off_list_landing(handle, self._id(handle), gate, landed) is not None:
-                raise ValidationError(f"URL not on the read allowlist: {landed}")
-        return soup, reloaded
+        try:
+            return self._cache.get_soup(handle, self._backend,
+                                        on_reload=self._landing_hook(handle, self._id(handle), gate))
+        except _Bounced as b:
+            raise ValidationError(f"URL not on the read allowlist: {b.envelope['url']}") from None
+
+    def _landing_hook(self, handle: str, id: str, gate: ReadGate):
+        """The soup cache's ``on_reload`` hook: gate where a reload landed, before the fetch.
+
+        Judges the URL the reload reports (as ``navigate`` judges its landing), bounces
+        an off-list one, and raises :class:`_Bounced` so the cache never fetches the
+        page. Each caller decides how a bounce surfaces: a read refuses,
+        ``force_reload_tab`` returns the bounce envelope.
+        """
+        def gate_landing(tab_info):
+            bounced = self._bounce_off_list_landing(handle, id, gate, tab_info.url)
+            if bounced is not None:
+                raise _Bounced(bounced)
+        return gate_landing
 
     async def document_url(self, *, id: str) -> str | None:
         """Return ``id``'s FOCUSED-document URL (``document.URL``), or None if the tab is gone.
@@ -522,14 +548,18 @@ class BrowserSessionManager:
         """Reload ``id`` and refresh its cached DOM — gated before, and on the landing.
 
         One hold: the live URL must pass ``gate`` before the reload, and a reload
-        redirected off-list is bounced (and its snapshot dropped) before the hold ends.
+        redirected off-list is bounced before the hold ends — and before the landed
+        page is fetched, so none of it leaves the browser.
         """
         def work(handle):
             self._backend.select_tab(handle)
             self._check_live_url(gate)
-            _soup, tab_info = self._cache.force_reload(handle, self._backend)
-            bounced = self._bounce_off_list_landing(handle, id, gate, tab_info.url)
-            return bounced or {"id": id, "url": tab_info.url, "title": tab_info.title, "reloaded": True}
+            try:
+                _soup, tab_info = self._cache.force_reload(handle, self._backend,
+                                                           on_reload=self._landing_hook(handle, id, gate))
+            except _Bounced as b:
+                return b.envelope
+            return {"id": id, "url": tab_info.url, "title": tab_info.title, "reloaded": True}
         return await self._with_tab(id, work, invalidate=False)
 
     # -- serialization helpers ---------------------------------------------

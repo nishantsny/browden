@@ -33,7 +33,7 @@ class SoupCache:
     def parse(html: str) -> BeautifulSoup:
         return BeautifulSoup(html, "html.parser")
 
-    def get_soup(self, handle: str, backend, now: float | None = None):
+    def get_soup(self, handle: str, backend, now: float | None = None, on_reload=None):
         """Return ``(soup, reloaded)`` for ``handle``.
 
         - missing entry → fetch ``page_source`` and parse; ``reloaded=False`` (the
@@ -41,6 +41,10 @@ class SoupCache:
         - present but older than ``TTL_SECONDS`` → reload the tab in the browser,
           re-fetch, re-parse, store with a fresh timestamp; ``reloaded=True``.
         - present and fresh → the cached soup; ``reloaded=False``.
+
+        ``on_reload(tab_info)``, if given, runs right after a reload and BEFORE the
+        page is fetched: a reload can be redirected anywhere, so the caller can check
+        where it landed and raise to abort before any of that page leaves the browser.
         """
         current = self._clock() if now is None else now
         entry = self._entries.get(handle)
@@ -51,7 +55,9 @@ class SoupCache:
             return soup, False
         if current - entry.fetched_at >= TTL_SECONDS:
             backend.select_tab(handle)  # focus first: reload + re-fetch act on the focused tab
-            backend.reload()
+            tab_info = backend.reload()
+            if on_reload is not None:
+                on_reload(tab_info)
             soup = self.parse(backend.get_tab_html())
             self._entries[handle] = CacheEntry(soup=soup, fetched_at=current)
             return soup, True
@@ -60,11 +66,16 @@ class SoupCache:
     def invalidate(self, handle: str) -> None:
         self._entries.pop(handle, None)
 
-    def force_reload(self, handle: str, backend, now: float | None = None):
-        """Reload the tab in the browser, re-parse, store fresh. Returns ``(soup, tab_info)``."""
+    def force_reload(self, handle: str, backend, now: float | None = None, on_reload=None):
+        """Reload the tab in the browser, re-parse, store fresh. Returns ``(soup, tab_info)``.
+
+        ``on_reload`` is as for :meth:`get_soup`: it runs before the page is fetched.
+        """
         current = self._clock() if now is None else now
         backend.select_tab(handle)  # focus first: reload + re-fetch act on the focused tab
         tab_info = backend.reload()
+        if on_reload is not None:
+            on_reload(tab_info)
         soup = self.parse(backend.get_tab_html())
         self._entries[handle] = CacheEntry(soup=soup, fetched_at=current)
         return soup, tab_info

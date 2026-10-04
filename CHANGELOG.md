@@ -7,6 +7,25 @@ All notable changes to browden are documented here. The format follows
 
 ## [Unreleased]
 
+### Security
+- **A reload redirected off-list no longer fetches the page it landed on.**
+  `force_reload_tab`, and a read whose cached snapshot had expired, reloaded the
+  tab and fetched its HTML *before* checking where the reload landed. The agent
+  never received that page (the landing was bounced and the request refused),
+  but its content still left the browser into browden's memory. The landing is
+  now checked between the reload and the fetch.
+
+### Changed
+- **One race table for every page-touching tool (tests).**
+  `test/unit/mcp/test_gate_races.py` classifies each tool that reads, writes,
+  navigates or reloads in a single `TOOLS` table (`READ` / `WRITE` /
+  `LANDING`). Each tool runs through every race of its kind: paused at each
+  backend call it makes while a concurrent `navigate` to a readable-but-unwritable
+  page, or to a URL redirected off-list, queues behind it. After every race
+  one invariant is checked: no off-list content left the browser, and no write
+  landed on a page without a write rule. This replaces the separate read and
+  write race lists. A new tool is covered by adding one entry.
+
 ## [1.4.0] — 2026-10-04
 
 ### Changed
