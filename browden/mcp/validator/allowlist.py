@@ -5,10 +5,14 @@ from .popularity import PopularityAllowlist
 from .tranco import canonical_host
 
 # The write actions browden gates, by config section name: `click` (the click
-# tool), `write-text` (insert_text) and `press-key` (press_key). The schema
-# refuses any other top-level section, so a new write tool is added here before
-# a config can authorize it.
-WRITE_ACTIONS = ("click", "write-text", "press-key")
+# tool), `write-text` (insert_text), `press-key` (press_key) and `upload-file`
+# (upload_file). The schema refuses any other top-level section, so a new write
+# tool is added here before a config can authorize it.
+#
+# `upload-file` is a section of its own, never a widening of `write-text`:
+# handing a website a local file is a different capability from typing into a
+# box, so a host trusted with typing is not thereby trusted with the filesystem.
+WRITE_ACTIONS = ("click", "write-text", "press-key", "upload-file")
 
 # canonical_host is imported (not redefined) so the denylist/overrides normalize
 # hosts identically to the Tranco check — a trailing dot or leading www. must not

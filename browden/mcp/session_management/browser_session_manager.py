@@ -337,6 +337,16 @@ class BrowserSessionManager:
         return await self._with_page(id, lambda page: page.insert_text(css_selector, value, gate),
                                      invalidate=True)
 
+    async def upload_file(self, css_selector: str, file_path: str, *, id: str,
+                          gate: WriteGate) -> dict:
+        """Attach ``file_path`` to the file input ``css_selector`` on ``id``, if ``gate`` allows.
+
+        The soup cache is then invalidated: setting a file input is a DOM change,
+        and pages routinely render the chosen filename next to the control.
+        """
+        return await self._with_page(id, lambda page: page.upload_file(css_selector, file_path, gate),
+                                     invalidate=True)
+
     async def press_key(self, css_selector: str, key: str, *, id: str, gate: WriteGate) -> dict:
         """Press ``key`` on ``css_selector`` on ``id`` if ``gate`` authorizes it, in one driver hold.
 

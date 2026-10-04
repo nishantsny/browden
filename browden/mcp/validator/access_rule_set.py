@@ -38,6 +38,29 @@ def _merge_host_rules(base: "dict[str, list[PageRule]]",
     return merged
 
 
+def _coerce_upload_roots(roots: object) -> "tuple[Path, ...]":
+    """Expand and resolve the configured ``upload_roots`` into real directories.
+
+    Resolved here, once, rather than at every gate call: the gate then compares
+    two already-real paths, so a root reached through a symlink (``~/receipts`` ->
+    ``/mnt/box/receipts``) names the same directory as its target instead of
+    silently matching nothing. A root that doesn't exist resolves anyway (the
+    non-strict form) and simply has no file under it.
+
+    A path that cannot be expanded at all is dropped rather than raising: the
+    schema has already rejected the shapes an operator can fix, and a rule set
+    that fails to build would take the whole config down with it — for a grant
+    whose failure mode here is "this root authorizes nothing".
+    """
+    out: "list[Path]" = []
+    for root in (roots or ()):
+        try:
+            out.append(Path(str(root)).expanduser().resolve())
+        except (OSError, ValueError, RuntimeError):
+            continue
+    return tuple(out)
+
+
 def _merge_read_cfg(base: dict, extra: dict) -> dict:
     """Merge two ``read`` blocks — the profile's settings over the global ones.
 
@@ -111,6 +134,17 @@ class BrowdenAccessRuleSet:
                 label: '(?i)grocery tip.*'
                 field_ids: [tip-widget--edit-form--amount-input]
 
+    * ``upload_roots`` — the directories ``upload-file`` may take a file from::
+
+          upload_roots:
+            - ~/receipts
+
+      Not a host map and deliberately **not per-host**: it bounds what may leave
+      the machine at all, independent of where it is going. Absent or empty means
+      no upload is ever authorized, so enabling the action takes two deliberate
+      acts — listing the host under ``upload-file`` and listing a root here. A
+      profile's roots are additive over the global ones, like every other rule.
+
     * ``allow_all: true`` — every write action on every page, and reads of every
       host the read gate would otherwise *rank*. It is the sugar for "this is a
       scratch profile: let the agent work in it", so an operator can scope down
@@ -174,6 +208,7 @@ class BrowdenAccessRuleSet:
         action_rules = {
             action: _coerce_section(sections.get(action), want_label=True, where=action)
             for action in WRITE_ACTIONS}
+        upload_roots = _coerce_upload_roots(sections.get("upload_roots"))
         allow_all = bool(sections.get("allow_all")) or (base is not None and base._allow_all)
         # Whether THIS set decided the popularity question for itself. Only an
         # explicit `tranco.enabled` here counts: under allow_all the net is
@@ -187,10 +222,15 @@ class BrowdenAccessRuleSet:
             action_rules = {
                 action: _merge_host_rules(base._action_rules[action], action_rules[action])
                 for action in WRITE_ACTIONS}
+            # Additive like every other rule: a profile starts from the global
+            # roots and may add its own. A profile cannot narrow one — same as
+            # the write actions, where a profile only ever widens.
+            upload_roots = (*base._upload_roots, *upload_roots)
         if allow_all and not tranco_is_explicit:
             read_cfg["tranco"] = {**(read_cfg.get("tranco") or {}), "enabled": True}
         # Kept so a set built on top of this one can union against it.
         self._allow_all = allow_all
+        self._upload_roots = tuple(dict.fromkeys(upload_roots))
         self._deny_rules = deny_rules
         self._read_cfg = read_cfg
         self._override_rules = override_rules
@@ -249,6 +289,17 @@ class BrowdenAccessRuleSet:
     def denylist(self) -> HostRuleMatcher:
         """The always-deny list, so write actions can veto denied hosts too."""
         return self._denylist
+
+    @property
+    def upload_roots(self) -> "tuple[Path, ...]":
+        """The directories ``upload-file`` may take a file from; empty = no upload.
+
+        Already expanded (``~``) and resolved, so the gate compares two real
+        paths and a symlinked root names the same directory as its target. Empty
+        is the default and denies every upload, including under ``allow_all`` —
+        which grants *page* authority and says nothing about the filesystem.
+        """
+        return self._upload_roots
 
     def is_denied(self, host: str, path: str) -> bool:
         """True if ``(host, path)`` is on the denylist (refused for every action)."""

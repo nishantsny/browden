@@ -22,6 +22,8 @@ interleaving is deterministic.
 """
 import asyncio
 import contextlib
+import tempfile
+from pathlib import Path
 from collections.abc import Callable
 from dataclasses import dataclass, field
 
@@ -39,7 +41,15 @@ SECRET = "https://secret.example/inbox"   # not readable
 def _page(text, button, field_label):
     return (f"<html><body><p id='x' class='c'>{text}</p>"
             f"<button id='go'>{button}</button>"
+            f"<input id='u' type='file' aria-label='{field_label}'>"
             f"<input id='f' type='text' placeholder='{field_label}'></body></html>")
+
+
+# A real file under a real root: the upload gate judges the filesystem, so the
+# race needs a path that actually passes it. The directory lives for the module.
+_UPLOAD_ROOT = tempfile.TemporaryDirectory()
+_UPLOAD_FILE = str(Path(_UPLOAD_ROOT.name) / "receipt.png")
+Path(_UPLOAD_FILE).write_bytes(b"png")
 
 
 # OTHER carries the very labels SHOP's write rules admit, so a write that is
@@ -56,6 +66,8 @@ _RULES = BrowdenRuntimeConfiguration({
     "click": {"shop.example": {"paths": [".*"], "label": r"(?i)add to cart"}},
     "write-text": {"shop.example": {"paths": [".*"], "label": r"(?i)grocery tip"}},
     "press-key": {"shop.example": [{"path": [".*"], "label": r"(?i)add to cart", "keys": ["Enter"]}]},
+    "upload-file": {"shop.example": {"paths": [".*"], "label": r"(?i)grocery tip"}},
+    "upload_roots": [_UPLOAD_ROOT.name],
 })
 
 READ, WRITE, LANDING = "read", "write", "landing"
@@ -88,6 +100,8 @@ TOOLS = {
                         ("document_url", "target_snapshot")),
     "press_key": Tool(WRITE, lambda s: s.press_key("#go", "Enter", id=TAB),
                       ("document_url", "target_snapshot")),
+    "upload_file": Tool(WRITE, lambda s: s.upload_file("#u", _UPLOAD_FILE, id=TAB),
+                        ("document_url", "target_snapshot")),
     "navigate": Tool(LANDING, lambda s: s.navigate(BOUNCE, id=TAB), ("navigate",)),
     "force_reload_tab": Tool(LANDING, lambda s: s.force_reload_tab(id=TAB), ("reload",),
                              redirects={SHOP: SECRET}),

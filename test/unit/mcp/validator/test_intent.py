@@ -10,6 +10,7 @@ from browden.mcp.validator import (
     is_fillable_control,
     is_label_activation,
     is_focusable_control,
+    is_uploadable_control,
     label_matches,
 )
 
@@ -118,6 +119,42 @@ def test_label_matches_uses_aria_labelledby_text():
     # And it still fully governs: a substring-only regex must not pass.
     btn["labelledby_text"] = "Continue to payment"
     assert not label_matches(btn, re.compile(r"(?i)continue"))
+
+
+# -- upload_file (upload-file): integrity of a file input ---------------------
+
+def test_a_file_input_is_uploadable():
+    assert is_uploadable_control(node("input", type="file"))
+    assert is_uploadable_control(node("input", type="file", id="bill_file_expense"))
+    assert is_uploadable_control(node("input", type="file", multiple=""))
+
+
+def test_nothing_else_is_uploadable():
+    """Most importantly a text box: typing and uploading are separate grants."""
+    for t in ("text", "password", "checkbox", "radio", "submit", "button", "hidden"):
+        assert not is_uploadable_control(node("input", type=t)), t
+    assert not is_uploadable_control(node("input"))     # bare input defaults to text
+    assert not is_uploadable_control(node("textarea"))
+    assert not is_uploadable_control(node("button", text="Attach"))
+    assert not is_uploadable_control(node("div", **{"contenteditable": "true"}))
+    assert not is_uploadable_control(None)
+    assert not is_uploadable_control({})
+
+
+def test_hidden_disabled_readonly_decoy_file_inputs_are_refused():
+    assert not is_uploadable_control(node("input", type="file", disabled=""))
+    assert not is_uploadable_control(node("input", type="file", readonly=""))
+    assert not is_uploadable_control(node("input", type="file", **{"aria-disabled": "true"}))
+    assert not is_uploadable_control(node("input", type="file", **{"aria-hidden": "true"}))
+    assert not is_uploadable_control(node("input", type="file", hidden=""))
+    assert not is_uploadable_control(
+        node("input", type="file", **{"data-target-audience": "ai-agent"}))
+
+
+def test_a_file_input_is_not_fillable_and_a_text_input_is_not_uploadable():
+    """The two gates stay disjoint — this is the whole reason for a separate action."""
+    assert not is_fillable_control(node("input", type="file"))
+    assert not is_uploadable_control(node("input", type="text"))
 
 
 # -- insert_text (write-text): integrity of a text control --------------------------

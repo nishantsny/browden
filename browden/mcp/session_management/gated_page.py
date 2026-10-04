@@ -24,7 +24,7 @@ from ...web_navigator.interface import InvalidSelectorError
 from ...web_navigator.soup_cache import SoupCache
 from ..validator.errors import ValidationError
 from ..validator.read_gates import ReadGate
-from ..validator.write_gates import WriteGate
+from ..validator.write_gates import WriteGate, resolve_upload_path
 
 
 class _Bounced(Exception):
@@ -180,6 +180,21 @@ class GatedPage:
     def insert_text(self, css_selector: str, value: str, gate: WriteGate) -> dict:
         return self._write(css_selector, gate, lambda ref: self._backend.insert_text_target(ref, value),
                            f"insert_text: set {css_selector!r} on tab {self._id}")
+
+    def upload_file(self, css_selector: str, file_path: str, gate: WriteGate) -> dict:
+        """Set the file input ``css_selector`` to ``file_path`` if ``gate`` authorizes both.
+
+        The gate's page check — run by ``_write`` before the DOM is read — has
+        already judged this path against the operator's upload roots, so the
+        resolve here cannot fail and cannot widen anything. The backend is handed
+        that *resolved* path rather than the caller's spelling, for the same
+        reason the write path hands it the exact element ref it judged: what was
+        checked and what is acted on must be the same thing.
+        """
+        return self._write(
+            css_selector, gate,
+            lambda ref: self._backend.upload_file_target(ref, str(resolve_upload_path(file_path))),
+            f"upload_file: set {css_selector!r} on tab {self._id}")
 
     def press_key(self, css_selector: str, key: str, gate: WriteGate) -> dict:
         return self._write(css_selector, gate, lambda ref: self._backend.press_key_target(ref, key),

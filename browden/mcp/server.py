@@ -31,6 +31,7 @@ from .validator import (
     click_gate,
     press_key_gate,
     read_gate,
+    upload_file_gate,
     validate_url,
     write_text_gate,
 )
@@ -336,6 +337,49 @@ async def insert_text(css_selector: str, value: str, id: str) -> dict:
     result = await session.insert_text(css_selector, value, id=id,
                                        gate=write_text_gate(_access_rules_for(session)))
     logger.info("Tool finished: insert_text")
+    return result
+
+
+@mcp.tool()
+@_tool
+async def upload_file(css_selector: str, file_path: str, id: str) -> dict:
+    """Attach a local file to a file input on a tab — the upload-file action.
+
+    How a receipt gets onto an expense, a document onto a form. It sets the
+    ``<input type="file">`` directly, which is what a human's file-picker
+    selection does to the page; clicking the control would open the operating
+    system's own file dialog, which is not part of the page and which browden
+    cannot drive.
+
+    A section of its own, never part of ``write-text``: reading a file off this
+    machine and handing it to a website is a different capability from typing
+    into a box, so a host trusted with typing is not thereby trusted with the
+    filesystem. Four server-side gates, all default-deny, must pass:
+      1. The tab's host must be listed under the ``upload-file`` section of the
+         allowlist (and not on the denylist), with a rule whose page selector
+         matches this page.
+      2. ``css_selector`` must resolve to exactly one element that is a real,
+         visible, non-decoy, non-readonly ``<input type="file">``. Integrity, not
+         intent.
+      3. That control must be authorized by a matching rule — by its visible
+         label, or by its exact ``id``/``name`` in the rule's ``field_ids``. The
+         id half matters more here than for text: a file input routinely carries
+         no visible label at all, so no label regex could ever match it.
+      4. ``file_path`` must resolve — through ``~``, ``..`` and every symlink —
+         to an existing regular file under one of the operator's configured
+         ``upload_roots``, within the size cap. **With no ``upload_roots``
+         configured nothing is uploadable**, including under ``allow_all``: that
+         grants authority over pages and says nothing about the filesystem.
+    Any gate failing raises a ValidationError and nothing is sent.
+    """
+    logger.info(f"Tool called: upload_file (css_selector={css_selector!r}, "
+                f"file_path={file_path!r}, id={id!r})")
+    session = _store.route(id)
+    # The rules are read once; the session runs every gate and the upload in one
+    # driver-lock hold (see docs/design/gate-atomicity.md).
+    result = await session.upload_file(css_selector, file_path, id=id,
+                                       gate=upload_file_gate(_access_rules_for(session), file_path))
+    logger.info("Tool finished: upload_file")
     return result
 
 

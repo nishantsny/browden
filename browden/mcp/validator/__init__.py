@@ -11,6 +11,7 @@ from .intent import (
     is_label_activation,
     is_fillable_control,
     is_focusable_control,
+    is_uploadable_control,
     label_matches,
 )
 from .popularity import PopularityAllowlist
@@ -18,12 +19,17 @@ from .runtime_configuration import BrowdenRuntimeConfiguration
 from .tranco import TrancoList
 from .read_gates import ReadGate, ensure_url_allowed, read_gate, validate_url
 from .write_gates import (
+    MAX_UPLOAD_BYTES,
     WriteGate,
     check_action_host,
     click_gate,
     press_key_gate,
+    resolve_upload_path,
+    upload_file_gate,
     validate_click_target,
     validate_press_key_target,
+    validate_upload_path,
+    validate_upload_target,
     validate_write_text_target,
     write_text_gate,
 )
@@ -33,6 +39,7 @@ __all__ = [
     "BrowdenAccessRuleSet",
     "BrowdenRuntimeConfiguration",
     "HostRuleMatcher",
+    "MAX_UPLOAD_BYTES",
     "PopularityAllowlist",
     "ReadGate",
     "ReadPolicy",
@@ -50,12 +57,17 @@ __all__ = [
     "is_label_activation",
     "is_fillable_control",
     "is_focusable_control",
+    "is_uploadable_control",
     "label_matches",
     "press_key_gate",
     "read_gate",
+    "resolve_upload_path",
     "tab_gone_envelope",
+    "upload_file_gate",
     "validate_click_target",
     "validate_press_key_target",
+    "validate_upload_path",
+    "validate_upload_target",
     "validate_write_text_target",
     "validate_url",
     "write_text_gate",

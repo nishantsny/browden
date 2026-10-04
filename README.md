@@ -138,6 +138,7 @@ verbatim; it is globally unique and routes itself to the right profile (multiple
 | `force_reload_tab` | Reload a tab and refresh its cached DOM |
 | `click` | **A write action, off by default** — click a control on a host listed in the `click` allowlist; each host declares a **required** `label` regex the control's visible text must fully match (`.*` to allow any). No host is listed out of the box. |
 | `insert_text` | **A write action, off by default** — type text into a single visible, non-readonly text field (`<textarea>`, a text `<input>`, or a `contenteditable`) on a host listed in the separate `write-text` allowlist section; the field's visible label (placeholder / aria-label / associated `<label>`) must fully match that host's **required** `label` regex. |
+| `upload_file` | **A write action, off by default** — attach a local file to a single visible, non-readonly `<input type=file>` on a host listed in the separate `upload-file` allowlist section. Additionally gated by `upload_roots`: the file must resolve to a regular file under a directory you listed, so an upload can never become an arbitrary local-file read. No host and no root are listed out of the box. |
 
 ### Reading the DOM
 
@@ -210,7 +211,9 @@ the credentialed profile narrow while a scratch profile browses freely.
 
 Every URL is checked before Chrome is told to go there. Merely *navigating* to a
 hostile page is risky. Each page's content is fed to the LLM and can lead to prompt injection. 
-The "allowlist" policy has **three layers**, evaluated in order (first match wins):
+The "allowlist" policy has **four layers**. The first three are evaluated in order
+(first match wins); the fourth bounds `upload_file` alone, and is additional to — never
+a substitute for — the third:
 
 1. **denylist** — host/path rules that are **always refused**, before anything
    else. Wins over the allowlist below, even when reads are disabled. Empty by
@@ -242,14 +245,23 @@ The "allowlist" policy has **three layers**, evaluated in order (first match win
    so an open redirect on an allowlisted site (or a server-side 302) can't
    silently park the tab off-allowlist — an off-list landing resets the tab to
    `about:blank`.
-3. **write actions** — `click` and `insert_text` are both default-deny, each
-   gated by its **own** allowlist section (`click` and `write-text`), so
-   permitting typing never implies permitting clicks, or the reverse. Each action
+3. **write actions** — `click`, `insert_text`, `press_key` and `upload_file` are
+   all default-deny, each gated by its **own** allowlist section (`click`,
+   `write-text`, `press-key`, `upload-file`), so permitting typing never implies
+   permitting clicks, or the reverse. Each action
    must be enabled per domain. On each domain, the allowlist mandates a `label` regex, 
    which must match the control's user-visible text (for `click`) or the field's user-visible label (for `insert_text`).
    Any control can be explicitly enabled via `label: '.*'`. The
    denylist vetoes both too; page-injected agent-targeted decoys are always
    refused regardless of the label.
+4. **upload roots** — a fourth layer that exists for `upload_file` alone, because
+   that action is the one that reads **your filesystem** and sends the bytes to a
+   website. `upload_roots` lists the directories a file may be taken from, and is
+   required: with none configured nothing is uploadable, including in an
+   `allow_all` profile. It is deliberately not per-host — it bounds what may
+   leave the machine at all, independently of where it is going. A path is
+   expanded and fully resolved before it is compared, so neither `../` nor a
+   symlink planted inside a root reaches outside one.
 
 
 To refresh the Tranco snapshot, use `python3 setup/fetch_tranco.py` and restart the MCP server.
@@ -342,6 +354,7 @@ any of them widens its own access. Setup prints both steps at the end:
 - [`allow_label_activation.yaml`](configs/samples/allow_label_activation.yaml) — `click` a `<label>` to drive a radio/checkbox the page hid in CSS, authorized by the label's own visible text.
 - [`allowlist-read-deny.yaml`](configs/samples/allowlist-read-deny.yaml) — a fully-commented tour of the read/deny system.
 - [`profile_scoped_rules.yaml`](configs/samples/profile_scoped_rules.yaml) — scope rules per browser profile: a narrow credentialed profile, an `allow_all` scratch profile, a dev-server profile.
+- [`allow_receipt_upload.yaml`](configs/samples/allow_receipt_upload.yaml) — enable `upload-file`: attach a local receipt to a Splitwise expense, bounded by `upload_roots`.
 - [`allow_local_file_reads.yaml`](configs/samples/allow_local_file_reads.yaml) — opt `file://` local-file reads in (scoped by path).
 - [`allow_localhost_dev_server.yaml`](configs/samples/allow_localhost_dev_server.yaml) — read a local `http://localhost:PORT` dev server.
 
@@ -529,9 +542,9 @@ on an ephemeral port. The same suites run on every push/PR via the
 - **Expose debugging APIs** — surface read-only console, network, and performance
   signals (browser logs, request/response metadata) so an agent can inspect a page,
   not just read its DOM.
-- **Expose more write actions** — grow the gated write surface beyond `click`
-  and `insert_text` (e.g. select/checkbox, file upload), each held to the same
-  allowlist-and-label policy.
+- **Expose more write actions** — grow the gated write surface beyond `click`,
+  `insert_text`, `press_key` and `upload_file` (e.g. select/checkbox), each held
+  to the same allowlist-and-label policy.
 
 All feedback is welcome — please [open an issue](https://github.com/nishantsny/browden/issues).
 

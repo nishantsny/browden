@@ -1,0 +1,79 @@
+# browden access policy — attaching a local file (`upload-file`).
+#
+# LIVE RELOAD: browden re-reads this file about every 10s while it runs, so edits
+# take effect without a restart. A save that doesn't parse (mid-edit, bad YAML) is
+# ignored and the last valid version stays in force.
+#
+# A worked example that ENABLES the `upload-file` write action. `upload-file` sets
+# an `<input type="file">` to a file on this machine — how a receipt image gets
+# attached to an expense. Clicking such a control would open the operating
+# system's own file dialog, which is not part of the page and which browden has no
+# way to drive, so this is the only route.
+#
+# Five independent layers, evaluated in this order for every URL/action:
+#   1. denylist        — always wins; a matching URL is refused outright.
+#   2. read allowlist  — a URL may be READ / navigated only if it matches here.
+#   3. write actions   — `upload-file` (below); default-deny, gated per host.
+#   4. upload_roots    — which local files may be sent ANYWHERE. Independent of 3.
+#
+# See configs/samples/allowlist-read-deny.yaml for a fully-commented tour of the
+# read/deny system, and allow_grocery_cart_manipulation.yaml for `click`.
+
+# ---- denylist: always denied, checked first -------------------------------
+denylist: {}
+
+# ---- read allowlist -------------------------------------------------------
+read:
+  enabled: true
+  # Tranco top-sites snapshot (offline; fetched next to this file by setup).
+  tranco:
+    enabled: true
+    top_n: 1000000
+  website_overrides: {}
+
+# ---- what may leave this machine ------------------------------------------
+# The gate `upload-file` has and no other write action does: a page rule says
+# WHERE a file may go, and this says WHICH files may go anywhere at all. The two
+# are deliberately separate — authorizing a host to receive an attachment should
+# not also decide that every file on the disk is attachable.
+#
+# REQUIRED to upload anything. Absent or empty denies every upload, including in
+# an `allow_all` profile: `allow_all` grants authority over pages and says
+# nothing about the filesystem.
+#
+# A path is expanded (`~`) and fully resolved — through `..` segments and every
+# symlink — before it is compared, so neither a traversal in the path the agent
+# passes nor a symlink planted inside a root can reach outside one. Keep these
+# narrow: a directory you drop receipts into, never `~` or `/`.
+upload_roots:
+  - ~/receipts
+
+# ---- write actions --------------------------------------------------------
+# `upload-file`: set a file input. Default-deny; every gate must pass:
+#   1. host+page — the host is listed here and some rule's `path` matches the page.
+#   2. file input — the target is a real, visible, non-decoy, non-readonly
+#      <input type="file">. A text box is NOT uploadable, whatever it is named.
+#   3. label or id — a matching rule's `label` regex fully matches the control's
+#      visible label, OR the control's exact id/name is in that rule's `field_ids`.
+#   4. upload root — the file resolves to a regular file under `upload_roots`.
+upload-file:
+  secure.splitwise.com:
+    # Splitwise is a hash-routed SPA: the add/edit-expense modal shares the path
+    # '/' with every other view and differs only in the fragment, so the rule
+    # matches on the whole URL.
+    - path: ['^/$', '^/#/.*']
+      match_on: url
+      # The receipt picker carries NO visible label: "Attach an image or PDF:" is
+      # a sibling <p>, not a <label for>, and there is no placeholder, aria-label
+      # or title. So the label regex below can never match it, and `field_ids` —
+      # naming the control by its stable id — is the only usable handle. The
+      # label is still required by the schema, and still governs any OTHER file
+      # input on these pages.
+      label: '(?i)attach an image or pdf:?'
+      field_ids: [bill_file_expense]
+
+# Note: `upload-file` is independent of `click`, `write-text` and `press-key`.
+# Enabling it here does NOT permit typing into the expense form or clicking its
+# Save button — add those sections separately. In particular it is NOT a widening
+# of `write-text`: a host you trust to receive typed text is not thereby trusted
+# to receive a file off your disk.

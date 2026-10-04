@@ -592,6 +592,29 @@ class SeleniumChromeBackend(WebNavigatorBackend):
             "title": drv.title,
         }
 
+    def upload_file_target(self, ref, file_path: str) -> dict:
+        """Hand ``file_path`` to the file input ``ref``.
+
+        ``send_keys(path)`` on an ``<input type=file>`` is Selenium's documented
+        upload mechanism: it sets the input's file list directly and fires the
+        page's ``change`` handler, without the native OS file dialog a real click
+        would open (which is outside the DOM and which browden could not drive).
+
+        Deliberately **no** ``clear()``, unlike :meth:`insert_text_target`: on a
+        file input ``clear()`` is not the "wipe the old value" step it is for a
+        text box, and the path through it is untested here. The caller has
+        already judged this exact element and this exact path.
+        """
+        drv = self._drv()
+        el = self._vet(ref)
+        el.send_keys(file_path)
+        return {
+            "uploaded": True,
+            "file_path": file_path,
+            "url": drv.current_url,
+            "title": drv.title,
+        }
+
     def press_key_target(self, ref, key: str) -> dict:
         drv = self._drv()
         try:

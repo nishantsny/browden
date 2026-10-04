@@ -1,4 +1,4 @@
-"""The full default-deny gate sequences for the write actions (``click`` / ``insert_text``).
+"""The full default-deny gate sequences for the write actions (``click`` / ``insert_text`` / ``press_key`` / ``upload_file``).
 
 Composes the three lower-level pieces — the per-action host allowlist (in the
 :class:`BrowdenAccessRuleSet` each gate is handed), the URL gate
@@ -17,6 +17,7 @@ session, which runs it inside the same driver-lock hold that performs the action
 """
 from collections.abc import Callable
 from dataclasses import dataclass
+from pathlib import Path
 from urllib.parse import urlparse
 
 from .access_rule_set import BrowdenAccessRuleSet
@@ -29,8 +30,15 @@ from .intent import (
     is_clickable_control,
     is_fillable_control,
     is_focusable_control,
+    is_uploadable_control,
     label_matches,
 )
+
+# The largest file ``upload-file`` will hand to a page. Not a config knob: it is
+# a sanity bound on an action whose real authorization is the upload-roots gate,
+# and a receipt or a scanned document is orders of magnitude smaller. A workflow
+# that needs to ship something bigger than this wants a different tool.
+MAX_UPLOAD_BYTES = 25 * 1024 * 1024
 
 
 def check_action_host(access_rules: BrowdenAccessRuleSet, action: str, url: str) -> None:
@@ -182,6 +190,99 @@ def validate_press_key_target(access_rules: BrowdenAccessRuleSet, url: str,
             f"{p.hostname or ''}{p.path or '/'} — refusing to press a key")
 
 
+def resolve_upload_path(file_path: str) -> Path:
+    """The caller's path as one real, absolute path — expanded and fully resolved.
+
+    The single transform between what the agent asks to upload and what is judged
+    and then sent, so the file the gate admitted is the file the browser opens.
+    Resolving the whole chain (``~``, ``..`` segments, every symlink) is what lets
+    the root check below be a simple containment test.
+    """
+    return Path(file_path).expanduser().resolve()
+
+
+def validate_upload_path(upload_roots: "tuple[Path, ...]", file_path: str) -> Path:
+    """Gate 4 for ``upload-file``: the file must be a real file under an allowed root.
+
+    The gate with no analogue in the other write actions, and the reason this is
+    an action of its own. ``click`` and ``insert_text`` act with data the agent
+    already has; an upload makes browden **read the local filesystem and ship the
+    bytes to a website**. Without a root, "upload to host X" means "exfiltrate
+    ``~/.ssh/id_rsa`` to host X", and the tool is an arbitrary local-file read
+    primitive wearing a form control.
+
+    So: the path is expanded and **fully resolved**, and the resolved path must
+    sit under one of the operator's resolved ``upload_roots``. Resolving first is
+    what closes the two ways out of a root — ``../`` traversal in the path the
+    agent passes, and a symlink *inside* a root pointing anywhere on disk. It must
+    also exist, be a regular file (not a directory, FIFO or device) and be under
+    :data:`MAX_UPLOAD_BYTES`.
+
+    No roots configured means no upload is authorized — including under
+    ``allow_all``, which grants authority over *pages* and says nothing about the
+    filesystem. Returns the resolved path to hand the backend; raises
+    :class:`ValidationError` otherwise.
+    """
+    if not upload_roots:
+        raise ValidationError(
+            "no upload_roots are configured — upload-file is not authorized to "
+            "read any local file (add an upload_roots list to the allowlist)")
+    try:
+        resolved = resolve_upload_path(file_path)
+    except (OSError, ValueError, RuntimeError) as e:
+        raise ValidationError(f"{file_path!r} is not a usable path: {e}") from None
+    if not any(resolved == root or resolved.is_relative_to(root) for root in upload_roots):
+        raise ValidationError(
+            f"{str(resolved)!r} is outside every configured upload root "
+            f"({', '.join(str(r) for r in upload_roots)}) — refusing to upload")
+    try:
+        if not resolved.is_file():
+            raise ValidationError(
+                f"{str(resolved)!r} is not an existing regular file — refusing to upload")
+        size = resolved.stat().st_size
+    except OSError as e:
+        raise ValidationError(f"cannot read {str(resolved)!r}: {e}") from None
+    if size > MAX_UPLOAD_BYTES:
+        raise ValidationError(
+            f"{str(resolved)!r} is {size} bytes, over the {MAX_UPLOAD_BYTES}-byte "
+            f"upload cap — refusing to upload")
+    return resolved
+
+
+def validate_upload_target(access_rules: BrowdenAccessRuleSet, url: str,
+                           css_selector: str, found: dict) -> None:
+    """Gates 2 and 3 for ``upload-file`` — file-control integrity, then label/id.
+
+    ``url`` is the tab's live URL; ``found`` is the ``query_selector_all(limit=2)``
+    result for ``css_selector``. Raises :class:`ValidationError` on the first
+    failing gate; returns ``None`` when the upload is authorized.
+
+    Gate 3 mirrors ``write-text``'s label-or-id shape because this target needs
+    the id half even more often: a file input routinely carries no visible label
+    of any kind (Splitwise's receipt picker has a sibling ``<p>``, not a
+    ``<label for>``, and no placeholder / aria-label / title), so no ``label``
+    regex could ever authorize it.
+    """
+    # Gate 2: the element must be a single, real, visible, non-decoy file input.
+    node = _single_node(found, css_selector, "refusing to upload")
+    if not is_uploadable_control(node):
+        raise ValidationError(
+            "selected element is not a file input (or is a "
+            "hidden/disabled/readonly/decoy element) — refusing to upload")
+
+    # Gate 3: authorize the control against the page rules matching THIS URL —
+    # by its visible label, or by the exact id/name the operator named in that
+    # same rule's field_ids. Fail closed, exactly as write-text does.
+    p = urlparse(url)
+    rules = access_rules.rules_for("upload-file", p.hostname or "", p.path, p.query, p.fragment)
+    label_ok = any(r.label is not None and field_label_matches(node, r.label) for r in rules)
+    id_ok = any(field_id_matches(node, r.field_ids) for r in rules)
+    if not (label_ok or id_ok):
+        raise ValidationError(
+            f"file input does not match any upload-file rule for "
+            f"{p.hostname or ''}{p.path or '/'} — refusing to upload")
+
+
 @dataclass(frozen=True)
 class WriteGate:
     """The full gate sequence for one write request, bound to one rule set.
@@ -219,3 +320,21 @@ def press_key_gate(access_rules: BrowdenAccessRuleSet, key: str) -> WriteGate:
         check_page=lambda url: check_action_host(access_rules, "press-key", url),
         check_element=lambda url, css_selector, found: validate_press_key_target(
             access_rules, url, css_selector, found, key))
+
+
+def upload_file_gate(access_rules: BrowdenAccessRuleSet, file_path: str) -> WriteGate:
+    """The ``upload_file`` gates for ``file_path``, bound to ``access_rules``.
+
+    The filesystem gate runs in ``check_page``, i.e. **before the DOM is read**:
+    there is no reason to inspect a page for an upload that is refused whatever
+    the page holds, and it keeps the decision inside the one driver hold with
+    every other gate (see docs/design/gate-atomicity.md).
+    """
+    def check_page(url: str) -> None:
+        check_action_host(access_rules, "upload-file", url)
+        validate_upload_path(access_rules.upload_roots, file_path)
+
+    return WriteGate(
+        check_page=check_page,
+        check_element=lambda url, css_selector, found: validate_upload_target(
+            access_rules, url, css_selector, found))

@@ -9,7 +9,7 @@ async def test_mcp_endpoint(mcp_server, mcp_client_session):
         tools = [t.name for t in tools_result.tools]
         expected_tools = {
             "list_tabs", "new_blank_tab", "close_tab", "select_tab", "navigate",
-            "click", "insert_text", "press_key", "get_element_by_id",
+            "click", "insert_text", "press_key", "upload_file", "get_element_by_id",
             "get_elements_by_class_name", "query_selector", "query_selector_all",
             "screenshot", "force_reload_tab", "invalidate_dom_cache"
         }
