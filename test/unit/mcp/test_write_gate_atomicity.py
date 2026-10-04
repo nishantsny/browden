@@ -14,8 +14,8 @@ import pytest
 from atomicity_harness import PROFILE, TAB, OnePageBackend, serve
 from atomicity_harness import make_session as _session
 
-from browden.configs.loader import RuntimeConfigurationRefresher
-from browden.mcp.validator import BrowdenRuntimeConfiguration, ValidationError, click_gate, read_gate
+from safe_agent_browser.configs.loader import RuntimeConfigurationRefresher
+from safe_agent_browser.mcp.validator import SafeAgentBrowserRuntimeConfiguration, ValidationError, click_gate, read_gate
 
 SHOP = "https://shop.example/item"
 OTHER = "https://other.example/account"
@@ -26,7 +26,7 @@ _OTHER_HTML = ("<html><body><button id='go'>Delete account</button>"
 
 # Both hosts are readable (so navigate may go to either); only shop.example may
 # be written to — each write action on its own labelled control.
-_SHOP_ONLY = BrowdenRuntimeConfiguration({
+_SHOP_ONLY = SafeAgentBrowserRuntimeConfiguration({
     "read": {"website_overrides": {"*": [".*"]}},
     "click": {"shop.example": {"paths": [".*"], "label": r"(?i)add to cart"}},
     "write-text": {"shop.example": {"paths": [".*"], "label": r"(?i)grocery tip"}},
@@ -46,7 +46,7 @@ def _serve(server, session, configuration=_SHOP_ONLY):
 def server():
     import importlib
 
-    import browden.mcp.server as server
+    import safe_agent_browser.mcp.server as server
     importlib.reload(server)
     return server
 
@@ -57,7 +57,7 @@ async def test_hot_reload_mid_request_cannot_authorize_what_neither_config_allow
     # old: shop.example clickable, label "Add to cart"     (element says "Delete account" -> refuse)
     # new: shop.example denylisted, label "Delete account" (denylisted            -> refuse)
     # A reload landing between gate 1 (old) and gate 3 (new) must not add up to "allow".
-    new = BrowdenRuntimeConfiguration({
+    new = SafeAgentBrowserRuntimeConfiguration({
         "denylist": {"shop.example": [".*"]},
         "read": {"website_overrides": {"*": [".*"]}},
         "click": {"shop.example": {"paths": [".*"], "label": r"(?i)delete account"}},
@@ -110,7 +110,7 @@ async def test_an_invalid_selector_is_an_error_envelope_and_nothing_is_done():
 
 
 async def test_a_gone_tab_is_the_tab_gone_envelope(server):
-    from browden.web_navigator.interface import TabNotFoundError
+    from safe_agent_browser.web_navigator.interface import TabNotFoundError
 
     class GoneBackend(OnePageBackend):
         def select_tab(self, handle):

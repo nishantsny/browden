@@ -1,12 +1,12 @@
-"""The live runtime configuration: one loaded ``BrowdenRuntimeConfiguration``
+"""The live runtime configuration: one loaded ``SafeAgentBrowserRuntimeConfiguration``
 plus periodic hot-reload.
 
 The MCP server holds a single :class:`RuntimeConfigurationRefresher`. It owns the
-current ``BrowdenRuntimeConfiguration`` and, while the server runs, re-stats the
+current ``SafeAgentBrowserRuntimeConfiguration`` and, while the server runs, re-stats the
 backing config file every few seconds and swaps in a freshly-loaded one when the file changes — so
 an operator can tighten or loosen the gate without restarting the process.
 
-Lock-free by RCU / atomic pointer swap: a ``BrowdenRuntimeConfiguration`` is
+Lock-free by RCU / atomic pointer swap: a ``SafeAgentBrowserRuntimeConfiguration`` is
 immutable after construction, and every reader (the tool layer) only ever *reads*
 ``.runtime_configuration`` and hands that frozen object to the stateless
 validator functions. A reload never mutates in place — it builds a fresh
@@ -27,7 +27,7 @@ from collections.abc import AsyncIterator
 from pathlib import Path
 
 from ...common.logger import logger
-from ...mcp.validator.runtime_configuration import BrowdenRuntimeConfiguration
+from ...mcp.validator.runtime_configuration import SafeAgentBrowserRuntimeConfiguration
 from .loader import load_runtime_configuration
 from .schema import ConfigError
 
@@ -50,7 +50,7 @@ def _stat_signature(path: Path) -> tuple[float, int] | None:
 
 
 class RuntimeConfigurationRefresher:
-    """Holds the live ``BrowdenRuntimeConfiguration``; hot-reloads it from its file.
+    """Holds the live ``SafeAgentBrowserRuntimeConfiguration``; hot-reloads it from its file.
 
     Build one with :meth:`from_path` to watch a file, or :meth:`static` to pin a
     fixed configuration (the import-time default and unit tests, which watch
@@ -58,7 +58,7 @@ class RuntimeConfigurationRefresher:
     context manager) to poll for changes for the server's lifetime.
     """
 
-    def __init__(self, runtime_configuration: BrowdenRuntimeConfiguration, *,
+    def __init__(self, runtime_configuration: SafeAgentBrowserRuntimeConfiguration, *,
                  path: Path | None, interval: float = DEFAULT_RELOAD_INTERVAL_SECONDS):
         self._runtime_configuration = runtime_configuration
         self._path = path
@@ -74,13 +74,13 @@ class RuntimeConfigurationRefresher:
         return cls(load_runtime_configuration(path), path=path, interval=interval)
 
     @classmethod
-    def static(cls, runtime_configuration: BrowdenRuntimeConfiguration
+    def static(cls, runtime_configuration: SafeAgentBrowserRuntimeConfiguration
                ) -> "RuntimeConfigurationRefresher":
         """A refresher pinned to a fixed configuration — watches no file, never reloads."""
         return cls(runtime_configuration, path=None)
 
     @property
-    def runtime_configuration(self) -> BrowdenRuntimeConfiguration:
+    def runtime_configuration(self) -> SafeAgentBrowserRuntimeConfiguration:
         """The current policy. Reads the atomically-swapped reference (see module docstring)."""
         return self._runtime_configuration
 

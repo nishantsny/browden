@@ -1,5 +1,5 @@
 """Runs the real setup/onetime_setup.py end to end under a throwaway service
-name and port, so an existing browden service is untouched. Skipped on
+name and port, so an existing safe-agent-browser service is untouched. Skipped on
 hosts without a systemd user session (e.g. some CI runners / macOS)."""
 import gzip
 import re
@@ -17,7 +17,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 # Opening sentinel of the auto-written provenance block (setup/checkpoints.py).
 # Everything above it is a verbatim copy of the sample; the block itself carries
 # per-install snapshot checksums and so diverges from the committed placeholders.
-_PROVENANCE_MARKER = "# >>> browden provenance"
+_PROVENANCE_MARKER = "# >>> safe-agent-browser provenance"
 SCRIPT = REPO_ROOT / "setup" / "onetime_setup.py"
 
 
@@ -40,14 +40,14 @@ def _run_setup(args):
                     reason="no systemd user session on this host")
 def test_onetime_setup_installs_config_and_service(tmp_path):
     sys.path.insert(0, str(REPO_ROOT))
-    from browden.web_navigator.utils.network_utils import get_free_port
+    from safe_agent_browser.web_navigator.utils.network_utils import get_free_port
 
     port = get_free_port()
-    service = f"browden-e2e-{port}"
+    service = f"safe-agent-browser-e2e-{port}"
     config_dir = tmp_path / "cfg"
     unit_path = Path.home() / ".config" / "systemd" / "user" / f"{service}.service"
     # Pin the service to this interpreter so setup skips venv creation/install
-    # (this test already runs in an env with browden installed).
+    # (this test already runs in an env with safe-agent-browser installed).
     args = ["--mode", "service", "--port", str(port), "--config-dir", str(config_dir),
             "--service-name", service, "--python", sys.executable]
 
@@ -124,7 +124,7 @@ def test_onetime_setup_installs_config_and_service(tmp_path):
 def test_onetime_setup_stdio_mode_prints_config_and_writes_no_service(tmp_path):
     """The default (stdio) mode does the venv/config/Tranco work and prints an
     stdio config block — no systemd unit, no SSE port. Needs no systemd session."""
-    service = "browden-stdio-test"
+    service = "safe-agent-browser-stdio-test"
     config_dir = tmp_path / "cfg"
     unit_path = Path.home() / ".config" / "systemd" / "user" / f"{service}.service"
     assert not unit_path.exists(), "unexpected leftover unit from a prior run"
@@ -145,5 +145,5 @@ def test_onetime_setup_stdio_mode_prints_config_and_writes_no_service(tmp_path):
     assert "/sse" not in res.stdout
     # The printed block is a stdio launcher for this interpreter.
     assert '"command"' in res.stdout
-    assert "browden.mcp.server" in res.stdout
+    assert "safe_agent_browser.mcp.server" in res.stdout
     assert str(config_dir / "allowlist.yaml") in res.stdout

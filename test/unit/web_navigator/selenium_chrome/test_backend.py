@@ -3,10 +3,10 @@ from unittest.mock import MagicMock, PropertyMock, patch
 
 import pytest
 
-from browden.dependencies.selenium import NoSuchWindowException
-from browden.web_navigator.interface import TabNotFoundError
-import browden.web_navigator.selenium_chrome.backend as backend
-from browden.web_navigator.selenium_chrome.backend import (
+from safe_agent_browser.dependencies.selenium import NoSuchWindowException
+from safe_agent_browser.web_navigator.interface import TabNotFoundError
+import safe_agent_browser.web_navigator.selenium_chrome.backend as backend
+from safe_agent_browser.web_navigator.selenium_chrome.backend import (
     SINGLETON_FILES,
     SeleniumChromeBackend,
     _chrome_args,
@@ -40,7 +40,7 @@ class FakeChromeOS:
 
     Fakes the process spawn (``subprocess.Popen``), the DevTools HTTP probe
     (``urlopen``), the free-port lookup and where the Chrome binary is. Everything
-    browden does on top of those — ``_launch_chrome``, ``_chrome_args``,
+    safe-agent-browser does on top of those — ``_launch_chrome``, ``_chrome_args``,
     ``_clear_stale_singletons``, ``_wait_for_devtools``, ``_terminate`` — runs for
     real. ``spawned`` records ``(argv, proc)`` per launch; ``on_spawn(argv)`` runs
     at the moment of the spawn.
@@ -51,7 +51,7 @@ class FakeChromeOS:
         self.devtools_up = True
         self.spawned: list[tuple[list[str], MagicMock]] = []
         self.on_spawn = None
-        monkeypatch.setenv("BROWDEN_CHROME_BINARY", "/fake/chrome")
+        monkeypatch.setenv("SAFE_AGENT_BROWSER_CHROME_BINARY", "/fake/chrome")
         monkeypatch.setattr(backend, "get_free_port", lambda: self.port)
         monkeypatch.setattr(backend.subprocess, "Popen", self._popen)
         monkeypatch.setattr(backend.urllib.request, "urlopen", self._urlopen)
@@ -89,7 +89,7 @@ def _debugger_address(mock_webdriver):
     return opts.experimental_options["debuggerAddress"]
 
 
-@patch("browden.web_navigator.selenium_chrome.backend.webdriver")
+@patch("safe_agent_browser.web_navigator.selenium_chrome.backend.webdriver")
 def test_drv_lazy_init(mock_webdriver, chrome_os):
     fake = _make_fake_driver()
     mock_webdriver.Chrome.return_value = fake
@@ -107,7 +107,7 @@ def test_drv_lazy_init(mock_webdriver, chrome_os):
     assert len(chrome_os.spawned) == 1  # one real launch
 
 
-@patch("browden.web_navigator.selenium_chrome.backend.webdriver")
+@patch("safe_agent_browser.web_navigator.selenium_chrome.backend.webdriver")
 def test_drv_launches_with_provided_profile_dir(mock_webdriver, chrome_os, tmp_path):
     chrome_os.port = 7000
     mock_webdriver.Chrome.return_value = _make_fake_driver()
@@ -124,7 +124,7 @@ def test_drv_launches_with_provided_profile_dir(mock_webdriver, chrome_os, tmp_p
     assert _debugger_address(mock_webdriver) == "127.0.0.1:7000"
 
 
-@patch("browden.web_navigator.selenium_chrome.backend.webdriver")
+@patch("safe_agent_browser.web_navigator.selenium_chrome.backend.webdriver")
 def test_drv_recreates_after_dead_session(mock_webdriver, chrome_os):
     dead = _make_fake_driver(dead=True)
     alive = _make_fake_driver()
@@ -162,8 +162,8 @@ def test_clear_stale_singletons_noop_when_absent(tmp_path):
 
 
 def test_chrome_args_have_no_automation_flags(tmp_path, monkeypatch):
-    monkeypatch.setenv("BROWDEN_CHROME_BINARY", "/usr/bin/google-chrome")
-    monkeypatch.delenv("BROWDEN_HEADLESS", raising=False)
+    monkeypatch.setenv("SAFE_AGENT_BROWSER_CHROME_BINARY", "/usr/bin/google-chrome")
+    monkeypatch.delenv("SAFE_AGENT_BROWSER_HEADLESS", raising=False)
     args = _chrome_args(tmp_path / "profile", 9222)
 
     assert args[0] == "/usr/bin/google-chrome"
@@ -182,17 +182,17 @@ def test_chrome_args_have_no_automation_flags(tmp_path, monkeypatch):
 
 
 def test_chrome_args_enable_swiftshader_when_headless(tmp_path, monkeypatch):
-    monkeypatch.setenv("BROWDEN_CHROME_BINARY", "/usr/bin/google-chrome")
-    monkeypatch.setenv("BROWDEN_HEADLESS", "1")
+    monkeypatch.setenv("SAFE_AGENT_BROWSER_CHROME_BINARY", "/usr/bin/google-chrome")
+    monkeypatch.setenv("SAFE_AGENT_BROWSER_HEADLESS", "1")
     args = _chrome_args(tmp_path / "profile", 9222)
     # The WebGL fallback matters headless too (CI, containers): keep it on.
     assert "--enable-unsafe-swiftshader" in args
 
 
 def test_chrome_args_headless_when_enabled(tmp_path, monkeypatch):
-    monkeypatch.setenv("BROWDEN_CHROME_BINARY", "/usr/bin/google-chrome")
-    monkeypatch.setenv("BROWDEN_HEADLESS", "1")
-    monkeypatch.delenv("BROWDEN_NO_SANDBOX", raising=False)
+    monkeypatch.setenv("SAFE_AGENT_BROWSER_CHROME_BINARY", "/usr/bin/google-chrome")
+    monkeypatch.setenv("SAFE_AGENT_BROWSER_HEADLESS", "1")
+    monkeypatch.delenv("SAFE_AGENT_BROWSER_NO_SANDBOX", raising=False)
     args = _chrome_args(tmp_path / "profile", 9222)
     assert "--headless=new" in args
     # Headless does NOT imply --no-sandbox: the sandbox stays on unless opted out.
@@ -200,39 +200,39 @@ def test_chrome_args_headless_when_enabled(tmp_path, monkeypatch):
 
 
 def test_chrome_args_no_sandbox_is_opt_in(tmp_path, monkeypatch):
-    monkeypatch.setenv("BROWDEN_CHROME_BINARY", "/usr/bin/google-chrome")
-    monkeypatch.delenv("BROWDEN_NO_SANDBOX", raising=False)
+    monkeypatch.setenv("SAFE_AGENT_BROWSER_CHROME_BINARY", "/usr/bin/google-chrome")
+    monkeypatch.delenv("SAFE_AGENT_BROWSER_NO_SANDBOX", raising=False)
     # Off by default, even headless — the sandbox is kept.
-    monkeypatch.setenv("BROWDEN_HEADLESS", "1")
+    monkeypatch.setenv("SAFE_AGENT_BROWSER_HEADLESS", "1")
     assert "--no-sandbox" not in _chrome_args(tmp_path / "profile", 9222)
     # Explicit opt-in adds it (the escape hatch for sandbox-less hosts).
-    monkeypatch.setenv("BROWDEN_NO_SANDBOX", "1")
+    monkeypatch.setenv("SAFE_AGENT_BROWSER_NO_SANDBOX", "1")
     assert "--no-sandbox" in _chrome_args(tmp_path / "profile", 9222)
 
 
 def test_find_chrome_binary_honours_env(monkeypatch):
-    monkeypatch.setenv("BROWDEN_CHROME_BINARY", "/opt/chrome/chrome")
+    monkeypatch.setenv("SAFE_AGENT_BROWSER_CHROME_BINARY", "/opt/chrome/chrome")
     assert _find_chrome_binary() == "/opt/chrome/chrome"
 
 
 def test_find_chrome_binary_searches_path(monkeypatch):
-    monkeypatch.delenv("BROWDEN_CHROME_BINARY", raising=False)
+    monkeypatch.delenv("SAFE_AGENT_BROWSER_CHROME_BINARY", raising=False)
     monkeypatch.delenv("CHROME_BIN", raising=False)
 
     def fake_which(name):
         return "/usr/bin/google-chrome" if name == "google-chrome" else None
 
     monkeypatch.setattr(
-        "browden.web_navigator.selenium_chrome.backend.shutil.which", fake_which
+        "safe_agent_browser.web_navigator.selenium_chrome.backend.shutil.which", fake_which
     )
     assert _find_chrome_binary() == "/usr/bin/google-chrome"
 
 
 def test_find_chrome_binary_raises_when_missing(monkeypatch):
-    monkeypatch.delenv("BROWDEN_CHROME_BINARY", raising=False)
+    monkeypatch.delenv("SAFE_AGENT_BROWSER_CHROME_BINARY", raising=False)
     monkeypatch.delenv("CHROME_BIN", raising=False)
     monkeypatch.setattr(
-        "browden.web_navigator.selenium_chrome.backend.shutil.which",
+        "safe_agent_browser.web_navigator.selenium_chrome.backend.shutil.which",
         lambda name: None,
     )
     # No well-known install either — must raise, not silently return nothing.
@@ -247,7 +247,7 @@ def test_find_chrome_binary_uses_wellknown_when_not_on_path(monkeypatch):
     if not paths:
         pytest.skip("Linux has no well-known install paths (Chrome is found on PATH); "
                     "this runs on the macOS and Windows runners")
-    monkeypatch.delenv("BROWDEN_CHROME_BINARY", raising=False)
+    monkeypatch.delenv("SAFE_AGENT_BROWSER_CHROME_BINARY", raising=False)
     monkeypatch.delenv("CHROME_BIN", raising=False)
     monkeypatch.setattr(backend.shutil, "which", lambda name: None)
     installed = paths[-1]  # only the last one exists: the earlier ones are skipped
@@ -296,7 +296,7 @@ def test_launch_chrome_terminates_when_devtools_never_comes_up(chrome_os, tmp_pa
     chrome_os.spawned[0][1].terminate.assert_called_once()  # no orphaned Chrome
 
 
-@patch("browden.web_navigator.selenium_chrome.backend.webdriver")
+@patch("safe_agent_browser.web_navigator.selenium_chrome.backend.webdriver")
 def test_drv_swallows_quit_error_on_dead_driver(mock_webdriver, chrome_os):
     dead = _make_fake_driver(dead=True)
     dead.quit.side_effect = Exception("already gone")
@@ -348,7 +348,7 @@ def test_get_profile_dir_returns_construction_path(tmp_path):
     assert backend.get_profile_dir() == tmp_path / "prof"
 
 
-@patch("browden.web_navigator.selenium_chrome.backend.webdriver")
+@patch("safe_agent_browser.web_navigator.selenium_chrome.backend.webdriver")
 def test_drv_restarts_when_current_window_is_gone(mock_webdriver, chrome_os):
     # Initial driver that has lost its current window: window_handles still works,
     # but current_window_handle raises — exactly what _drv()'s health check probes.
@@ -389,7 +389,7 @@ def test_is_running_false_and_tears_down_a_dead_session():
     drv.quit.assert_called_once()  # dead session is torn down (but not relaunched)
 
 
-@patch("browden.web_navigator.selenium_chrome.backend.webdriver")
+@patch("safe_agent_browser.web_navigator.selenium_chrome.backend.webdriver")
 def test_drv_recreates_when_window_handles_fails(mock_webdriver, chrome_os):
     # Driver that fails on window_handles (session dead)
     dead_drv = _make_fake_driver(dead=True)
@@ -439,7 +439,7 @@ def test_navigate_failure_becomes_page_not_found():
         backend.navigate("https://example.com")
 
 
-@patch("browden.web_navigator.selenium_chrome.backend.webdriver")
+@patch("safe_agent_browser.web_navigator.selenium_chrome.backend.webdriver")
 def test_list_tab_ids_returns_handles_without_switching(mock_webdriver, chrome_os):
     drv = _make_fake_driver(handles=("h1", "h2", "h3"))
     mock_webdriver.Chrome.return_value = drv

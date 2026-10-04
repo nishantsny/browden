@@ -451,7 +451,7 @@ class BrowserSessionManager:
 
         The cheap counterpart to ``force_reload_tab``: nothing is reloaded, so
         whatever the page's own JS built up in the live DOM (an expanded panel, a
-        loaded infinite-scroll batch, a half-filled form) survives — only browden's
+        loaded infinite-scroll batch, a half-filled form) survives — only safe-agent-browser's
         parsed copy is thrown away, and the next DOM query re-fetches the live HTML.
 
         The tab is verified to still exist first, via ``list_handles`` — cheap, and

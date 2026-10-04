@@ -1,11 +1,11 @@
 # =============================================================================
-# browden — allowing the agent to read LOCAL FILES (file://).
+# safe-agent-browser — allowing the agent to read LOCAL FILES (file://).
 #
-# LIVE RELOAD: browden re-reads this file about every 10s while it runs, so
+# LIVE RELOAD: safe-agent-browser re-reads this file about every 10s while it runs, so
 # edits take effect without a restart. A save that doesn't parse (mid-edit, bad
 # YAML) is ignored and the last valid version stays in force.
 #
-# By default browden accepts only https:// URLs: file://, ftp://, data:, etc.
+# By default safe-agent-browser accepts only https:// URLs: file://, ftp://, data:, etc.
 # are refused no matter what the host allowlist says, so a prompt-injected agent
 # can't be steered into reading /etc/passwd or your SSH keys off disk.
 #
@@ -14,7 +14,7 @@
 # like file:///home/me/report.html carries an *empty* host ("") — there is no
 # domain — so the override key you add is the empty string "".
 #
-# Copy this to ~/.browden/allowlist.yaml (or point --allowlist at it) and edit
+# Copy this to ~/.safe-agent-browser/allowlist.yaml (or point --allowlist at it) and edit
 # the path regexes to the exact files/dirs you want readable.
 #
 # SECURITY: file access lets the agent read anything the path regex matches, and

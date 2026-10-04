@@ -17,14 +17,14 @@ from unittest.mock import patch
 
 import pytest
 
-from browden.configs.loader import RuntimeConfigurationRefresher
-from browden.mcp.validator import BrowdenRuntimeConfiguration, FrameGate, ValidationError
+from safe_agent_browser.configs.loader import RuntimeConfigurationRefresher
+from safe_agent_browser.mcp.validator import SafeAgentBrowserRuntimeConfiguration, FrameGate, ValidationError
 
 # Only app.example.com is readable...
-_READ_APP = BrowdenRuntimeConfiguration({"read": {"website_overrides": {"app.example.com": [".*"]}}})
+_READ_APP = SafeAgentBrowserRuntimeConfiguration({"read": {"website_overrides": {"app.example.com": [".*"]}}})
 # ...vs the whole https web readable (to isolate the same-origin check from the
 # read-allowed check).
-_READ_OPEN = BrowdenRuntimeConfiguration({"read": {"website_overrides": {"*": [".*"]}}})
+_READ_OPEN = SafeAgentBrowserRuntimeConfiguration({"read": {"website_overrides": {"*": [".*"]}}})
 
 TOP = "https://app.example.com/page"
 WIDGET = "https://app.example.com/widget"
@@ -72,7 +72,7 @@ class GateRunningSession:
 
 
 def _server():
-    import browden.mcp.server as server
+    import safe_agent_browser.mcp.server as server
     __import__("importlib").reload(server)
     return server
 

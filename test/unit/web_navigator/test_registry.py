@@ -1,4 +1,4 @@
-from browden.web_navigator.registry import TabRegistry
+from safe_agent_browser.web_navigator.registry import TabRegistry
 
 
 def test_idle_pages_uses_ttl_and_clock(fake_clock):

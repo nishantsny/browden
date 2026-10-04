@@ -9,7 +9,7 @@ import urllib.parse
 
 import pytest
 
-from browden.mcp.session_management.browser_session_manager import BrowserSessionManager
+from safe_agent_browser.mcp.session_management.browser_session_manager import BrowserSessionManager
 from gates import OPEN_READ_GATE
 
 HTML = """<html><body>

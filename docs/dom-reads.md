@@ -9,9 +9,9 @@ capped, and how to get a whole large node out of a page.
 Why cap at all: a tool response is fed straight into a model's context. One
 Amazon order card is ~355 chars of text but ~167 KB of HTML, and a single
 attribute (an ad iframe's `name`) can hold 15 KB of JSON. So raw HTML and raw
-attribute values are never echoed by default — browden truncates, reports the
+attribute values are never echoed by default — safe-agent-browser truncates, reports the
 true size, and lets the caller opt into more. The caps live in
-[`browden/dom/serialize.py`](../browden/dom/serialize.py).
+[`safe_agent_browser/dom/serialize.py`](../safe_agent_browser/dom/serialize.py).
 
 ## The caps
 

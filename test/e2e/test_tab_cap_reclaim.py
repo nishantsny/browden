@@ -13,7 +13,7 @@ instead of waiting for it; a server subprocess offers no such seam.
 """
 import pytest
 
-from browden.mcp.session_management.browser_session_manager import (
+from safe_agent_browser.mcp.session_management.browser_session_manager import (
     IDLE_TTL_SECONDS,
     BrowserSessionManager,
 )

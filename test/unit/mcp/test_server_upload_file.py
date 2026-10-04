@@ -10,8 +10,8 @@ from unittest.mock import MagicMock, patch
 import pytest
 from gated_fakes import gated_upload
 
-from browden.configs.loader import RuntimeConfigurationRefresher
-from browden.mcp.validator import BrowdenRuntimeConfiguration, ValidationError
+from safe_agent_browser.configs.loader import RuntimeConfigurationRefresher
+from safe_agent_browser.mcp.validator import SafeAgentBrowserRuntimeConfiguration, ValidationError
 
 SPLITWISE = "https://secure.splitwise.com/"
 
@@ -27,7 +27,7 @@ def receipts(tmp_path):
 
 
 def _enabled(receipts, **extra):
-    return BrowdenRuntimeConfiguration({
+    return SafeAgentBrowserRuntimeConfiguration({
         "read": {"website_overrides": {"*": [".*"]}},
         "allowed_upload_locations": [str(receipts / "receipts")],
         "upload-file": {"secure.splitwise.com": [
@@ -50,7 +50,7 @@ def _session(*, url, elements, file_path=""):
 
 
 def _server():
-    import browden.mcp.server as server
+    import safe_agent_browser.mcp.server as server
     __import__("importlib").reload(server)
     return server
 
@@ -89,7 +89,7 @@ async def test_a_file_outside_the_roots_is_refused_before_the_page_is_touched(re
 async def test_an_authorized_host_with_no_roots_uploads_nothing(receipts):
     """Both halves are required: the host rule alone authorizes no file."""
     server = _server()
-    configuration = BrowdenRuntimeConfiguration({
+    configuration = SafeAgentBrowserRuntimeConfiguration({
         "read": {"website_overrides": {"*": [".*"]}},
         "upload-file": {"secure.splitwise.com": {"paths": [".*"], "label": ".*"}},
     })
@@ -104,7 +104,7 @@ async def test_an_authorized_host_with_no_roots_uploads_nothing(receipts):
 async def test_upload_file_is_a_separate_section_from_write_text(receipts):
     """The escalation this action exists to avoid: typing never implies uploading."""
     server = _server()
-    typing_only = BrowdenRuntimeConfiguration({
+    typing_only = SafeAgentBrowserRuntimeConfiguration({
         "read": {"website_overrides": {"*": [".*"]}},
         "allowed_upload_locations": [str(receipts / "receipts")],
         "write-text": {"secure.splitwise.com": {"paths": [".*"], "label": ".*"}},

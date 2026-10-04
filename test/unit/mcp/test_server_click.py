@@ -10,11 +10,11 @@ from unittest.mock import MagicMock, patch
 import pytest
 from gated_fakes import gated_write
 
-from browden.configs.loader import RuntimeConfigurationRefresher
-from browden.mcp.validator import BrowdenRuntimeConfiguration, ValidationError
+from safe_agent_browser.configs.loader import RuntimeConfigurationRefresher
+from safe_agent_browser.mcp.validator import SafeAgentBrowserRuntimeConfiguration, ValidationError
 
 # Mirror of allowlist.yaml with the showcase click block uncommented.
-_ENABLED_CONFIGURATION = BrowdenRuntimeConfiguration({
+_ENABLED_CONFIGURATION = SafeAgentBrowserRuntimeConfiguration({
     "read": {"website_overrides": {"*": [".*"]}},
     "click": {
         "amazon.com": {"paths": [".*"], "label": r"(?i)\badd to cart\b"},
@@ -22,7 +22,7 @@ _ENABLED_CONFIGURATION = BrowdenRuntimeConfiguration({
 })
 
 # Same, but amazon.com is also on the denylist — the denylist must win.
-_DENIED_CONFIGURATION = BrowdenRuntimeConfiguration({
+_DENIED_CONFIGURATION = SafeAgentBrowserRuntimeConfiguration({
     "denylist": {"amazon.com": [".*"]},
     "click": {
         "amazon.com": {"paths": [".*"], "label": r"(?i)\badd to cart\b"},
@@ -46,7 +46,7 @@ def _session(*, url, elements):
 async def test_shipped_default_denies_click_everywhere():
     # The click block in the shipped allowlist.yaml is commented out, so
     # even amazon.com is refused until the user opts in.
-    import browden.mcp.server as server
+    import safe_agent_browser.mcp.server as server
     __import__("importlib").reload(server)
     session = _session(url="https://www.amazon.com/dp/B0FBRRM2VQ", elements=[_atc_node()])
     with patch.object(server._store, "route", return_value=session):
@@ -57,7 +57,7 @@ async def test_shipped_default_denies_click_everywhere():
 
 @pytest.mark.asyncio
 async def test_happy_path_clicks():
-    import browden.mcp.server as server
+    import safe_agent_browser.mcp.server as server
     importlib = __import__("importlib")
     importlib.reload(server)
     session = _session(url="https://www.amazon.com/dp/B0FBRRM2VQ", elements=[_atc_node()])
@@ -73,7 +73,7 @@ async def test_denylist_vetoes_click_even_when_click_host_is_allowed():
     # amazon.com is on the click allowlist AND the denylist — denylist wins.
     # (That the element is then never even read is pinned at the session level,
     # in test_write_gate_atomicity.py.)
-    import browden.mcp.server as server
+    import safe_agent_browser.mcp.server as server
     __import__("importlib").reload(server)
     session = _session(url="https://www.amazon.com/dp/B0FBRRM2VQ", elements=[_atc_node()])
     with patch.object(server._store, "route", return_value=session), \
@@ -85,7 +85,7 @@ async def test_denylist_vetoes_click_even_when_click_host_is_allowed():
 
 @pytest.mark.asyncio
 async def test_host_not_allowed_is_rejected():
-    import browden.mcp.server as server
+    import safe_agent_browser.mcp.server as server
     __import__("importlib").reload(server)
     session = _session(url="https://evil.example.com/p", elements=[_atc_node()])
     with patch.object(server._store, "route", return_value=session), \
@@ -99,7 +99,7 @@ async def test_host_not_allowed_is_rejected():
 async def test_buy_now_rejected_by_site_label():
     # "Buy Now" is a real control (the predicate no longer vetoes it on intent),
     # but amazon.com requires the "add to cart" label — so Gate 3 refuses it.
-    import browden.mcp.server as server
+    import safe_agent_browser.mcp.server as server
     __import__("importlib").reload(server)
     session = _session(url="https://www.amazon.com/dp/X",
                        elements=[_atc_node(value="Buy Now")])
@@ -115,9 +115,9 @@ async def test_allow_all_host_clicks_any_real_control():
     # A host listed with paths but NO label means "any click here is fine" — so a
     # "Place your order" button (once vetoed by the hardcoded negative list) now
     # clicks. Integrity still holds: it must be a real, non-decoy control.
-    import browden.mcp.server as server
+    import safe_agent_browser.mcp.server as server
     __import__("importlib").reload(server)
-    allow_all = BrowdenRuntimeConfiguration({
+    allow_all = SafeAgentBrowserRuntimeConfiguration({
         "read": {"website_overrides": {"*": [".*"]}},
         "click": {"amazon.com": {"paths": [".*"], "label": ".*"}},  # explicit allow-any
     })
@@ -135,9 +135,9 @@ async def test_allow_all_host_clicks_any_real_control():
 async def test_allow_all_host_still_rejects_decoy():
     # "Any click" does not extend to page-injected agent decoys — that guard is
     # intent-independent and always applies.
-    import browden.mcp.server as server
+    import safe_agent_browser.mcp.server as server
     __import__("importlib").reload(server)
-    allow_all = BrowdenRuntimeConfiguration({
+    allow_all = SafeAgentBrowserRuntimeConfiguration({
         "read": {"website_overrides": {"*": [".*"]}},
         "click": {"amazon.com": {"paths": [".*"], "label": ".*"}},
     })
@@ -153,7 +153,7 @@ async def test_allow_all_host_still_rejects_decoy():
 
 @pytest.mark.asyncio
 async def test_ambiguous_selector_is_rejected():
-    import browden.mcp.server as server
+    import safe_agent_browser.mcp.server as server
     __import__("importlib").reload(server)
     session = _session(url="https://www.amazon.com/dp/X",
                        elements=[_atc_node(), _atc_node()])
@@ -167,7 +167,7 @@ async def test_ambiguous_selector_is_rejected():
 @pytest.mark.asyncio
 async def test_label_mismatch_for_site_is_rejected():
     # "Add to bag" passes the generic predicate but amazon.com requires "add to cart".
-    import browden.mcp.server as server
+    import safe_agent_browser.mcp.server as server
     __import__("importlib").reload(server)
     session = _session(url="https://www.amazon.com/dp/X",
                        elements=[_atc_node(value="Add to bag")])
@@ -180,7 +180,7 @@ async def test_label_mismatch_for_site_is_rejected():
 
 # Anchor clicks are gated by *where the href goes* against the READ allowlist.
 # Here amazon.com and wholefoodsmarket.com are readable; nothing else is.
-_ANCHOR_CONFIGURATION = BrowdenRuntimeConfiguration({
+_ANCHOR_CONFIGURATION = SafeAgentBrowserRuntimeConfiguration({
     "read": {"enabled": True, "tranco": {"enabled": False},
              "website_overrides": {"amazon.com": [".*"], "wholefoodsmarket.com": [".*"]}},
     "click": {"amazon.com": {"paths": [".*"], "label": ".*"}},  # allow any control text
@@ -194,7 +194,7 @@ def _anchor_node(href, text="link", **attrs):
 
 @pytest.mark.asyncio
 async def test_anchor_same_site_relative_clicks():
-    import browden.mcp.server as server
+    import safe_agent_browser.mcp.server as server
     __import__("importlib").reload(server)
     session = _session(url="https://www.amazon.com/checkout/p/x/spc",
                        elements=[_anchor_node("/checkout/next")])
@@ -208,7 +208,7 @@ async def test_anchor_same_site_relative_clicks():
 async def test_anchor_cross_domain_but_allowlisted_clicks():
     # The whole point of the read-allowlist rule (vs same-domain): an anchor that
     # leaves amazon.com for another ALLOW-LISTED site is fine.
-    import browden.mcp.server as server
+    import safe_agent_browser.mcp.server as server
     __import__("importlib").reload(server)
     session = _session(url="https://www.amazon.com/checkout/p/x/spc",
                        elements=[_anchor_node("https://www.wholefoodsmarket.com/cart")])
@@ -220,7 +220,7 @@ async def test_anchor_cross_domain_but_allowlisted_clicks():
 
 @pytest.mark.asyncio
 async def test_anchor_target_off_read_allowlist_rejected():
-    import browden.mcp.server as server
+    import safe_agent_browser.mcp.server as server
     __import__("importlib").reload(server)
     session = _session(url="https://www.amazon.com/checkout/p/x/spc",
                        elements=[_anchor_node("https://evil.example/x")])
@@ -235,7 +235,7 @@ async def test_anchor_target_off_read_allowlist_rejected():
 async def test_anchor_javascript_href_clicks_without_target_check():
     # javascript:void(0) runs in place (the tip "Edit" pattern) — no navigation,
     # so no read-allowlist check; it clicks even with no target host.
-    import browden.mcp.server as server
+    import safe_agent_browser.mcp.server as server
     __import__("importlib").reload(server)
     session = _session(url="https://www.amazon.com/checkout/p/x/spc",
                        elements=[_anchor_node("javascript:void(0)", text="Edit")])
@@ -247,7 +247,7 @@ async def test_anchor_javascript_href_clicks_without_target_check():
 
 @pytest.mark.asyncio
 async def test_anchor_mailto_scheme_rejected():
-    import browden.mcp.server as server
+    import safe_agent_browser.mcp.server as server
     __import__("importlib").reload(server)
     session = _session(url="https://www.amazon.com/checkout/p/x/spc",
                        elements=[_anchor_node("mailto:help@amazon.com", text="Contact")])
@@ -260,7 +260,7 @@ async def test_anchor_mailto_scheme_rejected():
 
 @pytest.mark.asyncio
 async def test_page_gone_returns_error():
-    import browden.mcp.server as server
+    import safe_agent_browser.mcp.server as server
     __import__("importlib").reload(server)
     session = _session(url=None, elements=[])
     with patch.object(server._store, "route", return_value=session):

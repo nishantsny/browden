@@ -8,7 +8,7 @@ session is handed a gate that admits everything.
 """
 from pathlib import Path
 
-from browden.mcp.validator import AdmittedFile, FrameGate, ReadGate, UploadFileGate, WriteGate
+from safe_agent_browser.mcp.validator import AdmittedFile, FrameGate, ReadGate, UploadFileGate, WriteGate
 
 OPEN_GATE = WriteGate(check_page=lambda url: None,
                       check_element=lambda url, css_selector, found: None)

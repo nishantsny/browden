@@ -12,7 +12,7 @@ import urllib.parse
 
 import pytest
 
-from browden.web_navigator.interface import TabNotFoundError
+from safe_agent_browser.web_navigator.interface import TabNotFoundError
 
 DATA_URL = "data:text/html," + urllib.parse.quote(
     "<html><body><h1 id='h'>hi</h1></body></html>")

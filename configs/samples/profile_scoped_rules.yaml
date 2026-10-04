@@ -1,7 +1,7 @@
 # Profile-scoped rules: the same rule grammar, scoped to one browser profile.
 #
 # A profile is Chrome's --user-data-dir: one browsing identity, with its own
-# cookies, extensions and logged-in sessions. browden runs one Chrome per
+# cookies, extensions and logged-in sessions. safe-agent-browser runs one Chrome per
 # profile, so profiles are where "the credentialed browser" and "a scratch
 # browser for reading" actually differ — and this is how the policy can tell
 # them apart, instead of every loosening applying to all of them at once.
@@ -34,7 +34,7 @@ profiles:
   # The credentialed profile — the one holding real logins. Narrow on purpose:
   # it can read what any profile can read, and click exactly one control.
   # -------------------------------------------------------------------------
-  ~/.cache/browden/chrome-profile:
+  ~/.cache/safe-agent-browser/chrome-profile:
     click:
       secure.splitwise.com:
         - path: ['^/expenses.*']
@@ -51,7 +51,7 @@ profiles:
   # from a search page) still needs a deliberate act, either the opt-out below
   # or a named override. Nothing here touches any other profile.
   # -------------------------------------------------------------------------
-  ~/.cache/browden/chrome-research:
+  ~/.cache/safe-agent-browser/chrome-research:
     allow_all: true
     read:
       website_overrides:
@@ -67,7 +67,7 @@ profiles:
   # naming the host explicitly — a blanket rule never re-enables plaintext —
   # and only this profile can reach it.
   # -------------------------------------------------------------------------
-  ~/.cache/browden/chrome-dev:
+  ~/.cache/safe-agent-browser/chrome-dev:
     read:
       website_overrides:
         localhost: ['.*']

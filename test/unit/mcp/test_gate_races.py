@@ -35,7 +35,7 @@ from dataclasses import dataclass, field
 import pytest
 from atomicity_harness import TAB, OnePageBackend, make_session, serve, until_queued
 
-from browden.mcp.validator import BrowdenRuntimeConfiguration, ValidationError
+from safe_agent_browser.mcp.validator import SafeAgentBrowserRuntimeConfiguration, ValidationError
 
 SHOP = "https://shop.example/item"        # readable, and every write action is allowed
 OTHER = "https://other.example/item"      # readable, but no write rule at all
@@ -73,7 +73,7 @@ PAGES = {
 # refuses it as a frame — the check a split, check-outside-the-hold move skips.
 FRAMES = {SHOP: {"#child": WIDGET, "#foreign": FOREIGN}}
 
-_RULES = BrowdenRuntimeConfiguration({
+_RULES = SafeAgentBrowserRuntimeConfiguration({
     "read": {"tranco": {"enabled": False},
              "website_overrides": {"shop.example": [".*"], "other.example": [".*"]}},
     "click": {"shop.example": {"paths": [".*"], "label": r"(?i)add to cart"}},
@@ -158,7 +158,7 @@ def _assert_nothing_escaped(backend):
 def server():
     import importlib
 
-    import browden.mcp.server as server
+    import safe_agent_browser.mcp.server as server
     importlib.reload(server)
     return server
 

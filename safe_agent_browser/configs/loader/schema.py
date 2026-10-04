@@ -36,7 +36,7 @@ Any other top-level key is refused: an unknown section would be kept as rules
 no gate ever consults, so a typo like `clik:` would silently authorize nothing.
 
 Validation is structural plus regex compilation; semantics (default-deny,
-denylist-wins ordering, www-stripping, ...) live in BrowdenAccessRuleSet and
+denylist-wins ordering, www-stripping, ...) live in SafeAgentBrowserAccessRuleSet and
 ReadPolicy.
 """
 import re

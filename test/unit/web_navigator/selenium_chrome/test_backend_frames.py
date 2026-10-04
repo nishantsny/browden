@@ -7,9 +7,9 @@ renamed or removed fails here, not in Chrome.
 """
 import pytest
 
-from browden.dependencies.selenium import JavascriptException
-from browden.web_navigator.interface import FrameFocusError, InvalidSelectorError
-from browden.web_navigator.selenium_chrome.backend import SeleniumChromeBackend
+from safe_agent_browser.dependencies.selenium import JavascriptException
+from safe_agent_browser.web_navigator.interface import FrameFocusError, InvalidSelectorError
+from safe_agent_browser.web_navigator.selenium_chrome.backend import SeleniumChromeBackend
 
 TOP = "https://app.example.com/page"
 CHILD = "https://app.example.com/widget"

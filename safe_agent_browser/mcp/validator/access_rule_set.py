@@ -1,9 +1,9 @@
 """The access rules a request is decided by: denylist, read gate, write actions.
 
-:class:`BrowdenAccessRuleSet` is the evaluated rule surface every gate consults.
+:class:`SafeAgentBrowserAccessRuleSet` is the evaluated rule surface every gate consults.
 It is built from the rule sections of a loaded config and holds nothing
 process-wide — the ``infra`` caps live on
-:class:`~.runtime_configuration.BrowdenRuntimeConfiguration`, which owns one of these.
+:class:`~.runtime_configuration.SafeAgentBrowserRuntimeConfiguration`, which owns one of these.
 """
 import re
 from pathlib import Path
@@ -15,7 +15,7 @@ from .tranco import DEFAULT_TOP_N, canonical_host
 
 # The rule an `allow_all` set answers every write-action lookup with: any page,
 # any control, and — for press-key — every control key the gate would accept.
-# Deliberately NOT a `"*"` read override: see BrowdenAccessRuleSet's `allow_all`.
+# Deliberately NOT a `"*"` read override: see SafeAgentBrowserAccessRuleSet's `allow_all`.
 _ANY_PAGE_ANY_CONTROL = PageRule(patterns=(re.compile(".*"),), match_on="url",
                                  label=re.compile(".*"), keys=ACTIVATION_KEYS)
 
@@ -85,7 +85,7 @@ def _merge_read_cfg(base: dict, extra: dict) -> dict:
     return merged
 
 
-class BrowdenAccessRuleSet:
+class SafeAgentBrowserAccessRuleSet:
     """The access rules any single request is decided by: a denylist, the read
     gate, and the write actions.
 
@@ -185,7 +185,7 @@ class BrowdenAccessRuleSet:
     Write actions are read by name from :data:`~.allowlist.WRITE_ACTIONS`; every
     other key is ignored here. ``infra`` (process-wide, part of no access
     decision) and ``profiles`` (which scopes whole rule sets to a browser profile)
-    belong to the :class:`BrowdenRuntimeConfiguration` that owns this set; any
+    belong to the :class:`SafeAgentBrowserRuntimeConfiguration` that owns this set; any
     other key has already been refused by the schema when the sections come from
     a loaded file.
 
@@ -195,10 +195,10 @@ class BrowdenAccessRuleSet:
     """
 
     def __init__(self, sections: dict[str, object], tranco_path: Path | None = None,
-                 *, base: "BrowdenAccessRuleSet | None" = None):
+                 *, base: "SafeAgentBrowserAccessRuleSet | None" = None):
         # tranco_path is the Tranco snapshot that sits next to the allowlist
         # file; the loader/from_file pass it in. A bare dict construction (tests,
-        # the import-time default) leaves it None -> the ~/.browden fallback.
+        # the import-time default) leaves it None -> the ~/.safe-agent-browser fallback.
         #
         # `base` is the set these rules sit ON TOP OF: a profile's block is
         # additive over the global one, so a profile starts from every global
@@ -273,7 +273,7 @@ class BrowdenAccessRuleSet:
         opts sites in. The shipped sample enables Tranco so it works out of box.
 
         ``tranco_path`` is the snapshot sitting next to the allowlist config; if
-        it is missing we fall back to the ~/.browden default (``path=None``), so
+        it is missing we fall back to the ~/.safe-agent-browser default (``path=None``), so
         a snapshot that setup has not fetched yet degrades to "Tranco matches
         nothing" rather than a crash.
         """

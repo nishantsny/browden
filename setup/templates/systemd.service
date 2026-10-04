@@ -1,5 +1,5 @@
 [Unit]
-Description=Browden MCP Server (SSE, {service_name})
+Description=Safe Agent Browser MCP Server (SSE, {service_name})
 After=network.target
 
 [Service]
@@ -8,7 +8,7 @@ Environment=MCP_TRANSPORT=sse
 Environment=MCP_HOST=127.0.0.1
 Environment=MCP_PORT={port}
 WorkingDirectory={repo_root}
-ExecStart={python} -m browden.mcp.server --allowlist {allowlist}
+ExecStart={python} -m safe_agent_browser.mcp.server --allowlist {allowlist}
 Restart=always
 RestartSec=5
 

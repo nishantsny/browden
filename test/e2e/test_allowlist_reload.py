@@ -1,6 +1,6 @@
 """E2e: editing the allowlist hot-reloads into the running server and flips the gate.
 
-A real server process (with ``BROWDEN_RELOAD_INTERVAL`` tightened so the poller
+A real server process (with ``SAFE_AGENT_BROWSER_RELOAD_INTERVAL`` tightened so the poller
 ticks fast) whose config allows ``website-reload-xyz.com`` via a local Tranco
 snapshot. The first ``navigate`` passes the read gate; the config is then edited
 so the host is no longer listed, and within a few poller ticks the same
@@ -56,7 +56,7 @@ def reload_mcp_server(tmp_path, monkeypatch):
     from mcp_harness import McpServerHarness
 
     cfg = _reload_config_dir(tmp_path)
-    monkeypatch.setenv("BROWDEN_RELOAD_INTERVAL", "0.2")
+    monkeypatch.setenv("SAFE_AGENT_BROWSER_RELOAD_INTERVAL", "0.2")
     cache_dir = tmp_path / "cache"
     cache_dir.mkdir()
     harness = McpServerHarness(cache_dir, allowlist_path=cfg / "allowlist.yaml")

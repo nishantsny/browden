@@ -47,7 +47,7 @@ def test_select_installer_cls_per_platform():
 
 def _installer(cls, tmp_path):
     return cls(
-        service_name="browden-test", port=22050,
+        service_name="safe-agent-browser-test", port=22050,
         allowlist=tmp_path / "allowlist.yaml", python="/venv/bin/python",
         display=":0", repo_root=tmp_path / "repo", config_dir=tmp_path / "cfg")
 
@@ -58,18 +58,18 @@ def test_systemd_unit_render(tmp_path):
     unit = _installer(ots.LinuxSystemdInstaller, tmp_path).render()
     assert "Environment=MCP_PORT=22050" in unit
     assert "Environment=MCP_TRANSPORT=sse" in unit
-    assert "-m browden.mcp.server --allowlist" in unit
+    assert "-m safe_agent_browser.mcp.server --allowlist" in unit
     assert "Restart=always" in unit
     assert "WantedBy=default.target" in unit
 
 
 def test_launchd_plist_render(tmp_path):
     plist = _installer(ots.MacLaunchdInstaller, tmp_path).render()
-    assert "<key>Label</key><string>browden-test</string>" in plist
+    assert "<key>Label</key><string>safe-agent-browser-test</string>" in plist
     assert "<key>KeepAlive</key><true/>" in plist       # ~ Restart=always
     assert "<key>RunAtLoad</key><true/>" in plist        # ~ start at login
     assert "<key>MCP_PORT</key><string>22050</string>" in plist
-    assert "browden.mcp.server" in plist
+    assert "safe_agent_browser.mcp.server" in plist
 
 
 def test_windows_task_render(tmp_path):
@@ -81,7 +81,7 @@ def test_windows_task_render(tmp_path):
     assert inst.launcher_path().suffix == ".pyw"
     launcher = inst.render_launcher()
     assert 'os.environ.setdefault("MCP_PORT", "22050")' in launcher
-    assert "browden.mcp.server" in launcher
+    assert "safe_agent_browser.mcp.server" in launcher
     assert "allowlist.yaml" in launcher
 
 
@@ -90,35 +90,35 @@ def test_windows_task_render_xml_escapes_values(tmp_path):
     # task XML — it has to escape and still parse.
     import xml.etree.ElementTree as ET
     inst = ots.WindowsTaskInstaller(
-        service_name="browden & <co>", port=22050,
+        service_name="safe-agent-browser & <co>", port=22050,
         allowlist=tmp_path / "allowlist.yaml", python="/venv/bin/python",
         display=":0", repo_root=tmp_path / "a & b", config_dir=tmp_path / "cfg")
     task = inst.render()
-    assert "browden & <co>" not in task          # raw specials never leak through
-    assert "browden &amp; &lt;co&gt;" in task     # escaped instead
+    assert "safe-agent-browser & <co>" not in task          # raw specials never leak through
+    assert "safe-agent-browser &amp; &lt;co&gt;" in task     # escaped instead
     ET.fromstring(task)                           # and the result is well-formed XML
 
 
 # -- agent config blocks -----------------------------------------------------
 
 def test_sse_config_points_at_port():
-    cfg = json.loads(ots.sse_config("browden", 22050))
-    entry = cfg["mcpServers"]["browden"]
+    cfg = json.loads(ots.sse_config("safe-agent-browser", 22050))
+    entry = cfg["mcpServers"]["safe-agent-browser"]
     assert entry == {"type": "sse", "url": "http://127.0.0.1:22050/sse"}
 
 
 def test_stdio_config_includes_display_on_linux(tmp_path):
     allow = tmp_path / "allowlist.yaml"
-    cfg = json.loads(ots.stdio_config("browden", "/venv/bin/python", allow, ":0"))
-    entry = cfg["mcpServers"]["browden"]
+    cfg = json.loads(ots.stdio_config("safe-agent-browser", "/venv/bin/python", allow, ":0"))
+    entry = cfg["mcpServers"]["safe-agent-browser"]
     assert entry["command"] == "/venv/bin/python"
-    assert entry["args"] == ["-m", "browden.mcp.server", "--allowlist", str(allow)]
+    assert entry["args"] == ["-m", "safe_agent_browser.mcp.server", "--allowlist", str(allow)]
     assert entry["env"] == {"DISPLAY": ":0"}
 
 
 def test_stdio_config_omits_env_without_display(tmp_path):
-    cfg = json.loads(ots.stdio_config("browden", "py", tmp_path / "a.yaml", None))
-    assert "env" not in cfg["mcpServers"]["browden"]
+    cfg = json.loads(ots.stdio_config("safe-agent-browser", "py", tmp_path / "a.yaml", None))
+    assert "env" not in cfg["mcpServers"]["safe-agent-browser"]
 
 
 # -- hardening advisories ----------------------------------------------------
@@ -126,16 +126,16 @@ def test_stdio_config_omits_env_without_display(tmp_path):
 def test_rule_path_spells_home_and_absolute_paths():
     # Permission rules read a bare path as settings-relative: home paths need
     # "~/", anything else a leading "//".
-    assert ots._rule_path(Path.home() / ".browden") == "~/.browden"
-    assert ots._rule_path(Path("/opt/browden")) == "//opt/browden"
+    assert ots._rule_path(Path.home() / ".safe-agent-browser") == "~/.safe-agent-browser"
+    assert ots._rule_path(Path("/opt/safe-agent-browser")) == "//opt/safe-agent-browser"
 
 
-def test_guard_files_note_denies_every_browden_file(tmp_path):
+def test_guard_files_note_denies_every_safe_agent_browser_file(tmp_path):
     config_dir = tmp_path / "cfg"
     note = ots.guard_files_note(config_dir, config_dir / "allowlist.yaml", tmp_path / "repo")
     assert '"deny"' in note
     assert f'"Edit({ots._rule_path(config_dir)}/**)"' in note   # allowlist + snapshots
-    assert f'"Edit({ots._rule_path(tmp_path / "repo")}/**)"' in note  # browden's code
+    assert f'"Edit({ots._rule_path(tmp_path / "repo")}/**)"' in note  # safe-agent-browser's code
     assert '"ask"' in note                                      # the softer alternative
     json.loads(note[note.index("{"):note.rindex("}") + 1])      # the block is valid JSON
 

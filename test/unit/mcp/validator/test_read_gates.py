@@ -1,7 +1,7 @@
 import pytest
 
-from browden.mcp.validator import (
-    BrowdenAccessRuleSet,
+from safe_agent_browser.mcp.validator import (
+    SafeAgentBrowserAccessRuleSet,
     HostRuleMatcher,
     ReadPolicy,
     ValidationError,
@@ -116,11 +116,11 @@ def test_validate_url_passes_browser_internal_tabs_through(amazon_only):
 
 # -- ensure_url_allowed (the read-tool gate, H2) ------------------------------
 
-_READ = BrowdenAccessRuleSet({
+_READ = SafeAgentBrowserAccessRuleSet({
     "read": {"enabled": True, "tranco": {"enabled": False},
              "website_overrides": {"amazon.com": [".*"]}},
 })
-_DENIED = BrowdenAccessRuleSet({"denylist": {"amazon.com": [".*"]}})
+_DENIED = SafeAgentBrowserAccessRuleSet({"denylist": {"amazon.com": [".*"]}})
 AMAZON = "https://www.amazon.com/dp/B0FBRRM2VQ"
 
 
@@ -148,7 +148,7 @@ def test_ensure_url_allowed_true_for_browser_internal_tabs():
 
 def _read_policy(overrides: dict) -> ReadPolicy:
     """A ReadPolicy whose website_overrides are ``overrides`` (Tranco off)."""
-    return BrowdenAccessRuleSet({"read": {"website_overrides": overrides}}).read_policy
+    return SafeAgentBrowserAccessRuleSet({"read": {"website_overrides": overrides}}).read_policy
 
 
 def test_https_always_allowed_on_read_policy():

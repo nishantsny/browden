@@ -63,7 +63,7 @@ class FrameFocusError(RuntimeError):
 class WebNavigatorBackend(ABC):
     """Contract every browser backend must implement.
 
-    Implementations live in browden.web_navigator.<driver>/ and are the
+    Implementations live in safe_agent_browser.web_navigator.<driver>/ and are the
     only place third-party browser libraries (selenium, playwright, ...) are
     imported. The interface itself imports only from common.
 

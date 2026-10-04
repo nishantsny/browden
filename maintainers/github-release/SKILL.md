@@ -1,12 +1,12 @@
-name: release-browden
+name: release-safe-agent-browser
 description: >
-    Cut a new browden release. Drives `~/scripts/deploy.sh --release=<tag>` to
+    Cut a new safe-agent-browser release. Drives `~/scripts/deploy.sh --release=<tag>` to
     deploy the latest origin/main into the release worktree, run the full e2e,
     and — only on a fully green deploy — tag the release and watch the GitHub
     `release` workflow fast-forward `stable` and publish the Release. Asks the
     user for the version/tag and whether to open a CHANGELOG PR, and NEVER tags a
     version that isn't written into CHANGELOG.md and merged on main.
-    Trigger on "release browden", "cut a browden release", "/release-browden".
+    Trigger on "release safe-agent-browser", "cut a safe-agent-browser release", "/release-safe-agent-browser".
 
 ## What this does
 
@@ -41,7 +41,7 @@ too so you fail fast (before a ~7-minute run) and can offer to fix it.
 ## Steps
 
 1. **Preflight (read-only).** Work against the release worktree
-   (`${BROWDEN_RELEASE_DIR:-$HOME/projects/browser-guard-release}`).
+   (`${SAFE_AGENT_BROWSER_RELEASE_DIR:-$HOME/projects/browser-guard-release}`).
    `git fetch origin main` and report: current `origin/main` HEAD, `pyproject`
    version, latest `git tag`, the `## [Unreleased]` + newest version section of
    `CHANGELOG.md`, and that `.github/workflows/release.yml` exists on main. If the
@@ -69,7 +69,7 @@ too so you fail fast (before a ~7-minute run) and can offer to fix it.
      `## [<version>] — <today>` heading and fix the compare links. Mirror the
      previous `release: cut vX.Y.Z` commit and PR. Open the PR. Then **STOP**:
      tell the user to merge it to main (and say so, or re-run
-     `/release-browden`). Do not tag — the tag's commit must already describe it
+     `/release-safe-agent-browser`). Do not tag — the tag's commit must already describe it
      on main.
    - **The merge is the go-ahead.** When the user reports the prep PR merged (or
      a re-run finds it merged), confirm `MERGED` + the HARD RULE on origin/main
@@ -80,7 +80,7 @@ too so you fail fast (before a ~7-minute run) and can offer to fix it.
      there. Once `gh pr view <n> --json state` says `MERGED`, remove it
      (`git -C ~/projects/browser-guard worktree remove <path>`) and delete the
      local `release/v<version>` branch (`-D`: the squash merge means `-d`
-     won't see it as merged). The follow-up `/release-browden` run does this in
+     won't see it as merged). The follow-up `/release-safe-agent-browser` run does this in
      step 1 if they are still around.
    - Missing, and the user declined → **STOP** and explain the release is blocked
      until the version is in the changelog on main.
@@ -119,7 +119,7 @@ too so you fail fast (before a ~7-minute run) and can offer to fix it.
 - If the run 403s on the stable push / release create, check **repo Settings →
   Actions → General → Workflow permissions = "Read and write"** (and, if `stable` is
   branch-protected, that the workflow is allowed to push it), then `gh run rerun`.
-- The deploy script honors `BROWDEN_RELEASE_DIR`, `BROWDEN_SERVICE`,
-  `BROWDEN_PORT`, `BROWDEN_ALLOWLIST`, `BROWDEN_E2E_VENV`.
+- The deploy script honors `SAFE_AGENT_BROWSER_RELEASE_DIR`, `SAFE_AGENT_BROWSER_SERVICE`,
+  `SAFE_AGENT_BROWSER_PORT`, `SAFE_AGENT_BROWSER_ALLOWLIST`, `SAFE_AGENT_BROWSER_E2E_VENV`.
   The e2e venv is built fresh per run inside the run's temp dir unless
-  `BROWDEN_E2E_VENV` names a persistent one.
+  `SAFE_AGENT_BROWSER_E2E_VENV` names a persistent one.

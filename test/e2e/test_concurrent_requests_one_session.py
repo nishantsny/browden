@@ -31,7 +31,7 @@ import threading
 import pytest
 import yaml
 
-from browden.web_navigator.utils.network_utils import get_free_port
+from safe_agent_browser.web_navigator.utils.network_utils import get_free_port
 
 TAB_COUNT = 10
 

@@ -20,7 +20,7 @@ import urllib.parse
 import pytest
 from gates import OPEN_GATE, OPEN_READ_GATE
 
-from browden.mcp.session_management.browser_session_manager import BrowserSessionManager
+from safe_agent_browser.mcp.session_management.browser_session_manager import BrowserSessionManager
 
 HTML = """<html><head><style>
   /* the issue #146 pattern, lifted from a real consular-services form */

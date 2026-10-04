@@ -1,5 +1,5 @@
 """Re-export validator symbols for convenient access."""
-from .access_rule_set import BrowdenAccessRuleSet
+from .access_rule_set import SafeAgentBrowserAccessRuleSet
 from .allowlist import HostRuleMatcher, ReadPolicy
 from .errors import SessionBusyError, ValidationError, tab_gone_envelope
 from .intent import (
@@ -15,7 +15,7 @@ from .intent import (
     label_matches,
 )
 from .popularity import PopularityAllowlist
-from .runtime_configuration import BrowdenRuntimeConfiguration
+from .runtime_configuration import SafeAgentBrowserRuntimeConfiguration
 from .tranco import TrancoList
 from .read_gates import (
     FrameGate,
@@ -47,8 +47,8 @@ from .write_gates import (
 __all__ = [
     "ACTIVATION_KEYS",
     "AdmittedFile",
-    "BrowdenAccessRuleSet",
-    "BrowdenRuntimeConfiguration",
+    "SafeAgentBrowserAccessRuleSet",
+    "SafeAgentBrowserRuntimeConfiguration",
     "FrameGate",
     "HostRuleMatcher",
     "MAX_UPLOAD_BYTES",

@@ -27,7 +27,7 @@ import threading
 import pytest
 import yaml
 
-from browden.web_navigator.utils.network_utils import get_free_port
+from safe_agent_browser.web_navigator.utils.network_utils import get_free_port
 
 
 # --- server-under-a-custom-allowlist factory -------------------------------
@@ -38,7 +38,7 @@ def make_server(tmp_path):
 
     The dict is serialized with ``yaml.safe_dump`` (so path regexes with regex
     metacharacters are quoted correctly), each call gets its own config dir (so
-    the policy under test doesn't depend on the host's ~/.browden), and every
+    the policy under test doesn't depend on the host's ~/.safe-agent-browser), and every
     harness is stopped on teardown.
     """
     sys.path.insert(0, os.path.dirname(__file__))
@@ -54,7 +54,7 @@ def make_server(tmp_path):
         cfg = d / "allowlist.yaml"
         cfg.write_text(yaml.safe_dump(config, sort_keys=False))
         # No Tranco snapshot is written (these policies keep Tranco off); the
-        # loader tolerates its absence — see BrowdenAccessRuleSet._build_read_policy.
+        # loader tolerates its absence — see SafeAgentBrowserAccessRuleSet._build_read_policy.
         cache = d / "cache"
         cache.mkdir()
         harness = McpServerHarness(cache, allowlist_path=cfg)

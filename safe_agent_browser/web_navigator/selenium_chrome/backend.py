@@ -97,27 +97,27 @@ def _switch(drv, handle: str) -> None:
 
 
 def _headless_enabled() -> bool:
-    """Whether to launch Chrome headless, controlled by ``BROWDEN_HEADLESS``.
+    """Whether to launch Chrome headless, controlled by ``SAFE_AGENT_BROWSER_HEADLESS``.
 
     A real human-facing session wants a visible window, so this defaults to off.
-    Set ``BROWDEN_HEADLESS=1`` (or true/yes/on) for environments without a
+    Set ``SAFE_AGENT_BROWSER_HEADLESS=1`` (or true/yes/on) for environments without a
     display — e2e tests and CI runners.
     """
-    return os.environ.get("BROWDEN_HEADLESS", "").strip().lower() in ("1", "true", "yes", "on")
+    return os.environ.get("SAFE_AGENT_BROWSER_HEADLESS", "").strip().lower() in ("1", "true", "yes", "on")
 
 
 def _no_sandbox_enabled() -> bool:
     """Whether to disable Chrome's setuid/namespace sandbox — opt-in only.
 
     ``--no-sandbox`` removes a layer of renderer isolation, exactly the layer
-    that matters most on the hosts browden is likely to drive at hostile web
+    that matters most on the hosts safe-agent-browser is likely to drive at hostile web
     content (CI runners, containers, servers). So we default to keeping the
     sandbox ON and only drop it when the operator explicitly sets
-    ``BROWDEN_NO_SANDBOX=1`` (or true/yes/on) — the escape hatch for environments
+    ``SAFE_AGENT_BROWSER_NO_SANDBOX=1`` (or true/yes/on) — the escape hatch for environments
     where the sandbox cannot start, e.g. an unprivileged container or a runner
     with user namespaces disabled, where Chrome would otherwise refuse to launch.
     """
-    return os.environ.get("BROWDEN_NO_SANDBOX", "").strip().lower() in ("1", "true", "yes", "on")
+    return os.environ.get("SAFE_AGENT_BROWSER_NO_SANDBOX", "").strip().lower() in ("1", "true", "yes", "on")
 
 
 SINGLETON_FILES = ("SingletonLock", "SingletonCookie", "SingletonSocket")
@@ -167,12 +167,12 @@ def _wellknown_chrome_paths(platform: str = sys.platform, os_name: str = os.name
 def _find_chrome_binary() -> str:
     """Locate the Chrome/Chromium executable to launch directly.
 
-    Honours ``BROWDEN_CHROME_BINARY`` (or the common ``CHROME_BIN``) first, then
+    Honours ``SAFE_AGENT_BROWSER_CHROME_BINARY`` (or the common ``CHROME_BIN``) first, then
     the usual binary names on PATH, then each platform's canonical install
     location (macOS ``/Applications``, Windows ``Program Files``) — so a stock
     Chrome install works without setting anything.
     """
-    explicit = os.environ.get("BROWDEN_CHROME_BINARY") or os.environ.get("CHROME_BIN")
+    explicit = os.environ.get("SAFE_AGENT_BROWSER_CHROME_BINARY") or os.environ.get("CHROME_BIN")
     if explicit:
         return explicit
     for name in CHROME_BINARY_NAMES:
@@ -184,7 +184,7 @@ def _find_chrome_binary() -> str:
             return path
     raise RuntimeError(
         "Could not find a Chrome/Chromium binary on PATH or in the usual install "
-        "locations; set BROWDEN_CHROME_BINARY to its full path."
+        "locations; set SAFE_AGENT_BROWSER_CHROME_BINARY to its full path."
     )
 
 
@@ -216,7 +216,7 @@ def _chrome_args(profile_dir: Path, port: int) -> list[str]:
         # port — e.g. a malicious page scanning loopback ports, whose Origin
         # header the browser sets and the page cannot forge — open a DevTools
         # websocket and take full CDP control (read every cookie, run JS in any
-        # origin), bypassing every browden gate. Pinning the origin keeps
+        # origin), bypassing every safe-agent-browser gate. Pinning the origin keeps
         # Selenium working while shutting that out. (A hostile *native* local
         # process can spoof any Origin header, so this flag is no defence
         # there — local processes are trusted by design, see SECURITY.md.)
@@ -245,7 +245,7 @@ def _chrome_args(profile_dir: Path, port: int) -> list[str]:
             "--window-size=1280,1024",
         ]
     if _no_sandbox_enabled():
-        # Opt-in only (BROWDEN_NO_SANDBOX): dropping the sandbox weakens renderer
+        # Opt-in only (SAFE_AGENT_BROWSER_NO_SANDBOX): dropping the sandbox weakens renderer
         # isolation, so we never do it implicitly — not even headless. Set it on
         # hosts where the sandbox can't start (unprivileged containers, runners
         # with user namespaces disabled).
@@ -836,7 +836,7 @@ class SeleniumChromeBackend(WebNavigatorBackend):
         ``send_keys(path)`` on an ``<input type=file>`` is Selenium's documented
         upload mechanism: it sets the input's file list directly and fires the
         page's ``change`` handler, without the native OS file dialog a real click
-        would open (which is outside the DOM and which browden could not drive).
+        would open (which is outside the DOM and which safe-agent-browser could not drive).
 
         Deliberately **no** ``clear()``, unlike :meth:`insert_text_target`: on a
         file input ``clear()`` is not the "wipe the old value" step it is for a

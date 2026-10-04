@@ -25,7 +25,7 @@ import time
 import pytest
 import yaml
 
-from browden.configs.loader.refresher import DEFAULT_RELOAD_INTERVAL_SECONDS
+from safe_agent_browser.configs.loader.refresher import DEFAULT_RELOAD_INTERVAL_SECONDS
 
 # Generous margin over one poll interval: the poller sleeps a full interval
 # before its first re-stat, so a reload can't be observed sooner than that.

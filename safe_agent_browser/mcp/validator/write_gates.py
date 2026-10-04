@@ -1,7 +1,7 @@
 """The full default-deny gate sequences for the write actions (``click`` / ``insert_text`` / ``press_key`` / ``upload_file``).
 
 Composes the three lower-level pieces — the per-action host allowlist (in the
-:class:`BrowdenAccessRuleSet` each gate is handed), the URL gate
+:class:`SafeAgentBrowserAccessRuleSet` each gate is handed), the URL gate
 (:func:`validate_url`), and the pure element-integrity predicates
 (:mod:`.intent`) — into the exact ordered checks each write tool must pass
 before it is allowed to touch the page.
@@ -20,7 +20,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from urllib.parse import urlparse
 
-from .access_rule_set import BrowdenAccessRuleSet
+from .access_rule_set import SafeAgentBrowserAccessRuleSet
 from .errors import ValidationError
 from .intent import (
     ACTIVATION_KEYS,
@@ -41,7 +41,7 @@ from .intent import (
 MAX_UPLOAD_BYTES = 25 * 1024 * 1024
 
 
-def check_action_host(access_rules: BrowdenAccessRuleSet, action: str, url: str) -> None:
+def check_action_host(access_rules: SafeAgentBrowserAccessRuleSet, action: str, url: str) -> None:
     """Gate 1 for a write action: denylist veto, then the action's host allowlist.
 
     The denylist is consulted first — a denied host is never actionable, even
@@ -79,7 +79,7 @@ def _single_node(found: dict, css_selector: str, refusal: str) -> dict:
     return found["elements"][0]
 
 
-def validate_click_target(access_rules: BrowdenAccessRuleSet, url: str,
+def validate_click_target(access_rules: SafeAgentBrowserAccessRuleSet, url: str,
                           css_selector: str, found: dict) -> None:
     """Gates 2, 2b and 3 for ``click`` — element integrity, anchor target, label.
 
@@ -120,7 +120,7 @@ def validate_click_target(access_rules: BrowdenAccessRuleSet, url: str,
             f"{p.hostname or ''}{p.path or '/'} — refusing to click")
 
 
-def validate_write_text_target(access_rules: BrowdenAccessRuleSet, url: str,
+def validate_write_text_target(access_rules: SafeAgentBrowserAccessRuleSet, url: str,
                                css_selector: str, found: dict) -> None:
     """Gates 2 and 3 for ``insert_text`` — text-control integrity, then label/id.
 
@@ -150,7 +150,7 @@ def validate_write_text_target(access_rules: BrowdenAccessRuleSet, url: str,
             f"{p.hostname or ''}{p.path or '/'} — refusing to insert text")
 
 
-def validate_press_key_target(access_rules: BrowdenAccessRuleSet, url: str,
+def validate_press_key_target(access_rules: SafeAgentBrowserAccessRuleSet, url: str,
                               css_selector: str, found: dict, key: str) -> None:
     """Gates 2, 2b and 3 for ``press-key`` — focusability, control-key, then label+key.
 
@@ -206,7 +206,7 @@ def validate_upload_path(allowed_upload_locations: "tuple[Path, ...]", file_path
 
     The gate with no analogue in the other write actions, and the reason this is
     an action of its own. ``click`` and ``insert_text`` act with data the agent
-    already has; an upload makes browden **read the local filesystem and ship the
+    already has; an upload makes safe-agent-browser **read the local filesystem and ship the
     bytes to a website**. With nowhere declared allowed, "upload to host X" means
     "exfiltrate ``~/.ssh/id_rsa`` to host X", and the tool is an arbitrary
     local-file read primitive wearing a form control.
@@ -234,7 +234,7 @@ def validate_upload_path(allowed_upload_locations: "tuple[Path, ...]", file_path
     # Selenium hands the path to the driver as keystrokes and splits it on "\n",
     # so a path containing one names TWO files and a `multiple` input would take
     # both — the second never judged by anything here. Control characters have no
-    # business in a path browden was asked to upload, so refuse the lot.
+    # business in a path safe-agent-browser was asked to upload, so refuse the lot.
     if any(ord(ch) < 0x20 or ord(ch) == 0x7f for ch in file_path):
         raise ValidationError(
             "upload path contains a control character — refusing to upload "
@@ -267,7 +267,7 @@ def validate_upload_path(allowed_upload_locations: "tuple[Path, ...]", file_path
     return resolved
 
 
-def validate_upload_target(access_rules: BrowdenAccessRuleSet, url: str,
+def validate_upload_target(access_rules: SafeAgentBrowserAccessRuleSet, url: str,
                            css_selector: str, found: dict) -> None:
     """Gates 2 and 3 for ``upload-file`` — file-control integrity, then label/id.
 
@@ -360,7 +360,7 @@ class UploadFileGate(WriteGate):
     admitted: AdmittedFile = field(default_factory=AdmittedFile)
 
 
-def click_gate(access_rules: BrowdenAccessRuleSet) -> WriteGate:
+def click_gate(access_rules: SafeAgentBrowserAccessRuleSet) -> WriteGate:
     """The ``click`` gates, bound to ``access_rules``."""
     return WriteGate(
         check_page=lambda url: check_action_host(access_rules, "click", url),
@@ -368,7 +368,7 @@ def click_gate(access_rules: BrowdenAccessRuleSet) -> WriteGate:
             access_rules, url, css_selector, found))
 
 
-def write_text_gate(access_rules: BrowdenAccessRuleSet) -> WriteGate:
+def write_text_gate(access_rules: SafeAgentBrowserAccessRuleSet) -> WriteGate:
     """The ``insert_text`` gates, bound to ``access_rules``."""
     return WriteGate(
         check_page=lambda url: check_action_host(access_rules, "write-text", url),
@@ -376,7 +376,7 @@ def write_text_gate(access_rules: BrowdenAccessRuleSet) -> WriteGate:
             access_rules, url, css_selector, found))
 
 
-def press_key_gate(access_rules: BrowdenAccessRuleSet, key: str) -> WriteGate:
+def press_key_gate(access_rules: SafeAgentBrowserAccessRuleSet, key: str) -> WriteGate:
     """The ``press_key`` gates for ``key``, bound to ``access_rules``."""
     return WriteGate(
         check_page=lambda url: check_action_host(access_rules, "press-key", url),
@@ -384,7 +384,7 @@ def press_key_gate(access_rules: BrowdenAccessRuleSet, key: str) -> WriteGate:
             access_rules, url, css_selector, found, key))
 
 
-def upload_file_gate(access_rules: BrowdenAccessRuleSet, file_path: str) -> UploadFileGate:
+def upload_file_gate(access_rules: SafeAgentBrowserAccessRuleSet, file_path: str) -> UploadFileGate:
     """The ``upload_file`` gates for ``file_path``, bound to ``access_rules``.
 
     The filesystem gate runs in ``check_page``, i.e. **before the DOM is read**:

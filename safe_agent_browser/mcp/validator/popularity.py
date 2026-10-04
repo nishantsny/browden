@@ -1,7 +1,7 @@
 """The PSL-aware popularity read allowlist.
 
 :class:`PopularityAllowlist` owns the two data sources the read gate's popularity
-option needs — the Tranco top-N (:class:`~browden.mcp.validator.tranco.TrancoList`)
+option needs — the Tranco top-N (:class:`~safe_agent_browser.mcp.validator.tranco.TrancoList`)
 and the Public Suffix List — and answers the one question the read policy asks of
 it: is a host allowed? A host is reduced to its registrable domain (eTLD+1) via
 the PSL and tested against Tranco, so ``mail.google.com`` -> ``google.com`` is
@@ -24,7 +24,7 @@ from .tranco import DEFAULT_TOP_N, TrancoList, canonical_host
 PSL_FILENAME = "public_suffix_list.dat"
 # The snapshot sits next to the Tranco snapshot; PopularityAllowlist derives it
 # from the passed Tranco path. This is the fallback for path-less constructions.
-DEFAULT_PSL_PATH = (Path("~/.browden") / PSL_FILENAME).expanduser()
+DEFAULT_PSL_PATH = (Path("~/.safe-agent-browser") / PSL_FILENAME).expanduser()
 
 # publicsuffix2 ships its own (older) PSL snapshot; we use it only as a fallback.
 _BUNDLED_PSL_PATH = Path(publicsuffix2.__file__).resolve().parent / PSL_FILENAME

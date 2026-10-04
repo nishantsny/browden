@@ -8,7 +8,7 @@ driver hold as the read or write. These fakes do the same against a canned
 """
 from unittest.mock import AsyncMock
 
-from browden.mcp.validator import ValidationError, tab_gone_envelope
+from safe_agent_browser.mcp.validator import ValidationError, tab_gone_envelope
 
 
 def gated_write(*, url, elements, result):

@@ -18,9 +18,9 @@ import urllib.parse
 import pytest
 from gates import OPEN_READ_GATE, open_upload_gate
 
-from browden.mcp.session_management.browser_session_manager import BrowserSessionManager
-from browden.mcp.validator import (
-    BrowdenAccessRuleSet,
+from safe_agent_browser.mcp.session_management.browser_session_manager import BrowserSessionManager
+from safe_agent_browser.mcp.validator import (
+    SafeAgentBrowserAccessRuleSet,
     ValidationError,
     upload_file_gate,
 )
@@ -77,7 +77,7 @@ async def _page(session):
 
 def _real_gate(location, file_path):
     """The gate a live server would build: any host, any label, one allowed upload location."""
-    rules = BrowdenAccessRuleSet({
+    rules = SafeAgentBrowserAccessRuleSet({
         "upload-file": {"*": {"paths": [".*"], "label": ".*"}},
         "allowed_upload_locations": [str(location)],
     })

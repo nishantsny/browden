@@ -20,8 +20,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from browden.mcp.session_management import browser_session_store
-from browden.mcp.validator import popularity, tranco
+from safe_agent_browser.mcp.session_management import browser_session_store
+from safe_agent_browser.mcp.validator import popularity, tranco
 
 TRANCO_FIXTURE = Path(__file__).resolve().parents[1] / "fixtures" / "tranco-mini.txt.gz"
 

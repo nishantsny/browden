@@ -11,11 +11,11 @@ jobs:
     env:
       # Drive Chrome with no display; the e2e conftest also sets this, but make
       # it explicit at the job level so any ad-hoc run behaves the same.
-      BROWDEN_HEADLESS: "1"
+      SAFE_AGENT_BROWSER_HEADLESS: "1"
       # GitHub-hosted runners restrict unprivileged user namespaces, so Chrome's
       # sandbox can't start here — opt into --no-sandbox for CI only. It is OFF by
       # default so real deployments keep the renderer sandbox.
-      BROWDEN_NO_SANDBOX: "1"
+      SAFE_AGENT_BROWSER_NO_SANDBOX: "1"
     steps:
       - uses: actions/checkout@v7
 
@@ -44,5 +44,5 @@ jobs:
         # The backend now launches Chrome directly (not via chromedriver), so it
         # needs the binary path; point it at the one setup-chrome installed.
         env:
-          BROWDEN_CHROME_BINARY: ${{ steps.setup-chrome.outputs.chrome-path }}
+          SAFE_AGENT_BROWSER_CHROME_BINARY: ${{ steps.setup-chrome.outputs.chrome-path }}
         run: uv run --no-sync pytest test/e2e -q

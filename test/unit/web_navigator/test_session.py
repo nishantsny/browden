@@ -3,14 +3,14 @@ import time
 
 import pytest
 
-from browden.common.tab import TabInfo
-from browden.web_navigator.interface import PageSnapshot, TabNotFoundError
-from browden.mcp.session_management.browser_session_manager import (
+from safe_agent_browser.common.tab import TabInfo
+from safe_agent_browser.web_navigator.interface import PageSnapshot, TabNotFoundError
+from safe_agent_browser.mcp.session_management.browser_session_manager import (
     DRIVER_LOCK_TIMEOUT_SECONDS,
     IDLE_TTL_SECONDS,
     BrowserSessionManager,
 )
-from browden.mcp.validator import ReadGate, SessionBusyError, ValidationError
+from safe_agent_browser.mcp.validator import ReadGate, SessionBusyError, ValidationError
 
 # These tests pin the session's locking, caching and tab tracking, not policy
 # (the read gate is pinned in test/unit/mcp/test_read_gate_atomicity.py), so
@@ -486,7 +486,7 @@ async def test_driver_lock_gives_up_after_the_timeout():
 @pytest.mark.asyncio
 async def test_a_timed_out_request_surfaces_as_an_error_envelope():
     # The tool layer turns SessionBusyError into the envelope agents get back.
-    from browden.mcp.server import _tool
+    from safe_agent_browser.mcp.server import _tool
 
     @_tool
     async def fake_tool(id: str) -> dict:

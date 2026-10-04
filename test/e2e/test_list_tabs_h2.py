@@ -29,10 +29,10 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import pytest
 import yaml
 
-from browden.configs.loader.refresher import DEFAULT_RELOAD_INTERVAL_SECONDS
-from browden.mcp.session_management.browser_session_manager import BrowserSessionManager
-from browden.mcp.validator import ReadGate, ValidationError
-from browden.web_navigator.utils.network_utils import get_free_port
+from safe_agent_browser.configs.loader.refresher import DEFAULT_RELOAD_INTERVAL_SECONDS
+from safe_agent_browser.mcp.session_management.browser_session_manager import BrowserSessionManager
+from safe_agent_browser.mcp.validator import ReadGate, ValidationError
+from safe_agent_browser.web_navigator.utils.network_utils import get_free_port
 from gates import OPEN_READ_GATE
 
 ON = "data:text/html," + urllib.parse.quote("<p>on-list</p>")

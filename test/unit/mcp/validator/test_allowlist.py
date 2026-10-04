@@ -2,8 +2,8 @@ from pathlib import Path
 
 import pytest
 
-from browden.mcp.validator import BrowdenAccessRuleSet, BrowdenRuntimeConfiguration
-from browden.mcp.validator.runtime_configuration import (
+from safe_agent_browser.mcp.validator import SafeAgentBrowserAccessRuleSet, SafeAgentBrowserRuntimeConfiguration
+from safe_agent_browser.mcp.validator.runtime_configuration import (
     DEFAULT_MAX_BROWSER_SESSIONS,
     DEFAULT_MAX_TABS_PER_SESSION,
     DEFAULT_REAP_INTERVAL_SECONDS,
@@ -11,8 +11,8 @@ from browden.mcp.validator.runtime_configuration import (
 
 
 @pytest.fixture
-def rs() -> BrowdenAccessRuleSet:
-    return BrowdenAccessRuleSet(
+def rs() -> SafeAgentBrowserAccessRuleSet:
+    return SafeAgentBrowserAccessRuleSet(
         {
             "read": {"website_overrides": {"*": [".*"]}},
             "click": {
@@ -31,7 +31,7 @@ def test_read_overrides_wildcard_is_wide_open(rs):
 
 
 def test_read_overrides_can_path_scope():
-    rs = BrowdenAccessRuleSet({"read": {"website_overrides": {"example.com": ["^/docs/.*"]}}})
+    rs = SafeAgentBrowserAccessRuleSet({"read": {"website_overrides": {"example.com": ["^/docs/.*"]}}})
     assert rs.read_policy.is_allowed("example.com", "/docs/intro")
     assert not rs.read_policy.is_allowed("example.com", "/secret")
     assert not rs.read_policy.is_allowed("other.com", "/docs/intro")
@@ -40,23 +40,23 @@ def test_read_overrides_can_path_scope():
 def test_path_regex_must_match_whole_path():
     # A path rule fullmatches: `^/products` alone covers only exactly `/products`,
     # not a sibling like `/products-secret-admin`. A prefix is spelled `.*`.
-    rs = BrowdenAccessRuleSet({"read": {"website_overrides": {"example.com": ["^/products"]}}})
+    rs = SafeAgentBrowserAccessRuleSet({"read": {"website_overrides": {"example.com": ["^/products"]}}})
     assert rs.read_policy.is_allowed("example.com", "/products")
     assert not rs.read_policy.is_allowed("example.com", "/products-secret-admin")
     assert not rs.read_policy.is_allowed("example.com", "/products/42")  # needs ^/products/.*
-    wide = BrowdenAccessRuleSet({"read": {"website_overrides": {"example.com": ["^/products/.*"]}}})
+    wide = SafeAgentBrowserAccessRuleSet({"read": {"website_overrides": {"example.com": ["^/products/.*"]}}})
     assert wide.read_policy.is_allowed("example.com", "/products/42")
 
 
 def test_read_default_denies_when_nothing_listed():
     # No read block and no overrides => fail closed.
-    assert not BrowdenAccessRuleSet({}).read_policy.is_allowed("example.com", "/")
+    assert not SafeAgentBrowserAccessRuleSet({}).read_policy.is_allowed("example.com", "/")
 
 
 # -- read policy: Tranco ------------------------------------------------------
 
 def test_read_tranco_allows_top_sites_and_subdomains():
-    rs = BrowdenAccessRuleSet({"read": {"tranco": {"enabled": True, "top_n": 1000}}})
+    rs = SafeAgentBrowserAccessRuleSet({"read": {"tranco": {"enabled": True, "top_n": 1000}}})
     # google.com is Tranco rank #1 — in any top_n.
     assert rs.read_policy.is_allowed("google.com", "/")
     assert rs.read_policy.is_allowed("mail.google.com", "/inbox")  # subdomain covered
@@ -69,19 +69,19 @@ def test_read_tranco_allows_top_sites_and_subdomains():
 
 def test_read_tranco_top_n_is_a_cutoff():
     # top_n=1 keeps only rank #1 (google.com); rank #2 (cloudflare.com) is out.
-    rs = BrowdenAccessRuleSet({"read": {"tranco": {"enabled": True, "top_n": 1}}})
+    rs = SafeAgentBrowserAccessRuleSet({"read": {"tranco": {"enabled": True, "top_n": 1}}})
     assert rs.read_policy.is_allowed("google.com", "/")
     assert not rs.read_policy.is_allowed("cloudflare.com", "/")
 
 
 def test_read_tranco_disabled_by_default():
     # tranco present but enabled:false => contributes no allows.
-    rs = BrowdenAccessRuleSet({"read": {"tranco": {"enabled": False}}})
+    rs = SafeAgentBrowserAccessRuleSet({"read": {"tranco": {"enabled": False}}})
     assert not rs.read_policy.is_allowed("google.com", "/")
 
 
 def test_read_tranco_and_overrides_are_both_honored():
-    rs = BrowdenAccessRuleSet({"read": {
+    rs = SafeAgentBrowserAccessRuleSet({"read": {
         "tranco": {"enabled": True, "top_n": 100},
         "website_overrides": {"intranet.corp": [".*"]},
     }})
@@ -92,7 +92,7 @@ def test_read_tranco_and_overrides_are_both_honored():
 def test_override_triumphs_over_tranco_and_can_restrict():
     # google.com is in Tranco (blanket allow), but an explicit override governs
     # it — so it is path-scoped, and Tranco no longer waves the rest through.
-    rs = BrowdenAccessRuleSet({"read": {
+    rs = SafeAgentBrowserAccessRuleSet({"read": {
         "tranco": {"enabled": True, "top_n": 1000},
         "website_overrides": {"google.com": ["^/allowed/.*"]},
     }})
@@ -103,7 +103,7 @@ def test_override_triumphs_over_tranco_and_can_restrict():
 
 
 def test_wildcard_override_scopes_every_host_over_tranco():
-    rs = BrowdenAccessRuleSet({"read": {
+    rs = SafeAgentBrowserAccessRuleSet({"read": {
         "tranco": {"enabled": True, "top_n": 1000},
         "website_overrides": {"*": ["^/docs/.*"]},
     }})
@@ -112,7 +112,7 @@ def test_wildcard_override_scopes_every_host_over_tranco():
 
 
 def test_denylist_still_beats_a_triumphing_override():
-    rs = BrowdenAccessRuleSet({
+    rs = SafeAgentBrowserAccessRuleSet({
         "read": {"website_overrides": {"*": [".*"]}},
         "denylist": {"evil.test": [".*"]},
     })
@@ -123,14 +123,14 @@ def test_denylist_still_beats_a_triumphing_override():
 # -- read policy: master switch ----------------------------------------------
 
 def test_read_disabled_allows_everything_non_denied():
-    rs = BrowdenAccessRuleSet({"read": {"enabled": False}})
+    rs = SafeAgentBrowserAccessRuleSet({"read": {"enabled": False}})
     assert rs.read_policy.is_allowed("literally-anything.test", "/x")
 
 
 # -- denylist -----------------------------------------------------------------
 
 def test_denylist_vetoes_even_tranco():
-    rs = BrowdenAccessRuleSet({
+    rs = SafeAgentBrowserAccessRuleSet({
         "read": {"tranco": {"enabled": True, "top_n": 1000}},
         "denylist": {"google.com": [".*"]},
     })
@@ -139,7 +139,7 @@ def test_denylist_vetoes_even_tranco():
 
 
 def test_denylist_vetoes_even_when_read_disabled():
-    rs = BrowdenAccessRuleSet({
+    rs = SafeAgentBrowserAccessRuleSet({
         "read": {"enabled": False},
         "denylist": {"evil.test": [".*"]},
     })
@@ -148,7 +148,7 @@ def test_denylist_vetoes_even_when_read_disabled():
 
 
 def test_denylist_can_path_scope_and_is_queryable():
-    rs = BrowdenAccessRuleSet({"denylist": {"example.com": ["^/checkout"]}})
+    rs = SafeAgentBrowserAccessRuleSet({"denylist": {"example.com": ["^/checkout"]}})
     assert rs.is_denied("example.com", "/checkout/pay")
     assert not rs.is_denied("example.com", "/browse")
     assert not rs.is_denied("other.com", "/checkout")
@@ -158,11 +158,11 @@ def test_www_prefixed_rule_keys_are_canonicalized():
     # A "www."-prefixed rule key must not be silently inert: lookups strip www.,
     # so the key is canonicalized to match. A denylist {www.tracker.com} blocks
     # both www.tracker.com and the bare apex, and matches however you query it.
-    rs = BrowdenAccessRuleSet({"denylist": {"www.tracker.com": [".*"]}})
+    rs = SafeAgentBrowserAccessRuleSet({"denylist": {"www.tracker.com": [".*"]}})
     assert rs.is_denied("www.tracker.com", "/")
     assert rs.is_denied("tracker.com", "/")
     # Same for a www.-keyed read override and write-action host.
-    al2 = BrowdenAccessRuleSet({
+    al2 = SafeAgentBrowserAccessRuleSet({
         "read": {"website_overrides": {"www.intranet.corp": [".*"]}},
         "click": {"www.shop.test": {"paths": [".*"], "label": ".*"}},
     })
@@ -171,7 +171,7 @@ def test_www_prefixed_rule_keys_are_canonicalized():
 
 
 def test_empty_denylist_denies_nothing():
-    assert not BrowdenAccessRuleSet({"denylist": {}}).is_denied("anywhere.test", "/x")
+    assert not SafeAgentBrowserAccessRuleSet({"denylist": {}}).is_denied("anywhere.test", "/x")
 
 
 # -- M1: path normalization (dot-segments / %2e can't evade path rules) --------
@@ -179,7 +179,7 @@ def test_empty_denylist_denies_nothing():
 def test_denylist_not_evaded_by_dot_segments():
     # Chrome resolves ./ , /../ and %2e before requesting, so a path-scoped
     # denylist must decide on the same normalized form it will actually fetch.
-    rs = BrowdenAccessRuleSet({"denylist": {"reddit.com": ["^/checkout"]}})
+    rs = SafeAgentBrowserAccessRuleSet({"denylist": {"reddit.com": ["^/checkout"]}})
     assert rs.is_denied("reddit.com", "/checkout")
     assert rs.is_denied("reddit.com", "/./checkout")      # was a bypass
     assert rs.is_denied("reddit.com", "/x/../checkout")   # was a bypass
@@ -188,13 +188,13 @@ def test_denylist_not_evaded_by_dot_segments():
 
 
 def test_path_scoped_allow_not_escaped_by_dot_segments():
-    rs = BrowdenAccessRuleSet({"read": {"website_overrides": {"example.com": ["^/docs/.*"]}}})
+    rs = SafeAgentBrowserAccessRuleSet({"read": {"website_overrides": {"example.com": ["^/docs/.*"]}}})
     assert rs.read_policy.is_allowed("example.com", "/docs/x/../intro")  # stays /docs/
     assert not rs.read_policy.is_allowed("example.com", "/docs/../secret")  # escapes /docs/
 
 
 def test_normalization_preserves_trailing_slash():
-    rs = BrowdenAccessRuleSet({"denylist": {"example.com": ["^/checkout/$"]}})
+    rs = SafeAgentBrowserAccessRuleSet({"denylist": {"example.com": ["^/checkout/$"]}})
     assert rs.is_denied("example.com", "/checkout/")
     assert rs.is_denied("example.com", "/./checkout/")
 
@@ -202,7 +202,7 @@ def test_normalization_preserves_trailing_slash():
 # -- M2: override_has_host (the scheme gate's opt-in check) -------------------
 
 def test_override_has_host_is_explicit_not_wildcard():
-    rs = BrowdenAccessRuleSet({"read": {"website_overrides": {"localhost": [".*"], "*": [".*"]}}})
+    rs = SafeAgentBrowserAccessRuleSet({"read": {"website_overrides": {"localhost": [".*"], "*": [".*"]}}})
     rp = rs.read_policy
     assert rp.override_has_host("localhost")          # explicit entry
     assert rp.override_has_host("www.localhost")      # www-canonicalized
@@ -211,7 +211,7 @@ def test_override_has_host_is_explicit_not_wildcard():
 
 
 def test_override_has_host_matches_empty_host_for_file():
-    rp = BrowdenAccessRuleSet({"read": {"website_overrides": {"": ["^/home/.*"]}}}).read_policy
+    rp = SafeAgentBrowserAccessRuleSet({"read": {"website_overrides": {"": ["^/home/.*"]}}}).read_policy
     assert rp.override_has_host("")                    # the authority-less file:// host
     assert not rp.override_has_host("example.com")
 
@@ -268,7 +268,7 @@ def test_from_file_parses_yaml(tmp_path):
         '    paths: [".*"]\n'
         "    label: '(?i)\\badd to cart\\b'\n"
     )
-    rc = BrowdenRuntimeConfiguration.from_file(f)
+    rc = SafeAgentBrowserRuntimeConfiguration.from_file(f)
     assert rc.access_rules.read_policy.is_allowed("anything.example.com", "/whatever")  # via overrides
     assert rc.access_rules.read_policy.is_allowed("google.com", "/")                    # via Tranco
     assert rc.access_rules.section("click").is_allowed("www.amazon.com", "/dp/X")
@@ -279,7 +279,7 @@ def test_from_file_parses_yaml(tmp_path):
 def test_from_file_all_comments_is_deny_all(tmp_path):
     f = tmp_path / "allowlist.yaml"
     f.write_text("# everything commented out\n# read:\n#   enabled: true\n")
-    rc = BrowdenRuntimeConfiguration.from_file(f)
+    rc = SafeAgentBrowserRuntimeConfiguration.from_file(f)
     assert not rc.access_rules.read_policy.is_allowed("example.com", "/")
     assert not rc.access_rules.section("click").is_allowed("amazon.com", "/")
 
@@ -289,7 +289,7 @@ def test_from_file_all_comments_is_deny_all(tmp_path):
 def test_denylist_not_bypassed_by_trailing_dot():
     # evil.com. resolves to evil.com in the browser, so the denylist must treat
     # them alike (canonical_host strips the trailing dot) or the deny is bypassed.
-    rs = BrowdenAccessRuleSet({
+    rs = SafeAgentBrowserAccessRuleSet({
         "read": {"tranco": {"enabled": True, "top_n": 1000}},
         "denylist": {"google.com": [".*"]},
     })
@@ -302,13 +302,13 @@ def test_denylist_keys_and_lookups_agree_on_www():
     # A rule written with or without www. matches a host written either way —
     # keys and lookups canonicalize identically, so no silently-inert entry.
     for entry in ("tracker.com", "www.tracker.com"):
-        rs = BrowdenAccessRuleSet({"denylist": {entry: [".*"]}})
+        rs = SafeAgentBrowserAccessRuleSet({"denylist": {entry: [".*"]}})
         assert rs.is_denied("tracker.com", "/")
         assert rs.is_denied("www.tracker.com", "/")
 
 
 def test_override_matches_trailing_dot_and_www():
-    rs = BrowdenAccessRuleSet({"read": {"website_overrides": {"example.com": [".*"]}}})
+    rs = SafeAgentBrowserAccessRuleSet({"read": {"website_overrides": {"example.com": [".*"]}}})
     assert rs.read_policy.is_allowed("example.com", "/")
     assert rs.read_policy.is_allowed("example.com.", "/")
     assert rs.read_policy.is_allowed("www.example.com", "/")
@@ -319,7 +319,7 @@ def test_override_matches_trailing_dot_and_www():
 def test_write_label_is_scoped_per_page():
     # amazon.com authorizes different controls on different pages: "add to cart"
     # on a product page, "place your order" only in the checkout pipeline.
-    rs = BrowdenAccessRuleSet({"click": {"amazon.com": [
+    rs = SafeAgentBrowserAccessRuleSet({"click": {"amazon.com": [
         {"path": ["^/(dp|gp/product)/.*"], "label": "(?i)add to cart"},
         {"path": ["^/gp/buy/.*"], "label": "(?i)place your order"},
     ]}})
@@ -335,7 +335,7 @@ def test_write_label_is_scoped_per_page():
 
 def test_field_ids_are_page_scoped():
     # A label-less field id is typable only on the page whose rule lists it.
-    rs = BrowdenAccessRuleSet({"write-text": {"amazon.com": [
+    rs = SafeAgentBrowserAccessRuleSet({"write-text": {"amazon.com": [
         {"path": ["^/gp/css/order-history.*"], "label": "(?i)tip",
          "field_ids": ["tip-input"]},
     ]}})
@@ -346,7 +346,7 @@ def test_field_ids_are_page_scoped():
 
 def test_match_on_url_scopes_a_hash_router_spa():
     # Every SPA page shares path "/"; only match_on: url can tell them apart.
-    rs = BrowdenAccessRuleSet({"click": {"secure.splitwise.com": [
+    rs = SafeAgentBrowserAccessRuleSet({"click": {"secure.splitwise.com": [
         {"path": [r"^/#/friends/\d+$"], "match_on": "url", "label": "(?i)save"},
     ]}})
     friend = rs.rules_for("click", "secure.splitwise.com", "/", fragment="/friends/42")
@@ -358,7 +358,7 @@ def test_match_on_url_scopes_a_hash_router_spa():
 
 
 def test_match_on_url_read_override_scopes_spa_pages():
-    rs = BrowdenAccessRuleSet({"read": {"website_overrides": {"app.example.com": [
+    rs = SafeAgentBrowserAccessRuleSet({"read": {"website_overrides": {"app.example.com": [
         {"path": [r"^/#/reports/\d+$"], "match_on": "url"},
     ]}}})
     assert rs.read_policy.is_allowed("app.example.com", "/", fragment="/reports/9")
@@ -369,24 +369,24 @@ def test_match_on_url_read_override_scopes_spa_pages():
 
 def test_page_rule_requires_label_for_write_actions():
     with pytest.raises(ValueError, match="requires a 'label'"):
-        BrowdenAccessRuleSet({"click": {"amazon.com": [{"path": ["^/dp/.*"]}]}})
+        SafeAgentBrowserAccessRuleSet({"click": {"amazon.com": [{"path": ["^/dp/.*"]}]}})
 
 
 def test_page_rule_rejects_label_on_read_override():
     with pytest.raises(ValueError, match="only meaningful for a write action"):
-        BrowdenAccessRuleSet({"read": {"website_overrides": {
+        SafeAgentBrowserAccessRuleSet({"read": {"website_overrides": {
             "x.com": [{"path": [".*"], "label": ".*"}]}}})
 
 
 def test_page_rule_rejects_unknown_match_on():
     with pytest.raises(ValueError, match="match_on must be"):
-        BrowdenAccessRuleSet({"click": {"amazon.com": [
+        SafeAgentBrowserAccessRuleSet({"click": {"amazon.com": [
             {"path": [".*"], "match_on": "host", "label": ".*"}]}})
 
 
 def test_legacy_and_page_rule_forms_coexist():
     # Legacy host-wide dict and the new page-rule list load side by side.
-    rs = BrowdenAccessRuleSet({"click": {
+    rs = SafeAgentBrowserAccessRuleSet({"click": {
         "ebay.com": {"paths": [".*"], "label": "(?i)add"},           # legacy
         "amazon.com": [{"path": ["^/dp/.*"], "label": "(?i)add"}],   # page rules
     }})
@@ -398,14 +398,14 @@ def test_legacy_and_page_rule_forms_coexist():
 # -- infra knobs -------------------------------------------------------------
 
 def test_infra_defaults_when_the_section_is_absent():
-    rc = BrowdenRuntimeConfiguration({})
+    rc = SafeAgentBrowserRuntimeConfiguration({})
     assert rc.max_browser_sessions == DEFAULT_MAX_BROWSER_SESSIONS
     assert rc.max_tabs_per_session == DEFAULT_MAX_TABS_PER_SESSION
     assert rc.reap_interval_seconds == DEFAULT_REAP_INTERVAL_SECONDS == 7200
 
 
 def test_infra_reap_interval_is_read_from_the_config():
-    rc = BrowdenRuntimeConfiguration({"infra": {"reap_interval_seconds": 600}})
+    rc = SafeAgentBrowserRuntimeConfiguration({"infra": {"reap_interval_seconds": 600}})
     assert rc.reap_interval_seconds == 600
     # An unset sibling keeps its default rather than following the one that was set.
     assert rc.max_tabs_per_session == DEFAULT_MAX_TABS_PER_SESSION
@@ -413,9 +413,9 @@ def test_infra_reap_interval_is_read_from_the_config():
 
 # -- profile-scoped rule sets (#139) ------------------------------------------
 
-def _profiles(**bodies) -> BrowdenRuntimeConfiguration:
+def _profiles(**bodies) -> SafeAgentBrowserRuntimeConfiguration:
     """An allowlist whose profile keys are absolute paths, as a config's must be."""
-    return BrowdenRuntimeConfiguration({"profiles": {f"/profiles/{name}": body
+    return SafeAgentBrowserRuntimeConfiguration({"profiles": {f"/profiles/{name}": body
                                          for name, body in bodies.items()}})
 
 
@@ -435,7 +435,7 @@ def test_a_read_override_under_one_profile_admits_only_there():
 
 
 def test_a_profile_with_no_entry_gets_exactly_the_global_rules():
-    rc = BrowdenRuntimeConfiguration({
+    rc = SafeAgentBrowserRuntimeConfiguration({
         "read": {"website_overrides": {"example.com": [".*"]}},
         "profiles": {"/profiles/research": {"read": {"website_overrides": {"other.test": [".*"]}}}},
     })
@@ -446,13 +446,13 @@ def test_a_profile_with_no_entry_gets_exactly_the_global_rules():
 def test_no_profiles_block_leaves_every_profile_on_the_global_set():
     # The backward-compatibility guarantee: a config written before `profiles:`
     # existed decides every request with the one global rule set.
-    rc = BrowdenRuntimeConfiguration({"read": {"website_overrides": {"example.com": [".*"]}}})
+    rc = SafeAgentBrowserRuntimeConfiguration({"read": {"website_overrides": {"example.com": [".*"]}}})
     assert rc.access_rules_for("/anything") is rc.access_rules
     assert rc.profile_dirs() == []
 
 
 def test_profile_rules_are_additive_over_the_global_ones():
-    rc = BrowdenRuntimeConfiguration({
+    rc = SafeAgentBrowserRuntimeConfiguration({
         "read": {"website_overrides": {"global.test": [".*"]}},
         "click": {"global-shop.test": {"paths": [".*"], "label": "(?i)add"}},
         "profiles": {"/profiles/shopper": {
@@ -475,7 +475,7 @@ def test_rules_for_one_host_union_across_global_and_profile():
     # The same host listed in both places keeps both rule sets — including when
     # the two spell the host differently (www. is stripped by canonicalization,
     # so these must not look like two hosts and lose one).
-    rc = BrowdenRuntimeConfiguration({
+    rc = SafeAgentBrowserRuntimeConfiguration({
         "click": {"shop.test": [{"path": ["^/cart.*"], "label": "(?i)add"}]},
         "profiles": {"/profiles/shopper": {
             "click": {"www.shop.test": [{"path": ["^/checkout.*"], "label": "(?i)pay"}]}}},
@@ -486,7 +486,7 @@ def test_rules_for_one_host_union_across_global_and_profile():
 
 
 def test_denylist_unions_and_still_wins_inside_a_profile():
-    rc = BrowdenRuntimeConfiguration({
+    rc = SafeAgentBrowserRuntimeConfiguration({
         "denylist": {"blocked.test": [".*"]},
         "read": {"website_overrides": {"*": [".*"]}},
         "profiles": {"/profiles/research": {
@@ -505,7 +505,7 @@ def test_denylist_unions_and_still_wins_inside_a_profile():
 
 
 def test_a_profile_can_turn_the_popularity_net_off_for_itself_only():
-    rc = BrowdenRuntimeConfiguration({
+    rc = SafeAgentBrowserRuntimeConfiguration({
         "read": {"tranco": {"enabled": True}, "website_overrides": {}},
         "profiles": {"/profiles/offline": {"read": {"tranco": {"enabled": False}}}},
     })
@@ -517,7 +517,7 @@ def test_a_profile_can_turn_the_popularity_net_off_for_itself_only():
 
 
 def test_a_profile_inherits_global_read_settings_it_does_not_restate():
-    rc = BrowdenRuntimeConfiguration({
+    rc = SafeAgentBrowserRuntimeConfiguration({
         "read": {"tranco": {"enabled": True, "top_n": 1000}},
         "profiles": {"/profiles/p": {"read": {"website_overrides": {"unranked.test": [".*"]}}}},
     })
@@ -529,12 +529,12 @@ def test_a_profile_inherits_global_read_settings_it_does_not_restate():
 def test_profile_keys_are_canonicalized_like_session_paths():
     # Compared as paths, never as strings: the separator is the platform's, so a
     # literal "<home>/.cache/..." would only ever match on POSIX.
-    cache = Path.home() / ".cache" / "browden"
-    rc = BrowdenRuntimeConfiguration({"profiles": {
-        "~/.cache/browden/scratch": {"read": {"website_overrides": {"ok.test": [".*"]}}}}})
+    cache = Path.home() / ".cache" / "safe-agent-browser"
+    rc = SafeAgentBrowserRuntimeConfiguration({"profiles": {
+        "~/.cache/safe-agent-browser/scratch": {"read": {"website_overrides": {"ok.test": [".*"]}}}}})
     assert [Path(p) for p in rc.profile_dirs()] == [(cache / "scratch").resolve()]
     # Every spelling of that one directory finds it.
-    for spelling in ("~/.cache/browden/scratch", str(cache / "scratch"),
+    for spelling in ("~/.cache/safe-agent-browser/scratch", str(cache / "scratch"),
                      str(cache / "x" / ".." / "scratch")):
         assert rc.access_rules_for(spelling).read_policy.is_allowed("ok.test", "/"), spelling
     # A different directory does not.
@@ -553,11 +553,11 @@ def test_an_unusable_profile_path_falls_back_to_the_global_set():
 # The mini Tranco fixture ranks google.com (#1); "unranked.test" is in no
 # snapshot, which is what makes the popularity branch observable here.
 
-def _allow_all(read: dict | None = None, **rest) -> "BrowdenAccessRuleSet":
+def _allow_all(read: dict | None = None, **rest) -> "SafeAgentBrowserAccessRuleSet":
     body = {"allow_all": True, **rest}
     if read is not None:
         body["read"] = read
-    return BrowdenRuntimeConfiguration({"profiles": {"/profiles/scratch": body}}).access_rules_for("/profiles/scratch")
+    return SafeAgentBrowserRuntimeConfiguration({"profiles": {"/profiles/scratch": body}}).access_rules_for("/profiles/scratch")
 
 
 def test_allow_all_permits_every_write_action_on_any_page():
@@ -586,7 +586,7 @@ def test_allow_all_turns_tranco_on_even_when_the_global_config_had_it_off():
     # The net is turned ON for an allow_all set rather than inherited: opting out
     # is something the profile says in its own block, so a global
     # `tranco: {enabled: false}` doesn't quietly make allow_all mean "anything".
-    al = BrowdenRuntimeConfiguration({
+    al = SafeAgentBrowserRuntimeConfiguration({
         "read": {"tranco": {"enabled": False}},
         "profiles": {"/profiles/scratch": {"allow_all": True}},
     })
@@ -602,7 +602,7 @@ def test_allow_all_plus_explicit_tranco_off_admits_an_unranked_host():
 
 
 def test_allow_all_is_not_narrowed_by_an_inherited_page_scoped_override():
-    al = BrowdenRuntimeConfiguration({
+    al = SafeAgentBrowserRuntimeConfiguration({
         "read": {"tranco": {"enabled": False},
                  "website_overrides": {"docs.test": ["^/public/.*"]}},
         "profiles": {"/profiles/scratch": {"allow_all": True,
@@ -636,7 +636,7 @@ def test_allow_all_does_not_open_file_or_plaintext_http():
 
 
 def test_denylist_still_wins_inside_an_allow_all_profile():
-    al = BrowdenRuntimeConfiguration({
+    al = SafeAgentBrowserRuntimeConfiguration({
         "denylist": {"blocked.test": [".*"]},
         "profiles": {"/profiles/scratch": {"allow_all": True,
                                            "denylist": {"local-block.test": [".*"]}}},
@@ -648,7 +648,7 @@ def test_denylist_still_wins_inside_an_allow_all_profile():
 
 
 def test_allow_all_stays_inside_its_own_profile():
-    al = BrowdenRuntimeConfiguration({"profiles": {
+    al = SafeAgentBrowserRuntimeConfiguration({"profiles": {
         "/profiles/scratch": {"allow_all": True},
         "/profiles/narrow": {},
     }})
@@ -672,9 +672,9 @@ def test_allow_all_is_not_a_write_action_named_allow_all():
 # -- the access rule set / runtime configuration split ------------------------
 
 def test_access_rule_set_decides_without_the_runtime_configuration():
-    # BrowdenAccessRuleSet is the surface the gates use: it needs only the rule
+    # SafeAgentBrowserAccessRuleSet is the surface the gates use: it needs only the rule
     # sections, never the process-wide caps, so it can be built (and tested) alone.
-    rs = BrowdenAccessRuleSet({
+    rs = SafeAgentBrowserAccessRuleSet({
         "denylist": {"blocked.test": [".*"]},
         "read": {"website_overrides": {"example.com": ["^/docs/.*"]}},
         "click": {"shop.test": {"paths": [".*"], "label": "(?i)add"}},
@@ -689,7 +689,7 @@ def test_access_rule_set_decides_without_the_runtime_configuration():
 def test_only_named_write_actions_become_rules():
     # Write actions are read by name (WRITE_ACTIONS), so `infra` and any section
     # the schema would refuse never become a write action of the same name.
-    rs = BrowdenAccessRuleSet({
+    rs = SafeAgentBrowserAccessRuleSet({
         "infra": {"max_tabs_per_session": 3},
         "clik": {"shop.test": {"paths": [".*"], "label": ".*"}},
     })
@@ -701,11 +701,11 @@ def test_only_named_write_actions_become_rules():
 def test_runtime_configuration_decides_only_through_its_rule_set():
     # The container holds no decision members: a gate is handed the rule set
     # that governs its request (access_rules), never the whole configuration.
-    rc = BrowdenRuntimeConfiguration({
+    rc = SafeAgentBrowserRuntimeConfiguration({
         "denylist": {"blocked.test": [".*"]},
         "click": {"shop.test": {"paths": [".*"], "label": "(?i)add"}},
     })
-    assert isinstance(rc.access_rules, BrowdenAccessRuleSet)
+    assert isinstance(rc.access_rules, SafeAgentBrowserAccessRuleSet)
     assert rc.access_rules.is_denied("blocked.test", "/")
     assert rc.access_rules.rules_for("click", "shop.test", "/")
     for member in ("read_policy", "denylist", "is_denied", "section", "rules_for"):

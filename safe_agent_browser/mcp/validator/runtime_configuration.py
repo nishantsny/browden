@@ -1,15 +1,15 @@
-"""The runtime configuration browden runs under: one loaded allowlist file.
+"""The runtime configuration safe-agent-browser runs under: one loaded allowlist file.
 
-:class:`BrowdenRuntimeConfiguration` is what the loader builds from the allowlist
+:class:`SafeAgentBrowserRuntimeConfiguration` is what the loader builds from the allowlist
 YAML and the refresher hot-swaps: the process-wide ``infra`` caps plus the
-:class:`~.access_rule_set.BrowdenAccessRuleSet` every gate decides against.
+:class:`~.access_rule_set.SafeAgentBrowserAccessRuleSet` every gate decides against.
 """
 from pathlib import Path
 
 import yaml
 
 from ...common.profile import canonical_profile_dir
-from .access_rule_set import BrowdenAccessRuleSet
+from .access_rule_set import SafeAgentBrowserAccessRuleSet
 from .tranco import TRANCO_FILENAME
 
 # Defaults for the `infra` section. They live here, with the rest of the config
@@ -22,7 +22,7 @@ DEFAULT_MAX_TABS_PER_SESSION = 20
 DEFAULT_REAP_INTERVAL_SECONDS = 7200
 
 
-class BrowdenRuntimeConfiguration:
+class SafeAgentBrowserRuntimeConfiguration:
     """A whole loaded config: the process-wide ``infra`` caps plus the access rules.
 
     Two kinds of setting live in an allowlist file and they behave differently,
@@ -33,7 +33,7 @@ class BrowdenRuntimeConfiguration:
       layer; they gate no access decision and belong to no single request.
     * everything else — ``denylist``, ``read``, and the write actions: the rules
       that decide whether a given request may act. They are parsed into a
-      :class:`BrowdenAccessRuleSet` (which documents the grammar), reachable as
+      :class:`SafeAgentBrowserAccessRuleSet` (which documents the grammar), reachable as
       :attr:`access_rules`.
 
     ``profiles`` scopes a *second* copy of that same rule grammar to one browser
@@ -46,7 +46,7 @@ class BrowdenRuntimeConfiguration:
           tranco: {enabled: true, top_n: 1000000}
 
         profiles:
-          ~/.cache/browden/chrome-profile:      # the credentialed profile
+          ~/.cache/safe-agent-browser/chrome-profile:      # the credentialed profile
             click:
               secure.splitwise.com:
                 label: 'Save'
@@ -60,7 +60,7 @@ class BrowdenRuntimeConfiguration:
 
     Keys are canonicalized with :func:`canonical_profile_dir` — the same
     reduction the session layer applies to a caller's ``profile_dir`` — so a key
-    written ``~/.cache/browden/p`` names the same profile as the resolved path.
+    written ``~/.cache/safe-agent-browser/p`` names the same profile as the resolved path.
 
     :meth:`access_rules_for` is the only way to a decision: a gate is always
     handed the rule set for the profile whose session made the request, never
@@ -70,7 +70,7 @@ class BrowdenRuntimeConfiguration:
     def __init__(self, sections: dict[str, object], tranco_path: Path | None = None):
         # tranco_path is the Tranco snapshot that sits next to the allowlist
         # file; the loader/from_file pass it in. A bare dict construction (tests,
-        # the import-time default) leaves it None -> the ~/.browden fallback.
+        # the import-time default) leaves it None -> the ~/.safe-agent-browser fallback.
         self.max_browser_sessions = DEFAULT_MAX_BROWSER_SESSIONS
         self.max_tabs_per_session = DEFAULT_MAX_TABS_PER_SESSION
         self.reap_interval_seconds = DEFAULT_REAP_INTERVAL_SECONDS
@@ -82,22 +82,22 @@ class BrowdenRuntimeConfiguration:
                 infra.get("max_tabs_per_session", DEFAULT_MAX_TABS_PER_SESSION))
             self.reap_interval_seconds = int(
                 infra.get("reap_interval_seconds", DEFAULT_REAP_INTERVAL_SECONDS))
-        self._access_rules = BrowdenAccessRuleSet(sections, tranco_path)
+        self._access_rules = SafeAgentBrowserAccessRuleSet(sections, tranco_path)
         # Each profile's rules sit on top of the global set (base=), keyed by the
         # canonical profile path the session layer keys its Chrome sessions by.
         profiles = sections.get("profiles")
-        self._profiles: dict[str, BrowdenAccessRuleSet] = {
-            str(canonical_profile_dir(key)): BrowdenAccessRuleSet(
+        self._profiles: dict[str, SafeAgentBrowserAccessRuleSet] = {
+            str(canonical_profile_dir(key)): SafeAgentBrowserAccessRuleSet(
                 body if isinstance(body, dict) else {}, tranco_path, base=self._access_rules)
             for key, body in (profiles or {}).items()}
 
     @classmethod
-    def from_file(cls, path: Path) -> "BrowdenRuntimeConfiguration":
+    def from_file(cls, path: Path) -> "SafeAgentBrowserRuntimeConfiguration":
         return cls(yaml.safe_load(path.read_text()) or {},
                    tranco_path=path.parent / TRANCO_FILENAME)
 
     @property
-    def access_rules(self) -> BrowdenAccessRuleSet:
+    def access_rules(self) -> SafeAgentBrowserAccessRuleSet:
         """The global rule set — what a profile with no ``profiles`` block gets.
 
         Not the one to gate a request with: use :meth:`access_rules_for`, which
@@ -105,13 +105,13 @@ class BrowdenRuntimeConfiguration:
         """
         return self._access_rules
 
-    def access_rules_for(self, profile_dir: "str | Path") -> BrowdenAccessRuleSet:
+    def access_rules_for(self, profile_dir: "str | Path") -> SafeAgentBrowserAccessRuleSet:
         """The rule set that decides a request made in ``profile_dir``'s session.
 
         The profile's own set if it has a ``profiles`` entry (global rules plus
         its own), else the global set. ``profile_dir`` is normally the path the
         session is already keyed by (canonical — see
-        :func:`~browden.common.profile.canonical_profile_dir`), which is a plain
+        :func:`~safe_agent_browser.common.profile.canonical_profile_dir`), which is a plain
         dict lookup; a spelling that misses is canonicalized and looked up once
         more, so a caller naming a profile with ``~`` or a relative path still
         finds it.

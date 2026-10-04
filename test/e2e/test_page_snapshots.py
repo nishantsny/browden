@@ -10,7 +10,7 @@ import urllib.parse
 
 import pytest
 
-from browden.web_navigator.interface import InvalidSelectorError
+from safe_agent_browser.web_navigator.interface import InvalidSelectorError
 
 HTML = """<html><body>
   <p class="row">one</p><p class="row">two</p><p class="row">three</p>

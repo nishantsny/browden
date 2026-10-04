@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-16"?>
 <Task version="1.2" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
   <RegistrationInfo>
-    <Description>Browden MCP Server (SSE, {service_name})</Description>
+    <Description>Safe Agent Browser MCP Server (SSE, {service_name})</Description>
   </RegistrationInfo>
   <Triggers>
     <LogonTrigger>

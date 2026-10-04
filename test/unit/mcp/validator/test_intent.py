@@ -2,7 +2,7 @@ import re
 
 import pytest
 
-from browden.mcp.validator import (
+from safe_agent_browser.mcp.validator import (
     ACTIVATION_KEYS,
     classify_anchor_target,
     field_label_matches,

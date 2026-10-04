@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 #
-# deploy.sh — redeploy browden to the live systemd --user service from the deploy
+# deploy.sh — redeploy safe-agent-browser to the live systemd --user service from the deploy
 # branch (origin/main by default), then run the e2e suite as a post-deploy smoke test.
 #
 # Pipeline (fails fast — any step aborts with a non-zero exit):
 #   0. preflight  — release checkout / venv / config / systemctl all present
-#   1. fast-forward the release checkout to origin/$BROWDEN_DEPLOY_BRANCH (default main)
+#   1. fast-forward the release checkout to origin/$SAFE_AGENT_BROWSER_DEPLOY_BRANCH (default main)
 #   2. sync the release venv to the pulled uv.lock (uv sync --locked),
 #      so a ff-pull that ADDED a runtime dependency doesn't crash-loop the
 #      service on import — same editable install setup/onetime_setup.py does
@@ -16,20 +16,20 @@
 #
 # Idempotent: safe to re-run even when already at the deploy branch (it redeploys).
 #
-# The Tranco snapshot lives beside the config in ~/.browden (NOT in the checkout),
+# The Tranco snapshot lives beside the config in ~/.safe-agent-browser (NOT in the checkout),
 # so the release tree stays clean and the ff-pull just works — see the deploy
 # notes. Untracked files in the release tree are ignored; only local *tracked*
 # edits (which would block the ff-pull) abort the deploy.
 #
 # Overridable via env (defaults match the live host):
-#   BROWDEN_RELEASE_DIR  release checkout to deploy FROM  ($HOME/projects/browser-guard-release)
-#   BROWDEN_DEPLOY_BRANCH  branch to deploy (default main); the checkout must be ON
+#   SAFE_AGENT_BROWSER_RELEASE_DIR  release checkout to deploy FROM  ($HOME/projects/browser-guard-release)
+#   SAFE_AGENT_BROWSER_DEPLOY_BRANCH  branch to deploy (default main); the checkout must be ON
 #                          this branch. Lets you smoke-test a feature branch on the
 #                          live service before merge; --release stays main-only.
-#   BROWDEN_ALLOWLIST    allowlist config the service loads (~/.browden/allowlist.yaml)
-#   BROWDEN_SERVICE      systemd --user unit name           (browden.service)
-#   BROWDEN_PORT         port to health-check              (derived from the unit's MCP_PORT)
-#   BROWDEN_E2E_VENV     persistent venv to run e2e from     (default: a fresh one per run)
+#   SAFE_AGENT_BROWSER_ALLOWLIST    allowlist config the service loads (~/.safe-agent-browser/allowlist.yaml)
+#   SAFE_AGENT_BROWSER_SERVICE      systemd --user unit name           (safe-agent-browser.service)
+#   SAFE_AGENT_BROWSER_PORT         port to health-check              (derived from the unit's MCP_PORT)
+#   SAFE_AGENT_BROWSER_E2E_VENV     persistent venv to run e2e from     (default: a fresh one per run)
 #
 # Usage:
 #   ~/scripts/deploy.sh                          # deploy + run the whole e2e suite
@@ -48,17 +48,17 @@
 # created — nothing is pushed.
 set -euo pipefail
 
-RELEASE_DIR="${BROWDEN_RELEASE_DIR:-$HOME/projects/browser-guard-release}"
-CONFIG="${BROWDEN_ALLOWLIST:-$HOME/.browden/allowlist.yaml}"
-SERVICE="${BROWDEN_SERVICE:-browden.service}"
+RELEASE_DIR="${SAFE_AGENT_BROWSER_RELEASE_DIR:-$HOME/projects/browser-guard-release}"
+CONFIG="${SAFE_AGENT_BROWSER_ALLOWLIST:-$HOME/.safe-agent-browser/allowlist.yaml}"
+SERVICE="${SAFE_AGENT_BROWSER_SERVICE:-safe-agent-browser.service}"
 # Branch to deploy. Defaults to main; override to smoke-test a feature branch on
 # the live service before it merges (the checkout must be on that branch). A
 # GitHub release (--release) is refused for anything but main — see preflight.
-DEPLOY_BRANCH="${BROWDEN_DEPLOY_BRANCH:-main}"
+DEPLOY_BRANCH="${SAFE_AGENT_BROWSER_DEPLOY_BRANCH:-main}"
 # Health-check the port the live unit actually binds — read MCP_PORT from its
 # Environment rather than hardcode a literal, so this can never drift from the
-# service. Overridable via BROWDEN_PORT; validated (non-empty) in preflight.
-PORT="${BROWDEN_PORT:-$(systemctl --user show "$SERVICE" -p Environment --value 2>/dev/null \
+# service. Overridable via SAFE_AGENT_BROWSER_PORT; validated (non-empty) in preflight.
+PORT="${SAFE_AGENT_BROWSER_PORT:-$(systemctl --user show "$SERVICE" -p Environment --value 2>/dev/null \
     | tr ' ' '\n' | sed -n 's/^MCP_PORT=//p' | head -1)}"
 VENV_PY="$RELEASE_DIR/.venv/bin/python"
 
@@ -93,7 +93,7 @@ command -v systemctl >/dev/null || die "systemctl not found"
 command -v ss >/dev/null        || die "ss (iproute2) not found"
 command -v uv >/dev/null        || die "uv not found (needed to build the e2e venv)"
 [ -n "$PORT" ] \
-    || die "could not determine $SERVICE port (no MCP_PORT in its unit Environment) — set BROWDEN_PORT"
+    || die "could not determine $SERVICE port (no MCP_PORT in its unit Environment) — set SAFE_AGENT_BROWSER_PORT"
 
 # When cutting a release, verify gh is present + authenticated NOW — at the start,
 # not after a ~7-minute deploy + e2e — so an auth problem fails in seconds instead
@@ -106,7 +106,7 @@ fi
 
 branch="$(git -C "$RELEASE_DIR" rev-parse --abbrev-ref HEAD)"
 [ "$branch" = "$DEPLOY_BRANCH" ] \
-    || die "release checkout is on '$branch', not '$DEPLOY_BRANCH' (BROWDEN_DEPLOY_BRANCH) — refusing to deploy"
+    || die "release checkout is on '$branch', not '$DEPLOY_BRANCH' (SAFE_AGENT_BROWSER_DEPLOY_BRANCH) — refusing to deploy"
 
 # Refuse to deploy on top of local *tracked* edits (they'd block the ff-pull).
 [ -z "$(git -C "$RELEASE_DIR" status --porcelain --untracked-files=no)" ] \
@@ -145,7 +145,7 @@ UV_PROJECT_ENVIRONMENT="${VENV_PY%/bin/python}" uv sync --quiet --locked --proje
 log "Validating $CONFIG under the release venv"
 "$VENV_PY" - "$CONFIG" <<'PY'
 import sys
-from browden.configs.loader import load_runtime_configuration
+from safe_agent_browser.configs.loader import load_runtime_configuration
 load_runtime_configuration(sys.argv[1])
 print("config loads OK")
 PY
@@ -171,7 +171,7 @@ log "$SERVICE is active and listening on $PORT (now running $after)"
 # therefore exercises the just-deployed source, and the production venv is never
 # mutated. The harness spawns its OWN isolated Chrome/profile
 # (XDG_CACHE_HOME under a tmpdir), so it never touches the live service's profile.
-# BROWDEN_HEADLESS=1 is exported in the real env because the subprocess-spawning
+# SAFE_AGENT_BROWSER_HEADLESS=1 is exported in the real env because the subprocess-spawning
 # harness tests don't inherit conftest's monkeypatched value.
 
 # The run writes a lot of throwaway state to the temp dir: pytest's per-test
@@ -183,13 +183,13 @@ log "$SERVICE is active and listening on $PORT (now running $after)"
 # (mcp_server.log per test) until the next run sweeps it. The live service's
 # Chrome never sees this TMPDIR.
 E2E_TMP_ROOT="${TMPDIR:-/tmp}"
-rm -rf "$E2E_TMP_ROOT"/browden-e2e.*
-E2E_TMP="$(mktemp -d "$E2E_TMP_ROOT/browden-e2e.XXXXXX")"
+rm -rf "$E2E_TMP_ROOT"/safe-agent-browser-e2e.*
+E2E_TMP="$(mktemp -d "$E2E_TMP_ROOT/safe-agent-browser-e2e.XXXXXX")"
 
 # The e2e venv lives in that private dir too, so it shares its lifetime: gone
 # after a green run, kept alongside the logs after a red one. uv builds it from
 # its package cache, so a fresh venv per run costs seconds, not a download.
-# BROWDEN_E2E_VENV opts into a persistent venv at a path of your choosing; the
+# SAFE_AGENT_BROWSER_E2E_VENV opts into a persistent venv at a path of your choosing; the
 # script reuses it and never removes it.
 #
 # It is built from uv.lock (`uv sync --locked`, as CI does), not by resolving
@@ -197,13 +197,13 @@ E2E_TMP="$(mktemp -d "$E2E_TMP_ROOT/browden-e2e.XXXXXX")"
 # dependency, so the e2e would test a set nothing else runs — which is how an
 # mcp 2.x release broke the v1.3.0 e2e at collection. --locked also fails the
 # run if uv.lock is out of date with pyproject.
-E2E_VENV="${BROWDEN_E2E_VENV:-$E2E_TMP/venv}"
+E2E_VENV="${SAFE_AGENT_BROWSER_E2E_VENV:-$E2E_TMP/venv}"
 log "Preparing e2e venv ($E2E_VENV): release tree + dev extras, from uv.lock"
 UV_PROJECT_ENVIRONMENT="$E2E_VENV" uv sync --quiet --locked --extra dev --project "$RELEASE_DIR"
 
 log "Running e2e (headless) from $RELEASE_DIR: ${E2E_ARGS[*]}"
 cd "$RELEASE_DIR"
-TMPDIR="$E2E_TMP" BROWDEN_HEADLESS=1 "$E2E_VENV/bin/python" -m pytest "${E2E_ARGS[@]}" -q \
+TMPDIR="$E2E_TMP" SAFE_AGENT_BROWSER_HEADLESS=1 "$E2E_VENV/bin/python" -m pytest "${E2E_ARGS[@]}" -q \
     || die "e2e FAILED — the new code is LIVE but did not pass e2e. Investigate or roll back to $before. Run artifacts kept in $E2E_TMP."
 rm -rf "$E2E_TMP"
 
@@ -214,7 +214,7 @@ deploy_ok=1   # deploy + e2e passed; the release stage may now proceed
 # Reached only after a fully green deploy + e2e above (guarded on $deploy_ok, and
 # on set -e / `|| die` before it). Every check here is fail-closed: on any failure
 # we die BEFORE creating the tag, so a bad release never gets pushed. cwd is
-# $RELEASE_DIR (the e2e step cd'd here), so git/gh act on the browden repo.
+# $RELEASE_DIR (the e2e step cd'd here), so git/gh act on the safe-agent-browser repo.
 # gh presence + auth were already verified in preflight (fail-fast, no wasted run).
 if [ -n "$RELEASE_TAG" ] && [ "$deploy_ok" = 1 ]; then
     log "Release: verifying preconditions for $RELEASE_TAG"

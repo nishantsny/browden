@@ -2,7 +2,7 @@
 
 A plain store: it never touches the browser. Fetching, reloading a stale entry
 and gating what was fetched are ``GatedPage``'s job
-(browden/mcp/session_management/gated_page.py), so every byte of page content
+(safe_agent_browser/mcp/session_management/gated_page.py), so every byte of page content
 passes a gate on its way in. Synchronous, and only used on one session's driver
 thread or event loop, never both at once.
 

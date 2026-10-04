@@ -9,11 +9,11 @@ from unittest.mock import MagicMock, patch
 import pytest
 from gated_fakes import gated_write
 
-from browden.configs.loader import RuntimeConfigurationRefresher
-from browden.mcp.validator import BrowdenRuntimeConfiguration, ValidationError
+from safe_agent_browser.configs.loader import RuntimeConfigurationRefresher
+from safe_agent_browser.mcp.validator import SafeAgentBrowserRuntimeConfiguration, ValidationError
 
 # amazon.com may type into fields whose visible label reads like "Grocery Tip …".
-_ENABLED = BrowdenRuntimeConfiguration({
+_ENABLED = SafeAgentBrowserRuntimeConfiguration({
     "read": {"website_overrides": {"*": [".*"]}},
     "write-text": {
         "amazon.com": {"paths": [".*"], "label": r"(?i)grocery tip.*"},
@@ -35,7 +35,7 @@ def _session(*, url, elements):
 
 @pytest.mark.asyncio
 async def test_shipped_default_denies_fill_everywhere():
-    import browden.mcp.server as server
+    import safe_agent_browser.mcp.server as server
     __import__("importlib").reload(server)
     session = _session(url="https://www.amazon.com/checkout", elements=[_field()])
     with patch.object(server._store, "route", return_value=session):
@@ -46,7 +46,7 @@ async def test_shipped_default_denies_fill_everywhere():
 
 @pytest.mark.asyncio
 async def test_happy_path_fills():
-    import browden.mcp.server as server
+    import safe_agent_browser.mcp.server as server
     __import__("importlib").reload(server)
     session = _session(url="https://www.amazon.com/checkout", elements=[_field()])
     with patch.object(server._store, "route", return_value=session), \
@@ -59,9 +59,9 @@ async def test_happy_path_fills():
 @pytest.mark.asyncio
 async def test_write_text_is_a_separate_section_from_click():
     # A host enabled for `click` is NOT thereby enabled for `insert_text`.
-    import browden.mcp.server as server
+    import safe_agent_browser.mcp.server as server
     __import__("importlib").reload(server)
-    click_only = BrowdenRuntimeConfiguration({
+    click_only = SafeAgentBrowserRuntimeConfiguration({
         "read": {"website_overrides": {"*": [".*"]}},
         "click": {"amazon.com": {"paths": [".*"], "label": ".*"}},
     })
@@ -75,7 +75,7 @@ async def test_write_text_is_a_separate_section_from_click():
 
 @pytest.mark.asyncio
 async def test_non_text_control_is_rejected():
-    import browden.mcp.server as server
+    import safe_agent_browser.mcp.server as server
     __import__("importlib").reload(server)
     session = _session(url="https://www.amazon.com/checkout",
                        elements=[{"tag": "button", "id": None, "classes": [],
@@ -91,7 +91,7 @@ async def test_non_text_control_is_rejected():
 async def test_field_label_mismatch_is_rejected():
     # A card-number field is fillable, but its visible label doesn't match the
     # host's write-text label, so Gate 3 refuses it.
-    import browden.mcp.server as server
+    import safe_agent_browser.mcp.server as server
     __import__("importlib").reload(server)
     session = _session(url="https://www.amazon.com/checkout",
                        elements=[_field(placeholder="Card number")])
@@ -104,7 +104,7 @@ async def test_field_label_mismatch_is_rejected():
 
 @pytest.mark.asyncio
 async def test_ambiguous_selector_is_rejected():
-    import browden.mcp.server as server
+    import safe_agent_browser.mcp.server as server
     __import__("importlib").reload(server)
     session = _session(url="https://www.amazon.com/checkout", elements=[_field(), _field()])
     with patch.object(server._store, "route", return_value=session), \
@@ -116,7 +116,7 @@ async def test_ambiguous_selector_is_rejected():
 
 @pytest.mark.asyncio
 async def test_page_gone_returns_error():
-    import browden.mcp.server as server
+    import safe_agent_browser.mcp.server as server
     __import__("importlib").reload(server)
     session = _session(url=None, elements=[])
     with patch.object(server._store, "route", return_value=session):

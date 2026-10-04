@@ -15,7 +15,7 @@ from urllib.parse import urlparse, urlunparse
 from ...common.logger import logger
 from ...common.origin import same_origin
 from .allowlist import HostRuleMatcher, ReadPolicy
-from .access_rule_set import BrowdenAccessRuleSet
+from .access_rule_set import SafeAgentBrowserAccessRuleSet
 from .errors import ValidationError
 
 # Browser-internal "blank" / new-tab URLs a not-yet-navigated tab reports. Always
@@ -86,7 +86,7 @@ def validate_url(url: str, gate: "HostRuleMatcher | ReadPolicy") -> str:
     return urlunparse(p)
 
 
-def ensure_url_allowed(access_rules: BrowdenAccessRuleSet, url: str) -> bool:
+def ensure_url_allowed(access_rules: SafeAgentBrowserAccessRuleSet, url: str) -> bool:
     """Return whether the READ policy admits ``url`` (never raises).
 
     The read counterpart of :func:`check_action_host`: it runs a tab's live URL
@@ -118,7 +118,7 @@ class ReadGate:
     check_page: Callable[[str], None]
 
 
-def read_gate(access_rules: BrowdenAccessRuleSet) -> ReadGate:
+def read_gate(access_rules: SafeAgentBrowserAccessRuleSet) -> ReadGate:
     """The read gate, bound to ``access_rules``."""
     def check_page(url: str) -> None:
         if not ensure_url_allowed(access_rules, url):
@@ -137,7 +137,7 @@ def validate_and_ensure_same_origin(
     1. ``frame_url`` must be admitted by the read policy (``validate_url``) — a frame
        is a distinct document and must itself be readable to be inspected.
     2. ``frame_url`` must have the top page's exact **origin** (scheme, host, port —
-       :func:`~browden.common.origin.same_origin`): the browser's own boundary, so
+       :func:`~safe_agent_browser.common.origin.same_origin`): the browser's own boundary, so
        ``http://shop.example`` inside ``https://www.shop.example`` is refused.
 
     Same-origin is a deliberate scope limit, not a crutch for the write gates:
@@ -172,7 +172,7 @@ class FrameGate:
     check_landed: Callable[[str, str], None]   # (top_url, frame_url): read-allowed + same-origin
 
 
-def frame_gate(access_rules: BrowdenAccessRuleSet) -> FrameGate:
+def frame_gate(access_rules: SafeAgentBrowserAccessRuleSet) -> FrameGate:
     """The frame gates, bound to ``access_rules``."""
     read = read_gate(access_rules)
     return FrameGate(

@@ -7,11 +7,11 @@ or the parse and the live DOM disagreeing — and the soup cache keyed by URL.
 """
 import pytest
 
-from browden.common.tab import TabInfo
-from browden.dom import query
-from browden.mcp.session_management.gated_page import GatedPage
-from browden.common.origin import same_origin
-from browden.mcp.validator import (
+from safe_agent_browser.common.tab import TabInfo
+from safe_agent_browser.dom import query
+from safe_agent_browser.mcp.session_management.gated_page import GatedPage
+from safe_agent_browser.common.origin import same_origin
+from safe_agent_browser.mcp.validator import (
     FrameGate,
     ReadGate,
     UploadFileGate,
@@ -19,14 +19,14 @@ from browden.mcp.validator import (
     WriteGate,
     upload_file_gate,
 )
-from browden.mcp.validator import BrowdenAccessRuleSet
-from browden.web_navigator.interface import (
+from safe_agent_browser.mcp.validator import SafeAgentBrowserAccessRuleSet
+from safe_agent_browser.web_navigator.interface import (
     FrameFocusError,
     InvalidSelectorError,
     PageSnapshot,
     TargetSnapshot,
 )
-from browden.web_navigator.soup_cache import TTL_SECONDS, SoupCache
+from safe_agent_browser.web_navigator.soup_cache import TTL_SECONDS, SoupCache
 
 SHOP = "https://shop.example/item"
 OTHER = "https://shop.example/other"
@@ -320,7 +320,7 @@ def test_a_write_never_reads_a_page_gate_1_refuses(clock):
 # the gate never saw.
 
 def _upload_rules(location):
-    return BrowdenAccessRuleSet({
+    return SafeAgentBrowserAccessRuleSet({
         "upload-file": {"shop.example": {"paths": [".*"], "label": ".*"}},
         "allowed_upload_locations": [str(location)],
     })

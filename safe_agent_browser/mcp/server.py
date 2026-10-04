@@ -25,8 +25,8 @@ from ..web_navigator.selenium_chrome import SeleniumChromeBackend
 from .session_management.browser_session_store import BrowserSessionStore, UnknownTabError
 
 from .validator import (
-    BrowdenAccessRuleSet,
-    BrowdenRuntimeConfiguration,
+    SafeAgentBrowserAccessRuleSet,
+    SafeAgentBrowserRuntimeConfiguration,
     SessionBusyError,
     click_gate,
     frame_gate,
@@ -41,7 +41,7 @@ DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 8000
 
 _INSTRUCTIONS = (
-    "browden drives a real Chrome session. Within a single profile-dir there is ONE browser session. You can open multiple tabs within that one session, and you may fire concurrent requests at them: selenium (the underlying automation library) is not thread-safe, so a session serves its requests one at a time behind a lock, each re-selecting its own tab when its turn comes. A request that waits more than 10s for its turn comes back with a 'browser session busy' error; retry it. A new profile-dir can be chosen while creating a new tab. If you choose a previously used profile-dir, then the previous session will be reused. Creating a new tab will return a tab-id which is unique across all sessions, pass it back verbatim on other tools. A tab must be selected before any operation acts on it: passing a tool the tab's id selects that tab, and only one tab per session can be selected at a time."
+    "safe-agent-browser drives a real Chrome session. Within a single profile-dir there is ONE browser session. You can open multiple tabs within that one session, and you may fire concurrent requests at them: selenium (the underlying automation library) is not thread-safe, so a session serves its requests one at a time behind a lock, each re-selecting its own tab when its turn comes. A request that waits more than 10s for its turn comes back with a 'browser session busy' error; retry it. A new profile-dir can be chosen while creating a new tab. If you choose a previously used profile-dir, then the previous session will be reused. Creating a new tab will return a tab-id which is unique across all sessions, pass it back verbatim on other tools. A tab must be selected before any operation acts on it: passing a tool the tab's id selects that tab, and only one tab per session can be selected at a time."
 )
 
 
@@ -58,7 +58,7 @@ async def _runtime_configuration_lifespan(_server: FastMCP) -> AsyncIterator[Non
 
 
 mcp = FastMCP(
-    "browden",
+    "safe-agent-browser",
     instructions=_INSTRUCTIONS,
     host=os.environ.get("MCP_HOST", DEFAULT_HOST),
     port=int(os.environ.get("MCP_PORT", DEFAULT_PORT)),
@@ -72,9 +72,9 @@ mcp = FastMCP(
 # the live policy off ``_refresher.runtime_configuration``, which the refresher hot-reloads
 # in place via a lock-free atomic swap (see configs/loader/refresher.py).
 _refresher = RuntimeConfigurationRefresher.static(
-    load_runtime_configuration(SAMPLE_ALLOWLIST) if SAMPLE_ALLOWLIST.exists() else BrowdenRuntimeConfiguration({}))
+    load_runtime_configuration(SAMPLE_ALLOWLIST) if SAMPLE_ALLOWLIST.exists() else SafeAgentBrowserRuntimeConfiguration({}))
 
-logger.info("Browden MCP module initialized")
+logger.info("Safe Agent Browser MCP module initialized")
 
 # All per-profile session state and the customer<->backend id mapping live in
 # the store (see session_management/browser_session_store.py).
@@ -82,7 +82,7 @@ _store = BrowserSessionStore()
 
 
 def _default_cache_root(platform: str = sys.platform, os_name: str = os.name) -> Path:
-    """Per-OS cache root for browden's shared state.
+    """Per-OS cache root for safe-agent-browser's shared state.
 
     An explicit ``XDG_CACHE_HOME`` wins on every platform (tests and power users
     rely on it); otherwise use each OS's idiomatic cache location — macOS
@@ -109,7 +109,7 @@ def _default_profile_dir() -> Path:
     the server is the caller that decides which profile, and hands the backend a
     concrete path.
     """
-    return canonical_profile_dir(_default_cache_root() / "browden" / "chrome-profile")
+    return canonical_profile_dir(_default_cache_root() / "safe-agent-browser" / "chrome-profile")
 
 
 def _resolve_profile_dir(profile_dir: str | None) -> Path:
@@ -124,7 +124,7 @@ def _resolve_profile_dir(profile_dir: str | None) -> Path:
     return _default_profile_dir()
 
 
-def _access_rules_for(session) -> BrowdenAccessRuleSet:
+def _access_rules_for(session) -> SafeAgentBrowserAccessRuleSet:
     """The rule set that gates a request: the live rules, scoped to its profile.
 
     Every gate in this module is handed this and nothing else. The configuration
@@ -349,7 +349,7 @@ async def upload_file(css_selector: str, file_path: str, id: str) -> dict:
     How a receipt gets onto an expense, a document onto a form. It sets the
     ``<input type="file">`` directly, which is what a human's file-picker
     selection does to the page; clicking the control would open the operating
-    system's own file dialog, which is not part of the page and which browden
+    system's own file dialog, which is not part of the page and which safe-agent-browser
     cannot drive.
 
     A section of its own, never part of ``write-text``: reading a file off this
@@ -458,7 +458,7 @@ Offset = Annotated[int, Field(description=(
 #
 # The DOM-read tools observe only the *focused* document. These move a tab's
 # frame focus so those tools can inspect an iframe's contents; the focus persists
-# (browden replays it across the window-refocus every op performs) until moved
+# (safe-agent-browser replays it across the window-refocus every op performs) until moved
 # back or reset by a navigate/reload.
 
 @mcp.tool()
@@ -466,7 +466,7 @@ Offset = Annotated[int, Field(description=(
 async def switch_to_frame(css_selector: str, id: str) -> dict:
     """Switch a tab's focus INTO the iframe matched by css_selector (same-origin only).
 
-    browden's DOM-read tools (query_selector, get_element_by_id, screenshot, …) see
+    safe-agent-browser's DOM-read tools (query_selector, get_element_by_id, screenshot, …) see
     only the focused document, so an iframe's contents are invisible until you focus
     it here. After this succeeds those tools observe the frame; call
     ``switch_to_default_content`` (or ``switch_to_parent_frame``) to leave. A
@@ -697,21 +697,21 @@ def main(argv: list[str] | None = None) -> None:
     """
     global _refresher
     parser = argparse.ArgumentParser(
-        prog="browden", description="Browden MCP server")
+        prog="safe-agent-browser", description="Safe Agent Browser MCP server")
     parser.add_argument(
         "--allowlist",
-        help="Path to the allowlist YAML config (default: $BROWDEN_ALLOWLIST, "
-             "then ~/.browden/allowlist.yaml, then the repo sample)")
+        help="Path to the allowlist YAML config (default: $SAFE_AGENT_BROWSER_ALLOWLIST, "
+             "then ~/.safe-agent-browser/allowlist.yaml, then the repo sample)")
     args = parser.parse_args(argv)
 
     path = resolve_allowlist_path(args.allowlist)
     if path is None:
         parser.error("no allowlist config found — run setup/onetime_setup.py or pass --allowlist")
-    # BROWDEN_RELOAD_INTERVAL shortens the hot-reload poll tick — the e2e suite
+    # SAFE_AGENT_BROWSER_RELOAD_INTERVAL shortens the hot-reload poll tick — the e2e suite
     # sets it so a config edit is picked up in fractions of a second instead of
     # the operator-friendly 10s default.
     interval = float(os.environ.get(
-        "BROWDEN_RELOAD_INTERVAL", DEFAULT_RELOAD_INTERVAL_SECONDS))
+        "SAFE_AGENT_BROWSER_RELOAD_INTERVAL", DEFAULT_RELOAD_INTERVAL_SECONDS))
     try:
         _refresher = RuntimeConfigurationRefresher.from_path(path, interval=interval)
     except ConfigError as e:

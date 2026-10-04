@@ -29,7 +29,7 @@ class _LiveStderrHandler(logging.StreamHandler):
 def configure_logging():
     """Configure logging to stderr for MCP compatibility."""
     # Create a logger for the package
-    logger = logging.getLogger("browden")
+    logger = logging.getLogger("safe-agent-browser")
 
     # Avoid duplicate handlers if called multiple times
     if not logger.handlers:

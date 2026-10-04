@@ -12,8 +12,8 @@ older bundled copy.
 
 Usage (from the repo root, any Python):
 
-    python3 setup/fetch_psl.py                       # -> ~/.browden
-    python3 setup/fetch_psl.py --config-dir /etc/browden
+    python3 setup/fetch_psl.py                       # -> ~/.safe-agent-browser
+    python3 setup/fetch_psl.py --config-dir /etc/safe-agent-browser
 """
 import argparse
 import urllib.request
@@ -22,10 +22,10 @@ from pathlib import Path
 from checkpoints import ALLOWLIST_FILENAME, sha256_hex, update_checkpoints
 
 # stdlib-only on purpose: this runs with any Python, before the venv exists.
-# Keep PSL_FILENAME in sync with browden.mcp.validator.popularity (the consumer).
+# Keep PSL_FILENAME in sync with safe_agent_browser.mcp.validator.popularity (the consumer).
 PSL_FILENAME = "public_suffix_list.dat"
 PSL_URL = "https://publicsuffix.org/list/public_suffix_list.dat"
-DEFAULT_CONFIG_DIR = Path("~/.browden")
+DEFAULT_CONFIG_DIR = Path("~/.safe-agent-browser")
 
 
 def snapshot_path(config_dir: Path) -> Path:

@@ -6,21 +6,21 @@ path — so these assert equality between spellings, not a literal string.
 import os
 from pathlib import Path
 
-from browden.common.profile import canonical_profile_dir
+from safe_agent_browser.common.profile import canonical_profile_dir
 
 
 def test_expands_home_to_an_absolute_path():
-    out = canonical_profile_dir("~/.cache/browden/chrome-profile")
+    out = canonical_profile_dir("~/.cache/safe-agent-browser/chrome-profile")
     assert out.is_absolute()
-    assert out == (Path.home() / ".cache/browden/chrome-profile").resolve()
+    assert out == (Path.home() / ".cache/safe-agent-browser/chrome-profile").resolve()
 
 
 def test_spellings_of_one_profile_agree():
     home = Path.home()
-    assert (canonical_profile_dir("~/.cache/browden/p")
-            == canonical_profile_dir(str(home / ".cache" / "browden" / "p"))
-            == canonical_profile_dir(home / ".cache/browden/./p")
-            == canonical_profile_dir("~/.cache/browden/x/../p"))
+    assert (canonical_profile_dir("~/.cache/safe-agent-browser/p")
+            == canonical_profile_dir(str(home / ".cache" / "safe-agent-browser" / "p"))
+            == canonical_profile_dir(home / ".cache/safe-agent-browser/./p")
+            == canonical_profile_dir("~/.cache/safe-agent-browser/x/../p"))
 
 
 def test_relative_paths_are_anchored(tmp_path, monkeypatch):
@@ -45,7 +45,7 @@ def test_the_server_resolves_profiles_through_it(tmp_path):
     # The session layer keys profiles by this path; a config scoping rules to a
     # profile has to reduce its key the same way, so both go through one
     # function. If the server stops using it, the two can drift apart.
-    import browden.mcp.server as server
+    import safe_agent_browser.mcp.server as server
     assert server._resolve_profile_dir(str(tmp_path / "p")) == canonical_profile_dir(tmp_path / "p")
     assert server._resolve_profile_dir("~/x") == canonical_profile_dir("~/x")
 

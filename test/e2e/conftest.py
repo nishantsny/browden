@@ -1,6 +1,6 @@
 """Shared setup for the e2e suite: real Chrome, headless, isolated profile.
 
-The backend reads ``BROWDEN_HEADLESS`` and ``XDG_CACHE_HOME`` when it
+The backend reads ``SAFE_AGENT_BROWSER_HEADLESS`` and ``XDG_CACHE_HOME`` when it
 launches Chrome, so this autouse fixture sets both *before* any backend is
 built. Headless lets the suite run without a display (CI, a server box); a
 throwaway profile under a temp ``XDG_CACHE_HOME`` keeps the test out of the
@@ -33,7 +33,7 @@ def new_backend():
     fixtures through here means no test has to write — or can forget — that
     cleanup, and one backend's failed shutdown never strands the others.
     """
-    from browden.web_navigator.selenium_chrome import SeleniumChromeBackend
+    from safe_agent_browser.web_navigator.selenium_chrome import SeleniumChromeBackend
 
     made = []
 
@@ -53,7 +53,7 @@ def new_backend():
 
 @pytest.fixture(autouse=True)
 def _headless_isolated_chrome(tmp_path, monkeypatch):
-    monkeypatch.setenv("BROWDEN_HEADLESS", "1")
+    monkeypatch.setenv("SAFE_AGENT_BROWSER_HEADLESS", "1")
     # The server's _default_profile_dir() reads XDG_CACHE_HOME live, so pointing
     # the env at a throwaway location keeps the test off the user's real profile.
     monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / "cache"))

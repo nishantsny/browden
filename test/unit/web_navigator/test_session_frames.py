@@ -9,10 +9,10 @@ sweeps idle tabs outside the driver lock.
 """
 import pytest
 
-from browden.web_navigator.interface import FrameFocusError
-from browden.web_navigator.soup_cache import TTL_SECONDS
+from safe_agent_browser.web_navigator.interface import FrameFocusError
+from safe_agent_browser.web_navigator.soup_cache import TTL_SECONDS
 
-from browden.mcp.validator import FrameGate, ValidationError
+from safe_agent_browser.mcp.validator import FrameGate, ValidationError
 from test_session import OPEN_READ_GATE, FakeBackend, make_session
 
 TAB = "ns-h1"
