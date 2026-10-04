@@ -124,7 +124,9 @@ All notable changes to browden are documented here. The format follows
   (a `srcdoc` frame has its parent page's URL, so the parent's rules apply). Returning to the top page (`switch_to_default_content`, or an ascent that
   reaches it) needs only the read check, so a tab at `about:blank` or an
   override-allowed `file://` page can always be returned to, and
-  `force_reload_tab` recovers from a lost frame in one call.
+  `force_reload_tab` recovers from a lost frame in one call. A worked sample,
+  [`configs/samples/allow_iframe_access.yaml`](./configs/samples/allow_iframe_access.yaml),
+  shows which frames a portal page can enter and where writes inside them apply.
   Every frame tool judges against the tab's own profile's rules. A frame the
   page wrote itself (`srcdoc`, or an `about:blank` frame filled in by script)
   has no URL of its own and is judged by the URL of the same-origin page that

@@ -372,6 +372,7 @@ any of them widens its own access. Setup prints both steps at the end:
 - [`allow_label_activation.yaml`](configs/samples/allow_label_activation.yaml) — `click` a `<label>` to drive a radio/checkbox the page hid in CSS, authorized by the label's own visible text.
 - [`allowlist-read-deny.yaml`](configs/samples/allowlist-read-deny.yaml) — a fully-commented tour of the read/deny system.
 - [`profile_scoped_rules.yaml`](configs/samples/profile_scoped_rules.yaml) — scope rules per browser profile: a narrow credentialed profile, an `allow_all` scratch profile, a dev-server profile.
+- [`allow_iframe_access.yaml`](configs/samples/allow_iframe_access.yaml) — read and act inside same-origin `<iframe>`s: frames are judged by their own URL under the usual read and write rules, and cross-origin frames stay refused however readable.
 - [`allow_receipt_upload.yaml`](configs/samples/allow_receipt_upload.yaml) — enable `upload-file`: attach a local receipt to a Splitwise expense, bounded by `allowed_upload_locations`.
 - [`allow_local_file_reads.yaml`](configs/samples/allow_local_file_reads.yaml) — opt `file://` local-file reads in (scoped by path).
 - [`allow_localhost_dev_server.yaml`](configs/samples/allow_localhost_dev_server.yaml) — read a local `http://localhost:PORT` dev server.
