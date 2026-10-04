@@ -368,8 +368,6 @@ class BrowserSessionManager:
         Read-only pre-flight for ``switch_to_frame``: lets the caller gate the
         frame's declared target before the driver ever enters it.
         """
-        self.sweep_idle()
-
         def work(handle):
             self._backend.select_tab(handle)
             result = self._backend.get_frame_src(css_selector)
@@ -385,8 +383,6 @@ class BrowserSessionManager:
         ``page_source``. Returns the frame's ``document.URL`` and the tab's top URL
         for the caller's post-switch allowlist + same-origin gate.
         """
-        self.sweep_idle()
-
         def work(handle):
             self._backend.select_tab(handle)
             result = self._backend.enter_frame(css_selector)
@@ -396,8 +392,6 @@ class BrowserSessionManager:
         return await self._with_tab(id, work, invalidate=True)
 
     async def switch_to_parent_frame(self, *, id: str) -> dict:
-        self.sweep_idle()
-
         def work(handle):
             self._backend.select_tab(handle)
             result = self._backend.switch_to_parent_frame()
@@ -407,8 +401,6 @@ class BrowserSessionManager:
         return await self._with_tab(id, work, invalidate=True)
 
     async def switch_to_default_content(self, *, id: str) -> dict:
-        self.sweep_idle()
-
         def work(handle):
             self._backend.select_tab(handle)
             result = self._backend.switch_to_default_content()
