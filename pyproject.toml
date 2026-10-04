@@ -12,6 +12,9 @@ license-files = ["LICENSE"]
 requires-python = ">=3.11"
 dependencies = [
   "mcp[cli]>=1.0,<2",
+  # Direct import: tool-parameter descriptions (see dependencies/pydantic.py).
+  # Already in the tree as an mcp dependency; declared here because we import it.
+  "pydantic>=2,<3",
   "selenium>=4.20",
   "beautifulsoup4>=4.12",
   "pyyaml>=6.0",

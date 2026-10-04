@@ -6,6 +6,7 @@ import os
 import sys
 from collections.abc import AsyncIterator, Awaitable, Callable
 from pathlib import Path
+from typing import Annotated
 
 
 from ..common.logger import logger
@@ -19,6 +20,7 @@ from ..configs.loader import (
     resolve_allowlist_path,
 )
 from ..dependencies.mcp import FastMCP, Image
+from ..dependencies.pydantic import Field
 from ..web_navigator.selenium_chrome import SeleniumChromeBackend
 from .session_management.browser_session_store import BrowserSessionStore, UnknownTabError
 
@@ -364,6 +366,37 @@ async def press_key(css_selector: str, key: str, id: str) -> dict:
     return result
 
 
+# Parameter annotations shared by the four DOM-query tools. FastMCP builds each
+# tool's JSON schema from these annotations, so a `Field(description=...)` here is
+# the only route by which the response caps reach an MCP client: without it the
+# client sees four bare typed params and has to discover the caps by reading
+# `dom/serialize.py` or by inferring them from a truncated response (#148).
+
+IncludeHtml = Annotated[bool, Field(description=(
+    "Also return the element's raw outer HTML in `html`. Off by default because HTML "
+    "is large (an Amazon order card is ~355 chars of text but ~167 KB of HTML). This "
+    "is the ONLY way to get more than 2000 chars out of one element: `text` is capped "
+    "unconditionally and cannot be paginated."
+))]
+
+MaxHtmlBytes = Annotated[int, Field(description=(
+    "Byte cap on the `html` field only. It does not affect `text`, and has no effect "
+    "at all unless include_html=True. Truncation sets html_truncated=true — assert "
+    "that it is false rather than trusting the returned length. Raise it (e.g. "
+    "5000000) when you need a whole large node, such as a JSON blob rendered in <pre>."
+))]
+
+Limit = Annotated[int, Field(description=(
+    "Paginate over matched ELEMENTS: return at most this many. Does not paginate the "
+    "text or HTML within a single element."
+))]
+
+Offset = Annotated[int, Field(description=(
+    "Paginate over matched ELEMENTS: skip this many before returning. Does not "
+    "paginate the text or HTML within a single element."
+))]
+
+
 # -- DOM-query tools --------------------------------------------------------
 #
 # These take a REQUIRED id (the id from new_blank_tab / navigate / list_tabs).
@@ -376,8 +409,15 @@ async def press_key(css_selector: str, key: str, id: str) -> dict:
 @mcp.tool()
 @_tool
 async def get_element_by_id(element_id: str, id: str,
-                            include_html: bool = False, max_html_bytes: int = 4096) -> dict:
-    """document.getElementById on a tab — one element node, or found=false (not an error) if absent."""
+                            include_html: IncludeHtml = False,
+                            max_html_bytes: MaxHtmlBytes = 4096) -> dict:
+    """document.getElementById on a tab — one element node, or found=false (not an error) if absent.
+
+    Caps: `text` is truncated at 2000 chars (`text_length` / `text_truncated` report
+    the real size) and cannot be paginated; attribute values at 256 chars
+    (`attributes_truncated`). For the full content of a node, pass include_html=True
+    with a max_html_bytes large enough to hold it. See docs/dom-reads.md.
+    """
     logger.info(f"Tool called: get_element_by_id (element_id={element_id!r}, id={id!r})")
     session = _store.route(id)
     # H2: the session gates the tab's live URL in the same driver hold as the read.
@@ -391,9 +431,16 @@ async def get_element_by_id(element_id: str, id: str,
 @mcp.tool()
 @_tool
 async def get_elements_by_class_name(class_names: str, id: str,
-                                     limit: int = 10, offset: int = 0,
-                                     include_html: bool = False, max_html_bytes: int = 4096) -> dict:
-    """document.getElementsByClassName on a tab — space-separated names, element must have ALL. Paginated."""
+                                     limit: Limit = 10, offset: Offset = 0,
+                                     include_html: IncludeHtml = False,
+                                     max_html_bytes: MaxHtmlBytes = 4096) -> dict:
+    """document.getElementsByClassName on a tab — space-separated names, element must have ALL. Paginated.
+
+    Caps: `text` is truncated at 2000 chars (`text_length` / `text_truncated` report
+    the real size) and cannot be paginated; attribute values at 256 chars
+    (`attributes_truncated`). For the full content of a node, pass include_html=True
+    with a max_html_bytes large enough to hold it. See docs/dom-reads.md.
+    """
     logger.info(f"Tool called: get_elements_by_class_name (class_names={class_names!r}, id={id!r})")
     session = _store.route(id)
     # H2: the session gates the tab's live URL in the same driver hold as the read.
@@ -408,8 +455,15 @@ async def get_elements_by_class_name(class_names: str, id: str,
 @mcp.tool()
 @_tool
 async def query_selector(css_selector: str, id: str,
-                         include_html: bool = False, max_html_bytes: int = 4096) -> dict:
-    """document.querySelector on a tab — one element node, or found=false if no match. Invalid CSS → error."""
+                         include_html: IncludeHtml = False,
+                         max_html_bytes: MaxHtmlBytes = 4096) -> dict:
+    """document.querySelector on a tab — one element node, or found=false if no match. Invalid CSS → error.
+
+    Caps: `text` is truncated at 2000 chars (`text_length` / `text_truncated` report
+    the real size) and cannot be paginated; attribute values at 256 chars
+    (`attributes_truncated`). For the full content of a node, pass include_html=True
+    with a max_html_bytes large enough to hold it. See docs/dom-reads.md.
+    """
     logger.info(f"Tool called: query_selector (css_selector={css_selector!r}, id={id!r})")
     session = _store.route(id)
     # H2: the session gates the tab's live URL in the same driver hold as the read.
@@ -423,9 +477,16 @@ async def query_selector(css_selector: str, id: str,
 @mcp.tool()
 @_tool
 async def query_selector_all(css_selector: str, id: str,
-                             limit: int = 10, offset: int = 0,
-                             include_html: bool = False, max_html_bytes: int = 4096) -> dict:
-    """document.querySelectorAll on a tab — paginated list of element nodes. Invalid CSS → error."""
+                             limit: Limit = 10, offset: Offset = 0,
+                             include_html: IncludeHtml = False,
+                             max_html_bytes: MaxHtmlBytes = 4096) -> dict:
+    """document.querySelectorAll on a tab — paginated list of element nodes. Invalid CSS → error.
+
+    Caps: `text` is truncated at 2000 chars (`text_length` / `text_truncated` report
+    the real size) and cannot be paginated; attribute values at 256 chars
+    (`attributes_truncated`). For the full content of a node, pass include_html=True
+    with a max_html_bytes large enough to hold it. See docs/dom-reads.md.
+    """
     logger.info(f"Tool called: query_selector_all (css_selector={css_selector!r}, id={id!r})")
     session = _store.route(id)
     # H2: the session gates the tab's live URL in the same driver hold as the read.
