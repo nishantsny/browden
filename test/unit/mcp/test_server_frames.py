@@ -67,7 +67,7 @@ class GateRunningSession:
     async def switch_to_default_content(self, *, id, gate):
         self.gates.append(gate)
         self.moves.append("top")
-        gate.check_landed(self.top, self.top)
+        gate.check_page(self.top)  # back at the top: only the read check applies
         return {"frame_url": self.top, "top_url": self.top, "id": id}
 
 
@@ -151,7 +151,7 @@ async def test_default_content_refuses_when_top_moved_to_untrusted():
     # descended. Returning to default content re-checks it and refuses (there is
     # nowhere safer to retreat — the read tools also refuse to read it).
     session = GateRunningSession(top="https://evil.com/landing")
-    with pytest.raises(ValidationError, match="not on allowlist"):
+    with pytest.raises(ValidationError, match="not on the read allowlist"):
         await _call("switch_to_default_content", _READ_APP, session, "t")
 
 
@@ -160,3 +160,12 @@ async def test_default_content_allowed_when_top_still_trusted():
     session = GateRunningSession()
     result = await _call("switch_to_default_content", _READ_APP, session, "t")
     assert result["top_url"] == TOP
+
+
+@pytest.mark.asyncio
+async def test_default_content_on_an_about_blank_tab_is_allowed():
+    # A fresh tab, or one bounced to about:blank: about:blank has no origin, but
+    # returning to the top page needs only the read check, which always admits it.
+    session = GateRunningSession(top="about:blank")
+    result = await _call("switch_to_default_content", _READ_APP, session, "t")
+    assert result["top_url"] == "about:blank"

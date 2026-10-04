@@ -140,8 +140,10 @@ async def test_a_refused_default_content_is_already_at_the_top():
     s = make_session(backend)
     await s.enter_frame("#child", id=TAB, gate=_gate())
     await _cache_snapshot(s)
-    with pytest.raises(ValidationError, match="landed refused"):
-        await s.switch_to_default_content(id=TAB, gate=_gate(landed=True))
+    # Back at the top there is nothing to be same-origin with: only the read
+    # check (check_page) judges the top page.
+    with pytest.raises(ValidationError, match="page refused"):
+        await s.switch_to_default_content(id=TAB, gate=_gate(page=True))
     assert backend.path == []
     assert not s._cache._entries
 

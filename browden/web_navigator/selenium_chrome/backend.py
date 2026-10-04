@@ -736,7 +736,9 @@ class SeleniumChromeBackend(WebNavigatorBackend):
             path.pop()
             if not path:
                 self._forget_frames(self._focused)
-        return {"frame_url": drv.execute_script(_EFFECTIVE_DOCUMENT_URL_JS), "top_url": drv.current_url}
+        # document_url: falls back to current_url at the top page (a chrome:// page
+        # runs no script), and raises FrameFocusError inside a frame.
+        return {"frame_url": self.document_url(), "top_url": drv.current_url}
 
     def switch_to_default_content(self) -> dict:
         """Return the focused tab to its top document, forgetting the frame path.
@@ -748,7 +750,9 @@ class SeleniumChromeBackend(WebNavigatorBackend):
         drv.switch_to.default_content()
         self._forget_frames(self._focused)
         self._frame_lost.discard(self._focused)  # leaving anyway: nothing to report
-        return {"frame_url": drv.execute_script(_EFFECTIVE_DOCUMENT_URL_JS), "top_url": drv.current_url}
+        # document_url: falls back to current_url at the top page (a chrome:// page
+        # runs no script), and raises FrameFocusError inside a frame.
+        return {"frame_url": self.document_url(), "top_url": drv.current_url}
 
     def current_url(self) -> str:
         try:

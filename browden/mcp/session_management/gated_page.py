@@ -155,8 +155,17 @@ class GatedPage:
         return png
 
     def reload(self, gate: ReadGate) -> dict:
-        """Reload and refresh the cached DOM — gated before, and on the landing."""
-        self._check_live_url(gate)
+        """Reload and refresh the cached DOM — gated before, and on the landing.
+
+        A reload returns the tab to its top document, so if the frame the tab was
+        focused on is gone (or its URL unreadable), the check before the reload
+        judges the top page instead of refusing: reloading is how an agent
+        recovers from a lost frame.
+        """
+        try:
+            self._check_live_url(gate)
+        except FrameFocusError:
+            gate.check_page(self._backend.current_url())
         try:
             tab = self._reload(gate)
         except _Bounced as b:
@@ -239,6 +248,16 @@ class GatedPage:
 
     # -- frame focus ------------------------------------------------------------
 
+    def _check_landing(self, gate: FrameGate, result: dict) -> None:
+        """Gate where an ascent landed: a frame must be read-allowed and same-origin
+        with the top page; the top page itself only has to be read-allowed — there is
+        nothing to compare it with, and an opaque top (``about:blank``, ``file://``)
+        has no origin to compare anyway."""
+        if self._backend.in_frame():
+            gate.check_landed(result["top_url"], result["frame_url"])
+        else:
+            gate.check_page(result["frame_url"])
+
     def _moved(self, result: dict) -> dict:
         self._cache.invalidate(self._handle)
         result["id"] = self._id
@@ -270,7 +289,7 @@ class GatedPage:
         """
         try:
             result = self._backend.switch_to_parent_frame()
-            gate.check_landed(result["top_url"], result["frame_url"])
+            self._check_landing(gate, result)
         except TabNotFoundError:
             raise  # the tab is gone: the session renders the tab-gone envelope
         except BaseException:
@@ -289,7 +308,7 @@ class GatedPage:
         """
         try:
             result = self._backend.switch_to_default_content()
-            gate.check_landed(result["top_url"], result["frame_url"])
+            self._check_landing(gate, result)
         except TabNotFoundError:
             raise  # the tab is gone: the session renders the tab-gone envelope
         except BaseException:

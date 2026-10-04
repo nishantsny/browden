@@ -10,7 +10,9 @@ import pytest
 from browden.common.tab import TabInfo
 from browden.dom import query
 from browden.mcp.session_management.gated_page import GatedPage
+from browden.common.origin import same_origin
 from browden.mcp.validator import (
+    FrameGate,
     ReadGate,
     UploadFileGate,
     ValidationError,
@@ -414,6 +416,19 @@ class FramedBackend(PageBackend):
             return PageSnapshot(url=self.frame, html=self.frame_html)
         return super().page_snapshot()
 
+    def switch_to_parent_frame(self):  # one level deep: up lands on the top page
+        self._log("switch_to_parent_frame")
+        self._in_frame = False
+        return {"frame_url": self.url, "top_url": self.url}
+
+    def switch_to_default_content(self):
+        self._log("switch_to_default_content")
+        self._in_frame, self._lost = False, False
+        return {"frame_url": self.url, "top_url": self.url}
+
+    def retreat_to_top(self):
+        self._in_frame = False
+
 
 def test_a_screenshot_inside_a_frame_gates_the_top_page_too():
     # The capture is the whole viewport. An allowed frame on an off-list top page
@@ -442,3 +457,43 @@ def test_a_lost_srcdoc_frame_is_not_served_from_the_cache_as_the_top_page(clock)
         _page(backend, cache).soup(READ)
     soup, _ = _page(backend, cache).soup(READ)
     assert soup.find(id="x").text == "shop"
+
+
+FILE_PAGE = "file:///home/u/page.html"
+
+
+def _frame_gate(read: ReadGate) -> FrameGate:
+    """A FrameGate with the real exact-origin rule on top of ``read``."""
+    def check_landed(top_url, frame_url):
+        read.check_page(frame_url)
+        if not same_origin(top_url, frame_url):
+            raise ValidationError(f"cross-origin frame refused: {frame_url!r} vs {top_url!r}")
+    return FrameGate(check_page=read.check_page, check_src=read.check_page, check_landed=check_landed)
+
+
+@pytest.mark.parametrize("move", ["switch_to_default_content", "switch_to_parent_frame"])
+@pytest.mark.parametrize("top", ["about:blank", FILE_PAGE])
+def test_landing_back_on_an_opaque_top_page_needs_only_the_read_check(move, top):
+    # about:blank and file:// have no origin, so "same-origin with itself" is
+    # false for them — but landing on the top page compares it with nothing: the
+    # read check alone decides. (about:blank is always readable; the file page is
+    # let in by the gate here, as an override would.)
+    backend = FramedBackend(top=top, frame=top)
+    result = getattr(_page(backend, SoupCache()), move)(_frame_gate(_read_gate(SHOP, FILE_PAGE)))
+    assert result["frame_url"] == top
+
+
+def test_landing_back_on_an_unreadable_top_page_is_still_refused():
+    backend = FramedBackend(top=SECRET, frame=SHOP)
+    with pytest.raises(ValidationError, match="read allowlist"):
+        _page(backend, SoupCache()).switch_to_default_content(_frame_gate(READ))
+
+
+def test_force_reload_recovers_from_a_lost_frame_in_one_call(clock):
+    # A reload returns the tab to its top document, so a lost frame must not make
+    # the reload itself refuse: the check before it judges the top page.
+    backend, cache = FramedBackend(top=SHOP, frame=SHOP), SoupCache(clock=clock)
+    backend.lose()
+    result = _page(backend, cache).reload(READ)
+    assert result["reloaded"] is True
+    assert "reload" in [name for name, _ in backend.calls]

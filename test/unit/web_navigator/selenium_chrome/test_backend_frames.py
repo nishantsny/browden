@@ -306,3 +306,26 @@ def test_closing_a_tab_forgets_its_frames():
     backend.close_tab("h1")
     backend.select_tab("h2")
     assert backend.in_frame() is False
+
+
+# -- ascents: the landed URL when script can't run --------------------------------
+
+@pytest.mark.parametrize("ascend", ["switch_to_default_content", "switch_to_parent_frame"])
+def test_an_ascent_to_the_top_falls_back_to_current_url_when_script_cant_run(ascend):
+    # e.g. a chrome:// top page, which runs no script: report the top URL (the read
+    # policy special-cases it) rather than raise the driver's error.
+    backend, drv = _backend()
+    backend.enter_frame("#child", _ok, _ok)
+    drv.url_script_error = JavascriptException(msg="script blocked")
+    result = getattr(backend, ascend)()
+    assert result == {"frame_url": TOP, "top_url": TOP}
+
+
+def test_an_ascent_that_stays_inside_a_frame_refuses_when_script_cant_run():
+    backend, drv = _backend({TOP: {"#mid": [FakeEl(MID, src=MID)]},
+                             MID: {"#child": [FakeEl(CHILD, src=CHILD)]}})
+    backend.enter_frame("#mid", _ok, _ok)
+    backend.enter_frame("#child", _ok, _ok)
+    drv.url_script_error = JavascriptException(msg="script blocked")
+    with pytest.raises(FrameFocusError):
+        backend.switch_to_parent_frame()  # lands in #mid, whose URL can't be read
