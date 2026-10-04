@@ -134,6 +134,9 @@ class OnePageBackend:
     def press_key_target(self, ref, key):
         return {"pressed": key, **self._act("press_key", ref)}
 
+    def upload_file_target(self, ref, file_path):
+        return {"uploaded": True, "file_path": file_path, **self._act("upload_file", ref)}
+
 
 def make_session(backend, clock=time.monotonic):
     return BrowserSessionManager(backend, namespace="ns", clock=clock, start_reaper=False)

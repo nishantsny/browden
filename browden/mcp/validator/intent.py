@@ -1,12 +1,12 @@
-"""Element-level guard for the write actions (``click`` and ``insert_text``).
+"""Element-level guard for the write actions (``click``, ``insert_text``, ``press_key``, ``upload_file``).
 
 The per-action host allowlist (in :class:`BrowdenAccessRuleSet`) decides
 *where* an action may act and, via each host's optional ``label`` regex, *what*
 target may carry.
 This module enforces only what the allowlist can't: element *integrity*. It
 answers "is this a real, visible, non-decoy control (a clickable one for
-``click``, a text box for ``insert_text``)?" — never "is this the kind of action I
-approve of." Judging intent (add-to-cart vs. checkout vs. remove; which fields may
+``click``, a text box for ``insert_text``, a file input for ``upload_file``)?" —
+never "is this the kind of action I approve of." Judging intent (add-to-cart vs. checkout vs. remove; which fields may
 be typed into) is the operator's job through the allowlist; a host listed with no
 ``label`` means every action on it is permitted by design.
 
@@ -48,6 +48,14 @@ _LABEL_ACTIVATABLE_INPUT_TYPES = ("radio", "checkbox")
 # excludes non-text inputs (checkbox/radio/file/range/color/date-pickers/etc.) —
 # those are manipulated by clicking, not typing.
 _TEXT_INPUT_TYPES = ("text", "search", "email", "tel", "url", "number", "password")
+
+# The one <input> type the `upload-file` action may set. Deliberately its own
+# constant rather than an addition to _TEXT_INPUT_TYPES: handing a website a
+# local file is a different capability from typing into a box, and 14 hosts in a
+# real deployed allowlist carry write-text `label: '.*'` — widening the text
+# tuple would silently upgrade every one of them from "may receive typed text"
+# to "may receive any local file, by absolute path".
+_UPLOADABLE_INPUT_TYPES = ("file",)
 
 # Tags the browser makes focusable without a tabindex — the ones that natively sit
 # in the tab order and take keyboard input (an <a> needs an href, handled below).
@@ -313,6 +321,38 @@ def is_fillable_control(node: dict) -> bool:
     # "false" (or absent) does not.
     ce = attrs.get("contenteditable")
     return ce is not None and ce.lower() in ("", "true", "plaintext-only")
+
+
+def is_uploadable_control(node: dict) -> bool:
+    """True iff ``node`` is a real, visible, non-decoy ``<input type="file">``.
+
+    The ``upload-file`` analogue of :func:`is_fillable_control`: integrity +
+    anti-decoy only. It says "is this a file picker a human could use", never
+    *which* file may be handed to it — the file itself is bounded by the
+    operator's allowed upload locations (see ``write_gates.validate_upload_path``) and the
+    control by the ``upload-file`` allowlist label / ``field_ids``.
+
+    A readonly file input is refused for the same reason a readonly text box is:
+    a field the human could not fill is not one the agent may fill either. A
+    ``multiple`` input is refused too: this action uploads one file, and that is
+    the control that could hold a second.
+
+    Default-deny: every check must pass. ``node`` is a serialized element dict.
+    """
+    if not node:
+        return False
+    attrs = node.get("attributes", {})
+    if _fails_integrity(attrs):
+        return False
+    if "readonly" in attrs or attrs.get("aria-readonly") == "true":
+        return False
+    # One file per upload. A `multiple` input is the only control that can hold
+    # more than one, so refusing it here means a single admitted path is also a
+    # single file at the browser — nothing can arrive alongside it. Lifting this
+    # is a deliberate later step, with its own way to authorize a set of files.
+    if "multiple" in attrs:
+        return False
+    return node.get("tag") == "input" and attrs.get("type") in _UPLOADABLE_INPUT_TYPES
 
 
 def _field_labels(node: dict) -> list[str]:

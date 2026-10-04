@@ -28,6 +28,28 @@ def gated_write(*, url, elements, result):
     return method
 
 
+def gated_upload(*, url, elements, result):
+    """A fake ``upload_file``: gates 1 and 2+, then records what the gate admitted.
+
+    ``upload_file`` takes no path — the file travels on the gate — so this records
+    ``(css_selector, admitted path)``, which is exactly what ``GatedPage`` hands
+    the backend.
+    """
+    found = {"total_count": len(elements), "elements": elements}
+
+    async def upload(css_selector, *, id, gate):
+        if url is None:
+            return tab_gone_envelope(id)
+        gate.check_page(url)
+        gate.check_element(url, css_selector, found)
+        method.performed.append((css_selector, str(gate.admitted.path)))
+        return {**result, "id": id}
+
+    method = AsyncMock(side_effect=upload)
+    method.performed = []
+    return method
+
+
 def gated_read(*, url, result):
     """A fake DOM read / ``screenshot``: gates the tab's live ``url``, then returns ``result``."""
     async def read(*args, id, gate, **kwargs):

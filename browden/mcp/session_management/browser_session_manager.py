@@ -47,7 +47,7 @@ from ...dom import query, serialize
 from ..validator.runtime_configuration import DEFAULT_REAP_INTERVAL_SECONDS
 from ..validator.errors import SessionBusyError, ValidationError, tab_gone_envelope
 from ..validator.read_gates import ReadGate
-from ..validator.write_gates import WriteGate
+from ..validator.write_gates import UploadFileGate, WriteGate
 from ...web_navigator.interface import TabNotFoundError
 from ...web_navigator.tab_id import format_tab_id, split_tab_id
 from ...web_navigator.registry import TabRegistry
@@ -335,6 +335,19 @@ class BrowserSessionManager:
         The soup cache is then invalidated because the DOM has changed.
         """
         return await self._with_page(id, lambda page: page.insert_text(css_selector, value, gate),
+                                     invalidate=True)
+
+    async def upload_file(self, css_selector: str, *, id: str, gate: UploadFileGate) -> dict:
+        """Attach the file ``gate`` admitted to the input ``css_selector`` on ``id``.
+
+        The file travels on the gate, not as an argument — see
+        :meth:`GatedPage.upload_file`: the path that was judged is the only one
+        anything downstream can reach.
+
+        The soup cache is then invalidated: setting a file input is a DOM change,
+        and pages routinely render the chosen filename next to the control.
+        """
+        return await self._with_page(id, lambda page: page.upload_file(css_selector, gate),
                                      invalidate=True)
 
     async def press_key(self, css_selector: str, key: str, *, id: str, gate: WriteGate) -> dict:

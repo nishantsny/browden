@@ -39,6 +39,38 @@ All notable changes to browden are documented here. The format follows
   decoy/`disabled`/`type=hidden` targets are refused either way. `press-key` is
   unchanged. Worked sample:
   [`configs/samples/allow_label_activation.yaml`](./configs/samples/allow_label_activation.yaml) (#146).
+- **`upload-file` write action: attach a local file to an `<input type=file>`.**
+  New `upload_file` tool, for the one control no existing action could drive:
+  `write-text` excludes `type=file` by design, and clicking a file input opens the
+  operating system's own file dialog, which is not part of the page and which
+  browden cannot drive. The motivating case is attaching a receipt image to a
+  Splitwise expense. It is a section of its own, **never** a widening of
+  `write-text`'s accepted input types: reading a file off your disk and handing it
+  to a website is a different capability from typing into a box, so a host already
+  trusted to receive typed text (`label: '.*'` is common) gains nothing from this.
+  Four default-deny gates: host+page, a real visible non-decoy non-readonly file
+  input, the control authorized by a matching rule's `label` **or** `field_ids`
+  (the id half carries this one — a file input routinely has no visible label at
+  all, as Splitwise's does not), and a new filesystem gate. `field_ids` is
+  therefore now accepted under `upload-file` as well as `write-text`. The path is
+  resolved **once**, by the gate, and that exact path is what the browser is
+  handed — never a second resolve of the caller's spelling, which could land
+  somewhere the gate never saw if a symlink inside an allowed location were
+  replaced in between. A path containing a control character is refused (the
+  driver splits a path on newlines, so one would name a second file), and a
+  `multiple` input is refused for now, so one admitted path is one file at the
+  browser.
+- **`allowed_upload_locations`: a new top-level allowlist section bounding what may leave the
+  machine.** Required for `upload-file` — with none configured nothing is
+  uploadable, **including under `allow_all`**, which grants authority over pages
+  and says nothing about the filesystem. Deliberately not per-host: it bounds
+  which files may be sent anywhere at all, independently of where they are going.
+  Without it, "upload to host X" would mean "exfiltrate `~/.ssh/id_rsa` to host
+  X". A path is expanded (`~`) and **fully resolved** — through `..` segments and
+  every symlink — before it is compared, so neither a traversal
+  in the path the agent passes nor a symlink planted inside one reaches outside it; the file must also exist, be a regular file, and be under a 25 MiB cap. A
+  profile's locations are additive over the global ones, like every other rule. Worked
+  sample: [`configs/samples/allow_receipt_upload.yaml`](./configs/samples/allow_receipt_upload.yaml) (#147).
 
 ### Security
 - **A reload redirected off-list no longer fetches the page it landed on.**

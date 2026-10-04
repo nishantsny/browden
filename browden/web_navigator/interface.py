@@ -182,3 +182,12 @@ class WebNavigatorBackend(ABC):
         ``"Enter"`` / ``"ArrowDown"``; which keys are allowed is policy, judged by
         the caller.
         """
+
+    @abstractmethod
+    def upload_file_target(self, ref, file_path: str) -> dict:
+        """Set the file input ``ref`` (from :meth:`target_snapshot`) to ``file_path``.
+
+        Like :meth:`click_target`. ``file_path`` is an absolute path to a regular
+        file on this machine; *which* files may be sent anywhere is policy, judged
+        by the caller before this is reached.
+        """

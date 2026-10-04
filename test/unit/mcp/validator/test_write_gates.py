@@ -8,12 +8,16 @@ still cover the same gates end-to-end; this file pins the composition unit.
 import pytest
 
 from browden.mcp.validator import (
+    MAX_UPLOAD_BYTES,
+    upload_file_gate,
     BrowdenAccessRuleSet,
     BrowdenRuntimeConfiguration,
     ValidationError,
     check_action_host,
     validate_click_target,
     validate_press_key_target,
+    validate_upload_path,
+    validate_upload_target,
     validate_write_text_target,
 )
 
@@ -268,3 +272,205 @@ def test_allow_all_still_gates_where_an_anchor_would_navigate():
               "attributes": {"href": "https://unranked.test/x"}, "text": "Go"}
     with pytest.raises(ValidationError, match="not on the read allowlist"):
         validate_click_target(scratch, "https://google.com/", "a", _found(anchor))
+
+
+# -- upload-file: the control gate (gates 2 and 3) ----------------------------
+
+SPLITWISE = "https://secure.splitwise.com/"
+
+_UPLOAD_RULES = BrowdenAccessRuleSet({
+    "read": {"enabled": True, "tranco": {"enabled": False},
+             "website_overrides": {"secure.splitwise.com": [".*"]}},
+    "upload-file": {"secure.splitwise.com": [
+        {"path": [".*"], "label": r"(?i)receipt", "field_ids": ["bill_file_expense"]}]},
+    # The same host is trusted to type, with an "any label" rule — the privilege
+    # that widening _TEXT_INPUT_TYPES would have silently turned into an upload.
+    "write-text": {"secure.splitwise.com": {"paths": [".*"], "label": ".*"}},
+})
+
+
+def _file_input(node_id=None, **attrs):
+    return {"tag": "input", "id": node_id, "classes": [],
+            "attributes": {"type": "file", **attrs}, "text": ""}
+
+
+def test_upload_authorized_by_field_id():
+    """The Splitwise case: no visible label of any kind, so the id is the handle."""
+    validate_upload_target(_UPLOAD_RULES, SPLITWISE, "#bill_file_expense",
+                           _found(_file_input(node_id="bill_file_expense")))
+
+
+def test_upload_authorized_by_visible_label():
+    validate_upload_target(_UPLOAD_RULES, SPLITWISE, "input[type=file]",
+                           _found(_file_input(**{"aria-label": "Receipt"})))
+
+
+def test_upload_unmatched_label_and_unlisted_id_rejected():
+    with pytest.raises(ValidationError, match="does not match any upload-file rule"):
+        validate_upload_target(_UPLOAD_RULES, SPLITWISE, "#other",
+                               _found(_file_input(node_id="avatar_file")))
+
+
+def test_upload_non_file_input_rejected():
+    """A write-text rule admitting any label must not become a file channel."""
+    text_box = {"tag": "input", "id": "bill_file_expense", "classes": [],
+                "attributes": {"type": "text"}, "text": ""}
+    with pytest.raises(ValidationError, match="not a file input"):
+        validate_upload_target(_UPLOAD_RULES, SPLITWISE, "#bill_file_expense", _found(text_box))
+
+
+def test_upload_decoy_rejected():
+    with pytest.raises(ValidationError, match="not a file input"):
+        validate_upload_target(_UPLOAD_RULES, SPLITWISE, "#x",
+                               _found(_file_input(node_id="bill_file_expense",
+                                                  **{"data-agent-action": "upload"})))
+
+
+def test_upload_disabled_rejected():
+    with pytest.raises(ValidationError, match="not a file input"):
+        validate_upload_target(_UPLOAD_RULES, SPLITWISE, "#x",
+                               _found(_file_input(node_id="bill_file_expense", disabled="")))
+
+
+def test_upload_ambiguous_selector_rejected():
+    with pytest.raises(ValidationError, match="ambiguous"):
+        validate_upload_target(_UPLOAD_RULES, SPLITWISE, "input",
+                               _found(_file_input(node_id="bill_file_expense"),
+                                      _file_input(node_id="other")))
+
+
+def test_upload_host_not_listed_for_upload_rejected():
+    """Trusted to type is not trusted to upload: the sections are independent."""
+    typing_only = BrowdenAccessRuleSet({
+        "write-text": {"secure.splitwise.com": {"paths": [".*"], "label": ".*"}}})
+    with pytest.raises(ValidationError, match="no upload-file rule authorizes"):
+        check_action_host(typing_only, "upload-file", SPLITWISE)
+
+
+# -- upload-file: the filesystem gate (gate 4) --------------------------------
+
+@pytest.fixture
+def allowed(tmp_path):
+    """The operator's allowed upload locations, with one receipt in one of them."""
+    location = tmp_path / "receipts"
+    location.mkdir()
+    (location / "lunch.png").write_bytes(b"png")
+    return (location,)
+
+
+def test_a_file_under_an_allowed_location_passes(allowed, tmp_path):
+    resolved = validate_upload_path(allowed, str(tmp_path / "receipts" / "lunch.png"))
+    assert resolved == tmp_path / "receipts" / "lunch.png"
+
+
+def test_no_roots_configured_denies_everything(tmp_path):
+    (tmp_path / "f.png").write_bytes(b"x")
+    with pytest.raises(ValidationError, match="no allowed_upload_locations are configured"):
+        validate_upload_path((), str(tmp_path / "f.png"))
+
+
+def test_a_file_outside_every_allowed_location_is_refused(allowed, tmp_path):
+    secret = tmp_path / "id_rsa"
+    secret.write_bytes(b"PRIVATE KEY")
+    with pytest.raises(ValidationError, match="outside every allowed upload location"):
+        validate_upload_path(allowed, str(secret))
+
+
+def test_traversal_out_of_an_allowed_location_is_refused(allowed, tmp_path):
+    """The path is resolved before it is compared, so `../` buys nothing."""
+    (tmp_path / "id_rsa").write_bytes(b"PRIVATE KEY")
+    with pytest.raises(ValidationError, match="outside every allowed upload location"):
+        validate_upload_path(allowed, str(tmp_path / "receipts" / ".." / "id_rsa"))
+
+
+def test_a_symlink_inside_an_allowed_location_pointing_out_is_refused(allowed, tmp_path):
+    """The dangerous case: the path *is* under an allowed location; its target is not."""
+    secret = tmp_path / "id_rsa"
+    secret.write_bytes(b"PRIVATE KEY")
+    link = allowed[0] / "innocent.png"
+    link.symlink_to(secret)
+    with pytest.raises(ValidationError, match="outside every allowed upload location"):
+        validate_upload_path(allowed, str(link))
+
+
+def test_a_symlinked_location_still_admits_its_own_files(tmp_path):
+    """The mirror image: a location reached through a symlink must still work."""
+    real = tmp_path / "real-receipts"
+    real.mkdir()
+    (real / "lunch.png").write_bytes(b"png")
+    link = tmp_path / "receipts"
+    link.symlink_to(real)
+    # The rule set resolves each location on load; this is that resolved form.
+    validate_upload_path((real.resolve(),), str(link / "lunch.png"))
+
+
+def test_a_missing_file_is_refused(allowed, tmp_path):
+    with pytest.raises(ValidationError, match="not an existing regular file"):
+        validate_upload_path(allowed, str(tmp_path / "receipts" / "nope.png"))
+
+
+def test_a_directory_is_refused(allowed, tmp_path):
+    (tmp_path / "receipts" / "sub").mkdir()
+    with pytest.raises(ValidationError, match="not an existing regular file"):
+        validate_upload_path(allowed, str(tmp_path / "receipts" / "sub"))
+
+
+def test_an_oversize_file_is_refused(allowed, tmp_path):
+    big = tmp_path / "receipts" / "big.bin"
+    with big.open("wb") as fh:
+        fh.truncate(MAX_UPLOAD_BYTES + 1)
+    with pytest.raises(ValidationError, match="over the .* upload cap"):
+        validate_upload_path(allowed, str(big))
+
+
+def test_allow_all_does_not_grant_the_filesystem():
+    """A scratch profile may act on any page, and still upload nothing."""
+    scratch = BrowdenRuntimeConfiguration({
+        "profiles": {"/profiles/scratch": {"allow_all": True}}}).access_rules_for("/profiles/scratch")
+    check_action_host(scratch, "upload-file", "https://unlisted.test/form")  # page authority: yes
+    assert scratch.allowed_upload_locations == ()
+    with pytest.raises(ValidationError, match="no allowed_upload_locations are configured"):
+        validate_upload_path(scratch.allowed_upload_locations, "/etc/passwd")
+
+
+def test_a_path_with_a_newline_is_refused(allowed, tmp_path):
+    """Selenium splits a path on newlines, so one path could name two files.
+
+    The driver hands the path to the browser as keystrokes; a `multiple` input
+    given "a\nb" ends up holding BOTH, and only the first was ever judged. A
+    control character has no place in a path browden was asked to upload.
+    """
+    secret = tmp_path / "id_rsa"
+    secret.write_bytes(b"PRIVATE KEY")
+    smuggled = allowed[0] / "lunch.png"
+    with pytest.raises(ValidationError, match="control character"):
+        validate_upload_path(allowed, f"{smuggled}\n{secret}")
+
+
+def test_other_control_characters_are_refused_too(allowed):
+    for ch in ("\r", "\t", "\x00", "\x7f"):
+        with pytest.raises(ValidationError, match="control character"):
+            validate_upload_path(allowed, f"{allowed[0] / 'lunch.png'}{ch}")
+
+
+def test_the_gate_carries_the_path_it_admitted(allowed):
+    """The action reads the file off the gate; nothing downstream re-resolves it."""
+    rules = BrowdenAccessRuleSet({
+        "upload-file": {"*": {"paths": [".*"], "label": ".*"}},
+        "allowed_upload_locations": [str(allowed[0])],
+    })
+    gate = upload_file_gate(rules, str(allowed[0] / "lunch.png"))
+    gate.check_page("https://anything.test/form")
+    assert gate.admitted.path == allowed[0] / "lunch.png"
+
+
+def test_a_gate_that_refused_carries_no_path(allowed, tmp_path):
+    rules = BrowdenAccessRuleSet({
+        "upload-file": {"*": {"paths": [".*"], "label": ".*"}},
+        "allowed_upload_locations": [str(allowed[0])],
+    })
+    gate = upload_file_gate(rules, str(tmp_path / "id_rsa"))
+    with pytest.raises(ValidationError, match="outside every allowed upload location"):
+        gate.check_page("https://anything.test/form")
+    with pytest.raises(ValidationError, match="no file was admitted"):
+        gate.admitted.path

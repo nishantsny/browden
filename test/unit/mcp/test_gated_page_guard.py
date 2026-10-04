@@ -24,7 +24,8 @@ EXEMPT_DIRS = {ROOT / "web_navigator" / "selenium_chrome"}
 LIFECYCLE = {"get_profile_dir", "is_running", "shutdown", "list_tabs", "list_handles",
              "new_blank_tab", "close_tab", "select_tab"}
 CONTENT = {"page_snapshot", "target_snapshot", "document_url", "current_url", "screenshot",
-           "navigate", "reload", "click_target", "insert_text_target", "press_key_target"}
+           "navigate", "reload", "click_target", "insert_text_target", "press_key_target",
+           "upload_file_target"}
 # Content method names no other class in browden uses, so any call of them —
 # whatever the receiver is called — is a backend call. (``navigate``,
 # ``screenshot`` and ``reload`` are also session / GatedPage methods; they are
