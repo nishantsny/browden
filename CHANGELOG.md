@@ -7,14 +7,9 @@ All notable changes to browden are documented here. The format follows
 
 ## [Unreleased]
 
+## [1.3.1] — 2026-10-04
+
 ### Changed
-- **Release skill: the version-bump PR is built in a temporary worktree
-  (maintainers).** `maintainers/github-release/SKILL.md` now says to prepare
-  the `release: cut vX.Y.Z` PR in its own `git worktree` (never the release
-  worktree, which must stay clean for the deploy), relock with
-  `uv lock --offline`, keep that worktree until the PR merges, and then remove
-  it along with the local `release/v*` branch. A later run's preflight clears
-  any leftover one.
 - **Deploy script syncs the service's venv from `uv.lock` (maintainers).**
   Step 2 used `uv pip install -e`, which resolves `pyproject`'s ranges: it
   never moved an already-installed package to its locked version, so the live
@@ -124,6 +119,13 @@ All notable changes to browden are documented here. The format follows
   and kept with the logs after a red one until the next run sweeps it. Setting
   `BROWDEN_E2E_VENV` still gives a persistent venv, which the script never
   removes.
+- **Release skill: the version-bump PR is built in a temporary worktree
+  (maintainers).** `maintainers/github-release/SKILL.md` now says to prepare
+  the `release: cut vX.Y.Z` PR in its own `git worktree` (never the release
+  worktree, which must stay clean for the deploy), relock with
+  `uv lock --offline`, keep that worktree until the PR merges, and then remove
+  it along with the local `release/v*` branch. A later run's preflight clears
+  any leftover one.
 
 ### Fixed
 - **`mcp` is pinned below 2.** The dependency was `mcp[cli]>=1.0` with no
@@ -297,7 +299,8 @@ Initial public release.
   service manager (systemd / launchd / Task Scheduler).
 - Apache-2.0.
 
-[Unreleased]: https://github.com/nishantsny/browden/compare/v1.3.0...HEAD
+[Unreleased]: https://github.com/nishantsny/browden/compare/v1.3.1...HEAD
+[1.3.1]: https://github.com/nishantsny/browden/compare/v1.3.0...v1.3.1
 [1.3.0]: https://github.com/nishantsny/browden/compare/v1.2.1...v1.3.0
 [1.2.1]: https://github.com/nishantsny/browden/compare/v1.2.0...v1.2.1
 [1.2.0]: https://github.com/nishantsny/browden/compare/v1.1.0...v1.2.0
