@@ -7,6 +7,12 @@ All notable changes to browden are documented here. The format follows
 
 ## [Unreleased]
 
+### Changed
+- **Release skill: a merged prep PR is the go-ahead (maintainers).** After the
+  `release: cut vX.Y.Z` PR merges, `maintainers/github-release/SKILL.md` now
+  goes straight to the `--release` deploy instead of asking again whether to
+  run it; it still asks when the version was already on `main`.
+
 ## [1.5.0] — 2026-10-04
 
 ### Added
