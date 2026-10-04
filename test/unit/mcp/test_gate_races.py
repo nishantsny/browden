@@ -12,7 +12,8 @@ each one through every race that applies to its kind:
 * **LANDING** — the tool's own navigation/reload is redirected off-list and
   paused there while a ``list_tabs`` is queued behind it.
 * **FRAME** — the tool moves a tab's frame focus into a document it must refuse
-  (a cross-origin frame, or an ancestor that moved cross-origin) and is paused
+  (a cross-origin frame, an ancestor that moved cross-origin, or a top page that
+  moved off-list) and is paused
   *mid-move* — switched, not yet checked — while a read is queued behind it.
 
 After every race the same invariant must hold: no off-list content left the
@@ -127,6 +128,12 @@ TOOLS = {
                                    ("switch_to_parent_frame",),
                                    setup=lambda b: b.path.extend(
                                        [("#mid", FOREIGN), ("#child", WIDGET)])),
+    # Inside an admitted frame, but the top page has since moved off-list: the
+    # return to the top is refused, and nothing of the top page may be read.
+    "switch_to_default_content": Tool(FRAME, lambda s: s.switch_to_default_content(id=TAB),
+                                      ("switch_to_default_content",),
+                                      setup=lambda b: (b.path.append(("#child", WIDGET)),
+                                                       setattr(b, "url", SECRET))),
 }
 
 
@@ -273,7 +280,8 @@ async def test_control_a_refused_frame_move_leaves_no_focus_inside(server, name)
     backend = _backend(SHOP)
     if TOOLS[name].setup:
         TOOLS[name].setup(backend)
-    with _serving(server, backend), pytest.raises(ValidationError, match="cross-origin"):
+    with _serving(server, backend), pytest.raises(ValidationError,
+                                                  match="cross-origin|not on (the read )?allowlist"):
         await TOOLS[name].call(server)
     _assert_nothing_escaped(backend)
 

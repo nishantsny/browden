@@ -52,8 +52,18 @@ class GatedPage:
     # -- gating helpers -------------------------------------------------------
 
     def _check_live_url(self, gate: ReadGate | WriteGate) -> str:
-        """Gate the focused document's live URL; return it."""
-        url = self._backend.document_url()
+        """Gate the focused document's live URL; return it.
+
+        A frame that can't be relied on (lost, or its URL unreadable) means the
+        focus has changed under the tab, and every focus change drops the tab's
+        cached snapshots: a ``srcdoc`` frame is cached under its parent's URL, so
+        the next read at the top would otherwise be answered with the frame's HTML.
+        """
+        try:
+            url = self._backend.document_url()
+        except FrameFocusError:
+            self._cache.invalidate(self._handle)
+            raise
         gate.check_page(url)
         return url
 
@@ -125,12 +135,22 @@ class GatedPage:
         return self._fetch(gate), entry is not None
 
     def screenshot(self, gate: ReadGate) -> bytes:
-        """A PNG of the viewport. The URL is gated before the capture and again after it."""
+        """A PNG of the viewport. The URL is gated before the capture and again after it.
+
+        Inside a frame the focused document is the frame, but the capture is the
+        whole viewport — the top page around it included — so the top page's URL
+        is gated too, before and after.
+        """
         url = self._check_live_url(gate)
+        in_frame = self._backend.in_frame()
+        if in_frame:
+            gate.check_page(self._backend.current_url())
         png = self._backend.screenshot()
         after = self._backend.document_url()
         if after != url:
             gate.check_page(after)
+        if in_frame:
+            gate.check_page(self._backend.current_url())
         logger.info(f"Captured screenshot of tab {self._id} ({len(png)} bytes)")
         return png
 

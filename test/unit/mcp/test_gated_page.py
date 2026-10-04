@@ -18,7 +18,12 @@ from browden.mcp.validator import (
     upload_file_gate,
 )
 from browden.mcp.validator import BrowdenAccessRuleSet
-from browden.web_navigator.interface import InvalidSelectorError, PageSnapshot, TargetSnapshot
+from browden.web_navigator.interface import (
+    FrameFocusError,
+    InvalidSelectorError,
+    PageSnapshot,
+    TargetSnapshot,
+)
 from browden.web_navigator.soup_cache import TTL_SECONDS, SoupCache
 
 SHOP = "https://shop.example/item"
@@ -371,3 +376,69 @@ def test_an_upload_whose_gate_never_admitted_a_file_is_refused(clock, tmp_path):
     with pytest.raises(ValidationError, match="no file was admitted"):
         _page(backend, cache).upload_file("#up", gate)
     assert backend.actions == []
+
+
+# -- inside a frame ----------------------------------------------------------------
+
+class FramedBackend(PageBackend):
+    """A tab focused inside a frame: ``url`` is the top page, ``frame`` the focused
+    document's (effective) URL and ``frame_html`` its content. ``lose()`` makes the
+    frame vanish the way the real backend reports it: the tab drops to its top and
+    the next ``document_url`` raises ``FrameFocusError`` once."""
+
+    def __init__(self, top=SHOP, frame=SHOP, frame_html=_html("FRAME")):
+        super().__init__(top)
+        self.frame, self.frame_html = frame, frame_html
+        self._in_frame, self._lost = True, False
+
+    def lose(self):
+        self._in_frame, self._lost = False, True
+
+    def in_frame(self):
+        return self._in_frame
+
+    def document_url(self):
+        self._log("document_url")
+        if self._lost:
+            self._lost = False
+            raise FrameFocusError("the frame is gone")
+        return self.frame if self._in_frame else self.url
+
+    def current_url(self):
+        self._log("current_url")
+        return self.url
+
+    def page_snapshot(self):
+        self._log("page_snapshot")
+        if self._in_frame:
+            return PageSnapshot(url=self.frame, html=self.frame_html)
+        return super().page_snapshot()
+
+
+def test_a_screenshot_inside_a_frame_gates_the_top_page_too():
+    # The capture is the whole viewport. An allowed frame on an off-list top page
+    # must not get the top page photographed.
+    backend = FramedBackend(top=SECRET, frame=SHOP)
+    with pytest.raises(ValidationError, match="read allowlist"):
+        _page(backend, SoupCache()).screenshot(READ)
+    assert "screenshot" not in [name for name, _ in backend.calls]
+
+
+def test_a_screenshot_inside_a_frame_on_an_allowed_page_is_taken():
+    backend = FramedBackend(top=SHOP, frame=OTHER)
+    assert _page(backend, SoupCache()).screenshot(READ).startswith(b"png:")
+
+
+def test_a_lost_srcdoc_frame_is_not_served_from_the_cache_as_the_top_page(clock):
+    # A srcdoc frame's URL is its parent's, so its snapshot is cached under the
+    # top page's URL. When the frame is lost, that entry must go: the read after
+    # the one-time error is the TOP page, and must return the top page's HTML.
+    backend, cache = FramedBackend(top=SHOP, frame=SHOP), SoupCache(clock=clock)
+    soup, _ = _page(backend, cache).soup(READ)
+    assert soup.find(id="x").text == "FRAME"
+
+    backend.lose()
+    with pytest.raises(FrameFocusError):
+        _page(backend, cache).soup(READ)
+    soup, _ = _page(backend, cache).soup(READ)
+    assert soup.find(id="x").text == "shop"

@@ -13,10 +13,10 @@ from dataclasses import dataclass
 from urllib.parse import urlparse, urlunparse
 
 from ...common.logger import logger
+from ...common.origin import same_origin
 from .allowlist import HostRuleMatcher, ReadPolicy
 from .access_rule_set import BrowdenAccessRuleSet
 from .errors import ValidationError
-from .tranco import canonical_host
 
 # Browser-internal "blank" / new-tab URLs a not-yet-navigated tab reports. Always
 # allowed: there is no site to gate, and the agent can't navigate to one
@@ -129,30 +129,32 @@ def read_gate(access_rules: BrowdenAccessRuleSet) -> ReadGate:
 def validate_and_ensure_same_origin(
     top_url: str, frame_url: str, gate: "HostRuleMatcher | ReadPolicy",
 ) -> None:
-    """Gate entering an iframe (v1: same-origin only). Raises on refusal.
+    """Gate a frame focus has landed on: read-allowed AND same-origin. Raises on refusal.
 
-    Called AFTER the driver has switched into the frame, with the frame's *actual*
-    ``document.URL`` and the tab's top-level URL. Two conditions, both required:
+    Called after a switch into a frame (and on every ascent), with the landed
+    document's effective URL and the tab's top-level URL. Both conditions hold:
 
     1. ``frame_url`` must be admitted by the read policy (``validate_url``) — a frame
        is a distinct document and must itself be readable to be inspected.
-    2. The frame's host must equal the top page's host (**same-origin**). Cross-origin
-       frames are refused in v1 because the click/write host gate keys off the tab's
-       top URL (``driver.current_url`` stays top-level inside a frame), so it cannot
-       correctly govern a different-origin document — enabling that safely needs a
-       frame-aware write gate (a future v2).
+    2. ``frame_url`` must have the top page's exact **origin** (scheme, host, port —
+       :func:`~browden.common.origin.same_origin`): the browser's own boundary, so
+       ``http://shop.example`` inside ``https://www.shop.example`` is refused.
 
-    The caller runs this post-switch and, on a raise, returns the driver to the top
-    document (no action is taken inside a refused frame). ``top_url`` is trusted here:
-    the caller has already gated it via the read policy before switching.
+    Same-origin is a deliberate scope limit, not a crutch for the write gates:
+    reads and writes inside a frame are judged by the frame's own URL, each under
+    its own gate (the read allowlist, the action's host and element rules). A
+    frame the page wrote (``srcdoc``) has its parent's URL, so the parent's rules
+    apply to it. Admitting cross-origin frames is left for later.
+
+    On a raise the caller restores the previous focus (entry) or retreats to the
+    top document (ascent); nothing is read or done inside a refused frame.
+    ``top_url`` is trusted here: the caller has already gated it.
     """
     validate_url(frame_url, gate)  # the landed document must itself be read-allowed
-    frame_host = canonical_host(urlparse(frame_url).hostname or "")
-    top_host = canonical_host(urlparse(top_url).hostname or "")
-    if frame_host != top_host:
+    if not same_origin(top_url, frame_url):
         raise ValidationError(
-            f"cross-origin frame refused (same-origin only): frame host {frame_host!r} "
-            f"!= page host {top_host!r}")
+            f"cross-origin frame refused (same-origin only): {frame_url!r} is not "
+            f"the same origin as the page {top_url!r}")
 
 
 @dataclass(frozen=True)

@@ -310,7 +310,7 @@ async def test_a_read_after_the_frame_is_removed_errors_instead_of_reading_the_t
         # read reports that rather than quietly answering from the top page...
         await _call_text(mcp, "click", {"css_selector": "#remover", "id": tab})
         refused = await _call_text(mcp, "query_selector", {"css_selector": "#top-only", "id": tab})
-        assert "no longer on the page" in refused, refused
+        assert "gone or has changed" in refused, refused
 
         # ...once: the agent now knows the tab is at its top document.
         assert (await _find(mcp, tab, "#top-only"))["found"] is True

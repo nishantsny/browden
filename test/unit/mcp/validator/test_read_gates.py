@@ -197,12 +197,24 @@ def test_frame_entry_allows_same_origin_read_allowed():
                                 "https://app.example.com/api/widget", rp) is None
 
 
-def test_frame_entry_treats_www_as_same_origin():
-    # canonical_host drops a leading www., so www.example.com and example.com are
-    # the same origin for the gate.
+@pytest.mark.parametrize("top,frame", [
+    ("https://example.com/p", "https://www.example.com/inner"),   # www. is another host
+    ("https://example.com/p", "http://example.com/inner"),        # another scheme
+    ("https://example.com/p", "https://example.com:8443/inner"),  # another port
+])
+def test_frame_entry_is_exact_origin(top, frame):
+    # Same-origin is the browser's boundary — scheme, host and port — not the read
+    # policy's host canonicalization (which drops a leading www.). example.com is
+    # named, so even its plain-http page is readable: only same-origin can refuse.
+    rp = _read_policy({"*": [".*"], "example.com": [".*"]})
+    with pytest.raises(ValidationError, match="cross-origin"):
+        validate_and_ensure_same_origin(top, frame, rp)
+
+
+def test_frame_entry_treats_an_explicit_default_port_as_the_same_origin():
     rp = _read_policy({"*": [".*"]})
     assert validate_and_ensure_same_origin("https://example.com/p",
-                                "https://www.example.com/inner", rp) is None
+                                           "https://example.com:443/inner", rp) is None
 
 
 def test_frame_entry_refuses_cross_origin_even_when_read_allowed():
