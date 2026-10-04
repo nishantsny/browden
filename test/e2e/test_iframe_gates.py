@@ -317,6 +317,38 @@ async def test_a_read_after_the_frame_is_removed_errors_instead_of_reading_the_t
         assert (await _find(mcp, tab, "#child"))["found"] is False
 
 
+@pytest.mark.asyncio
+async def test_force_reload_recovers_from_a_removed_frame_in_one_call(
+        frame_server, mcp_client_session, site, profiles):
+    plain = profiles[0]
+    async with mcp_client_session(frame_server) as mcp:
+        tab = await _open(mcp, plain, f"{site}/frames/same")
+        json.loads(await _switch(mcp, tab, "#child"))
+        await _call_text(mcp, "click", {"css_selector": "#remover", "id": tab})
+
+        # A reload returns to the top document anyway: the lost frame must not
+        # make the reload itself refuse.
+        reloaded = json.loads(await _call_text(mcp, "force_reload_tab", {"id": tab}))
+        assert reloaded["reloaded"] is True, reloaded
+        assert (await _find(mcp, tab, "#top-only"))["found"] is True
+
+
+# -- returning to the top page: only the read check applies --------------------
+
+@pytest.mark.asyncio
+async def test_default_content_works_on_an_about_blank_tab(
+        frame_server, mcp_client_session, profiles):
+    # A fresh tab — and any tab bounced off-list — is at about:blank, which has no
+    # origin to be "same-origin with itself". It is always readable, so returning
+    # to the top must just work.
+    plain = profiles[0]
+    async with mcp_client_session(frame_server) as mcp:
+        res = await mcp.call_tool("new_blank_tab", {"profile_dir": str(plain)})
+        tab = json.loads(res.content[0].text)["id"]
+        result = json.loads(await _call_text(mcp, "switch_to_default_content", {"id": tab}))
+        assert result["top_url"] == "about:blank", result
+
+
 # -- frames the parent wrote: judged by the page that wrote them --------------
 
 @pytest.mark.asyncio

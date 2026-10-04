@@ -121,7 +121,10 @@ All notable changes to browden are documented here. The format follows
   origin, otherwise the frame is lost. A `screenshot` inside a frame also gates
   the top page's URL, since the capture shows the whole viewport. Writes inside
   a frame are allowed, each judged by the frame's own URL under its own rules
-  (a `srcdoc` frame has its parent page's URL, so the parent's rules apply).
+  (a `srcdoc` frame has its parent page's URL, so the parent's rules apply). Returning to the top page (`switch_to_default_content`, or an ascent that
+  reaches it) needs only the read check, so a tab at `about:blank` or an
+  override-allowed `file://` page can always be returned to, and
+  `force_reload_tab` recovers from a lost frame in one call.
   Every frame tool judges against the tab's own profile's rules. A frame the
   page wrote itself (`srcdoc`, or an `about:blank` frame filled in by script)
   has no URL of its own and is judged by the URL of the same-origin page that
