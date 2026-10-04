@@ -48,7 +48,7 @@ from ..validator.runtime_configuration import DEFAULT_REAP_INTERVAL_SECONDS
 from ..validator.errors import SessionBusyError, ValidationError, tab_gone_envelope
 from ..validator.read_gates import FrameGate, ReadGate
 from ..validator.write_gates import UploadFileGate, WriteGate
-from ...web_navigator.interface import TabNotFoundError
+from ...web_navigator.interface import FrameFocusError, TabNotFoundError
 from ...web_navigator.tab_id import format_tab_id, split_tab_id
 from ...web_navigator.registry import TabRegistry
 from ...web_navigator.soup_cache import SoupCache

@@ -66,6 +66,9 @@ class OnePageBackend:
     def select_tab(self, handle):
         assert handle == "h1"
 
+    def in_frame(self):
+        return False  # no frame model: always at the top document
+
     def document_url(self):
         url = self.url
         self._maybe_park("document_url")

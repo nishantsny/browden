@@ -9,8 +9,11 @@ sweeps idle tabs outside the driver lock.
 """
 import pytest
 
+from browden.web_navigator.interface import FrameFocusError
+from browden.web_navigator.soup_cache import TTL_SECONDS
+
 from browden.mcp.validator import FrameGate, ValidationError
-from test_session import FakeBackend, make_session
+from test_session import OPEN_READ_GATE, FakeBackend, make_session
 
 TAB = "ns-h1"
 TOP = "https://example.test/h1"
@@ -57,6 +60,10 @@ class FrameFakeBackend(FakeBackend):
         self.path = []
         return {"frame_url": self.landed_url, "top_url": TOP}
 
+    def reload(self):
+        self.path = []  # like the real one: a reload returns the tab to its top document
+        return super().reload()
+
     def retreat_to_top(self):
         self.calls.append("retreat_to_top")
         self.path = []
@@ -67,7 +74,6 @@ class FrameFakeBackend(FakeBackend):
 
 async def _cache_snapshot(s):
     """Fill the soup cache for the tab, so a test can see whether it was dropped."""
-    from test_session import OPEN_READ_GATE
     await s.get_element_by_id("logo", id=TAB, gate=OPEN_READ_GATE)
     assert s._cache._entries
 
@@ -154,3 +160,38 @@ async def test_frame_methods_never_sweep_idle_tabs():
     await s.switch_to_default_content(id=TAB, gate=_gate())
 
     assert swept == []
+
+
+@pytest.mark.asyncio
+async def test_a_stale_reload_inside_a_frame_refuses_the_read_instead_of_reading_the_top(fake_clock):
+    # Finding 3: an expired snapshot reloads the page, which returns the tab to its
+    # top document. The read used to hand back the TOP page's elements as if they
+    # were the frame's. Now it refuses — before fetching the top page at all.
+    clock = fake_clock()
+    backend = FrameFakeBackend()
+    s = make_session(backend, clock=clock)
+    await s.enter_frame("#child", id=TAB, gate=_gate())
+    await _cache_snapshot(s)  # the frame's snapshot
+    clock.t += TTL_SECONDS + 1
+    fetches_before = [c for c in backend.calls if c[0:1] == ("get_tab_html",)]
+
+    with pytest.raises(FrameFocusError, match="switch_to_frame again"):
+        await s.get_element_by_id("logo", id=TAB, gate=OPEN_READ_GATE)
+
+    assert ("reload", "h1") in backend.calls
+    assert [c for c in backend.calls if c[0:1] == ("get_tab_html",)] == fetches_before  # no fetch
+    assert backend.path == []           # the reload did reset the focus...
+    assert not s._cache._entries        # ...and the stale entry is gone,
+    again = await s.get_element_by_id("logo", id=TAB, gate=OPEN_READ_GATE)
+    assert again["reloaded"] is False   # so the next read fetches the top fresh, no second reload
+
+
+@pytest.mark.asyncio
+async def test_a_stale_reload_at_the_top_still_just_reloads(fake_clock):
+    clock = fake_clock()
+    backend = FrameFakeBackend()
+    s = make_session(backend, clock=clock)
+    await _cache_snapshot(s)
+    clock.t += TTL_SECONDS + 1
+    result = await s.get_element_by_id("logo", id=TAB, gate=OPEN_READ_GATE)
+    assert result["reloaded"] is True
