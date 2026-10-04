@@ -503,19 +503,20 @@ def _refuse_u2(url):
 
 
 @pytest.mark.asyncio
-async def test_list_tabs_closes_an_off_list_tab_in_the_same_hold():
+async def test_list_tabs_closes_an_off_list_tab_in_the_same_hold(monkeypatch):
     backend = FakeBackend()
     s = make_session(backend)
     s._registry.touch("h2")
     s._cache._entries["h2"] = object()  # a cached snapshot of the off-list tab
 
+    # Every driver hold is one asyncio.to_thread call: count those.
     holds = []
-    original = s._run_driver
+    original = asyncio.to_thread
 
     async def counting(fn, *args, **kwargs):
         holds.append(fn)
         return await original(fn, *args, **kwargs)
-    s._run_driver = counting
+    monkeypatch.setattr(asyncio, "to_thread", counting)
 
     listed = await s.list_tabs(gate=ReadGate(check_page=_refuse_u2))
 
@@ -600,8 +601,9 @@ async def test_reaper_re_reads_its_interval_every_tick(monkeypatch):
             raise asyncio.CancelledError
     monkeypatch.setattr(asyncio, "sleep", fake_sleep)
 
-    s = make_session(FakeBackend())
-    s._reap_interval_seconds = lambda: intervals[min(len(slept), len(intervals) - 1)]
+    s = BrowserSessionManager(
+        FakeBackend(), namespace="ns", start_reaper=False,
+        reap_interval_seconds=lambda: intervals[min(len(slept), len(intervals) - 1)])
     with pytest.raises(asyncio.CancelledError):
         await s._reaper_loop()
 
