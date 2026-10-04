@@ -7,10 +7,9 @@ tools, so every verdict below comes from the same gates a client hits:
 * **same-origin frame** — entered, read, and left again;
 * **cross-origin frame** — refused after the switch, and focus is back on top;
 * **declared src off the read allowlist** — refused, focus stays on top;
-* **ascent re-gate** — a middle frame navigated cross-origin while we were
-  deeper is refused on ``switch_to_parent_frame``, which retreats to the top:
-  by the same-origin check where the new origin is readable, and by the read
-  check (which also refuses reads while still deeper) where it isn't;
+* **a middle frame moved cross-origin** while we were deeper loses the frame:
+  the next call is refused and the tab is at its top — whether or not the new
+  origin is readable on its own, since same-origin holds on every call;
 * **writes inside a frame** — judged by the *frame's* URL, not the top page's;
 * **profile scoping** — a frame readable in one profile only;
 * **a vanished frame** — the next read errors once, then the tab is at its top;
@@ -249,11 +248,11 @@ async def test_a_frame_is_judged_by_the_tabs_own_profile(
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("profile, readable", [("wide", True), ("plain", False)])
-async def test_parent_moved_cross_origin_is_refused_on_ascent(
+async def test_parent_moved_cross_origin_loses_the_frame(
         frame_server, mcp_client_session, site, profiles, profile, readable):
-    # wide: the second origin is readable, so only the same-origin check can
-    # refuse the landed parent. plain: it isn't readable either, so the read
-    # check refuses it first, and reads while still deeper are refused too.
+    # wide: the second origin is readable, so only the same-origin rule can keep
+    # the agent out of it. plain: it isn't readable either. Same outcome both ways:
+    # same-origin holds on every call, not only on entry and ascent.
     profile_dir = dict(zip(("plain", "wide"), profiles))[profile]
     async with mcp_client_session(frame_server) as mcp:
         tab = await _open(mcp, profile_dir, f"{site}/frames/nested")
@@ -261,19 +260,20 @@ async def test_parent_moved_cross_origin_is_refused_on_ascent(
         json.loads(await _switch(mcp, tab, "#child"))
 
         # From the innermost frame, move its parent to the second origin. The
-        # landing page has a #child too, so the recorded path still resolves.
+        # landing page has a #child too, so the recorded selectors still resolve.
         assert "clicked" in await _call_text(
             mcp, "click", {"css_selector": "#mover", "id": tab})
         await asyncio.sleep(2)
 
-        # Focus is now in the landing page's #child, on the second origin.
+        # The replay finds the middle frame holding another origin's document: the
+        # frame is lost. The next read is refused rather than answered from the
+        # second origin — even where that origin is readable on its own...
         deeper = await _call_text(mcp, "query_selector",
                                   {"css_selector": "#in-frame", "id": tab})
-        assert ('"found"' in deeper) is readable, deeper
+        assert "gone or has changed" in deeper, deeper
+        assert '"found"' not in deeper
 
-        refused = (await _call_text(mcp, "switch_to_parent_frame", {"id": tab})).lower()
-        assert "frame_url" not in refused
-        assert ("cross-origin" in refused) is readable, refused
+        # ...once: the tab is now at its top document.
         await _assert_at_top(mcp, tab)
 
 
