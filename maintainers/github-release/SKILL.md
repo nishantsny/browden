@@ -67,8 +67,14 @@ too so you fail fast (before a ~7-minute run) and can offer to fix it.
      `uv sync --locked`), and (b) move the `[Unreleased]` notes under a new
      `## [<version>] — <today>` heading and fix the compare links. Mirror the
      previous `release: cut vX.Y.Z` commit and PR. Open the PR. Then **STOP**:
-     tell the user to merge it to main and re-run `/release-browden`. Do not tag
-     — the tag's commit must already describe it on main.
+     tell the user to merge it to main (and say so, or re-run
+     `/release-browden`). Do not tag — the tag's commit must already describe it
+     on main.
+   - **The merge is the go-ahead.** When the user reports the prep PR merged (or
+     a re-run finds it merged), confirm `MERGED` + the HARD RULE on origin/main
+     and go straight to step 4 — do **not** ask whether to run the release or
+     re-run this skill. The version was settled in step 2 and the user approved
+     it by merging.
    - **Keep that temp worktree until the PR is merged**, since review fixes go
      there. Once `gh pr view <n> --json state` says `MERGED`, remove it
      (`git -C ~/projects/browser-guard worktree remove <path>`) and delete the
@@ -78,8 +84,10 @@ too so you fail fast (before a ~7-minute run) and can offer to fix it.
    - Missing, and the user declined → **STOP** and explain the release is blocked
      until the version is in the changelog on main.
 
-4. **Cut the release** (only when step 3 is satisfied). Confirm intent with the
-   user first — this publishes. Run `~/scripts/deploy.sh --release=<tag>` **once**
+4. **Cut the release** (only when step 3 is satisfied). If this run just merged
+   a prep PR (above), run without asking. Otherwise — the version was already on
+   main, so nothing has been approved yet — confirm intent with the user first,
+   since this publishes. Run `~/scripts/deploy.sh --release=<tag>` **once**
    (a real service restart + public tag; the user may prefer to run it themselves
    via `! ~/scripts/deploy.sh --release=<tag>`). The single run: checks gh auth up
    front, then deploys + e2es, and ONLY on green verifies the preconditions again,
@@ -98,8 +106,8 @@ too so you fail fast (before a ~7-minute run) and can offer to fix it.
 ## Notes / gotchas
 
 - This is a **publish** action (a tag + a public Release, awkward to unwind once
-  consumers pull `stable`). Confirm the version with the user before the run;
-  never pick it yourself.
+  consumers pull `stable`). The user picks the version (step 2); never pick it
+  yourself. A merged prep PR is their confirmation — don't ask again after it.
 - Always `--release`: there is no unblocked "deploy only" phase in this skill. A
   plain `~/scripts/deploy.sh` (no tag) is still fine for a routine redeploy, but a
   *release* always goes through the single `--release` run so the tag is only ever
