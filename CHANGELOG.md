@@ -8,6 +8,17 @@ All notable changes to browden are documented here. The format follows
 ## [Unreleased]
 
 ### Changed
+- **README: the intro now leads with the gating thesis rather than "read-only".**
+  The opening pitched the project as a read-only shell that happens to be
+  configurable, which undersold both halves of it: that the gates are
+  deliberately *unintelligent* — host, path and visible-label regexes, with no
+  model in them to persuade — and that they are extensive enough for an agent to
+  roam and act. The new intro states that, tabulates the five gates and their
+  defaults, and documents the scratch-profile posture (`allow_all` in its own
+  Chrome profile), including what `allow_all` still does *not* relax: the
+  denylist, the scheme gate, `allowed_upload_locations`, and the Tranco read
+  check, which stays on unless the profile opts out explicitly. Docs only — no
+  behaviour change.
 - **A merge during the release e2e no longer blocks the tag (maintainers).**
   `deploy.sh --release` refused to tag unless the deployed commit was still
   `main`'s tip, so any PR merged during the ~7-minute e2e aborted a green run.
