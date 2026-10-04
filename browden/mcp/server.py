@@ -27,7 +27,6 @@ from .validator import (
     BrowdenRuntimeConfiguration,
     SessionBusyError,
     click_gate,
-    ensure_url_allowed,
     press_key_gate,
     read_gate,
     validate_url,
@@ -189,22 +188,9 @@ async def list_tabs() -> list[dict]:
         if not await session.is_live():
             logger.info(f"list_tabs: skipping dead session (profile={session.profile_dir})")
             return []
-        # H2: a tab on a non-allowlisted host is closed, not just hidden — the
-        # agent can neither read it nor learn it exists. The same read gate the
-        # DOM tools use decides: if it fails, close the tab (best-effort — the
-        # last tab can't be closed) and drop it from the listing.
-        kept: list[dict] = []
-        access_rules = _access_rules_for(session)
-        for tab in await session.list_tabs():
-            if ensure_url_allowed(access_rules, tab.get("url") or ""):
-                kept.append(tab)
-                continue
-            logger.warning(f"list_tabs: closing non-allowlisted tab {tab.get('url')!r} (id={tab.get('id')})")
-            try:
-                await session.close_tab(tab["id"])
-            except Exception as e:
-                logger.warning(f"list_tabs: could not close tab {tab.get('id')}: {e}")
-        return kept
+        # H2: the session closes any tab parked off the read allowlist and leaves
+        # it out of the listing, in the same driver hold as the listing itself.
+        return await session.list_tabs(gate=read_gate(_access_rules_for(session)))
 
     listings = await asyncio.gather(*(_fetch(s) for s in _store.sessions()))
     logger.info("Tool finished: list_tabs")

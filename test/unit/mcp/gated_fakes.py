@@ -8,7 +8,7 @@ driver hold as the read or write. These fakes do the same against a canned
 """
 from unittest.mock import AsyncMock
 
-from browden.mcp.validator import tab_gone_envelope
+from browden.mcp.validator import ValidationError, tab_gone_envelope
 
 
 def gated_write(*, url, elements, result):
@@ -39,4 +39,22 @@ def gated_read(*, url, result):
 
     method = AsyncMock(side_effect=read)
     method.performed = []
+    return method
+
+
+def gated_list(*, tabs):
+    """A fake ``list_tabs``: keeps the ``tabs`` the gate admits; ``.closed`` lists the ids it refused."""
+    async def list_tabs(*, gate):
+        kept = []
+        for tab in tabs:
+            try:
+                gate.check_page(tab.get("url") or "")
+            except ValidationError:
+                method.closed.append(tab["id"])
+                continue
+            kept.append(tab)
+        return kept
+
+    method = AsyncMock(side_effect=list_tabs)
+    method.closed = []
     return method

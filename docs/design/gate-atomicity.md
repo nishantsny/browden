@@ -3,7 +3,7 @@
 **Status:** implemented · **Applies to:** the write tools (`click`,
 `insert_text`, `press_key`), the read tools (`get_element_by_id`,
 `get_elements_by_class_name`, `query_selector`, `query_selector_all`,
-`screenshot`), `navigate` and `force_reload_tab`
+`screenshot`), `navigate`, `force_reload_tab` and `list_tabs`
 
 ## Context
 
@@ -101,8 +101,22 @@ reload  session.force_reload_tab(id=, gate=ReadGate)      one hold:
   decisions still live in `read_gates.py` / `write_gates.py`, as pure
   functions.
 - **There is no ungated path.** `gate` is a required argument of every session
-  method that reads page content, writes, navigates or reloads. A test that
-  wants the raw primitive passes an explicit `OPEN_GATE` / `OPEN_READ_GATE`.
+  method that reads page content, writes, navigates, reloads or lists tabs. A
+  test that wants the raw primitive passes an explicit `OPEN_GATE` /
+  `OPEN_READ_GATE`. The session exposes no ungated way to read a tab's URL (it
+  once had a public `document_url()`): a URL read in its own hold is stale by
+  the time anything acts on it, so the gates read `backend.document_url()`
+  inside the hold they guard, and nothing else reads it at all.
+- **The server imports no gate predicate.** `server.py` builds gates
+  (`read_gate`, `click_gate`, …) and hands them to the session; it never
+  calls `ensure_url_allowed` / `check_action_host` / `validate_*_target`
+  itself. Checking in the server means checking outside the hold. (It still
+  calls `validate_url` on the *requested* URL of a `navigate`, which is a
+  string, not a page.)
+- **`list_tabs` closes off-list tabs in the listing's own hold (H2).** The
+  listing, the read gate on each tab's URL and the close of any off-list tab
+  are one hold, so no other request sees an off-list tab in between. A tab
+  that can't be closed (the last one) is still never listed.
 - **The bounce is part of the hold.** `_bounce_off_list_landing` navigates to
   `about:blank` and drops any snapshot the landing left in the soup cache
   before the hold ends, so no other request ever sees a tab resting off-list.

@@ -17,6 +17,7 @@ from browden.mcp.session_management.browser_session_manager import (
     IDLE_TTL_SECONDS,
     BrowserSessionManager,
 )
+from gates import OPEN_READ_GATE
 
 
 class Clock:
@@ -58,7 +59,7 @@ async def test_cap_reclaims_an_idle_tab_and_the_retry_opens_one(session):
     second = await manager.new_blank_tab(max_tabs=MAX_TABS)
 
     assert second["id"] != first["id"]  # a genuinely new tab, not the old one back
-    open_ids = {t["id"] for t in await manager.list_tabs()}
+    open_ids = {t["id"] for t in await manager.list_tabs(gate=OPEN_READ_GATE)}
     assert second["id"] in open_ids
     assert first["id"] not in open_ids  # the idle tab was really closed in Chrome
     assert len(open_ids) <= MAX_TABS  # and the cap still holds
@@ -73,4 +74,4 @@ async def test_cap_still_refuses_when_nothing_is_idle(session):
         await manager.new_blank_tab(max_tabs=MAX_TABS)
 
     # The in-use tab was not sacrificed to serve the request that failed.
-    assert first["id"] in {t["id"] for t in await manager.list_tabs()}
+    assert first["id"] in {t["id"] for t in await manager.list_tabs(gate=OPEN_READ_GATE)}

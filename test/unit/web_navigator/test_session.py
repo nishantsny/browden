@@ -10,7 +10,7 @@ from browden.mcp.session_management.browser_session_manager import (
     IDLE_TTL_SECONDS,
     BrowserSessionManager,
 )
-from browden.mcp.validator import ReadGate, SessionBusyError
+from browden.mcp.validator import ReadGate, SessionBusyError, ValidationError
 
 # These tests pin the session's locking, caching and tab tracking, not policy
 # (the read gate is pinned in test/unit/mcp/test_read_gate_atomicity.py), so
@@ -170,7 +170,7 @@ async def test_nav_tools_dispatch_and_touch_registry():
     backend = FakeBackend()
     s = make_session(backend)
 
-    await s.list_tabs()
+    await s.list_tabs(gate=OPEN_READ_GATE)
     assert "list_tabs" in backend.calls
     assert set(s._registry._last_access) == {"h1", "h2"}
 
@@ -497,13 +497,74 @@ async def test_a_timed_out_request_surfaces_as_an_error_envelope():
     assert "busy" in envelope["error"]
 
 
+# -- list_tabs: H2 closes off-list tabs, in the listing's own hold -------------
+
+def _refuse_u2(url):
+    if url == "u2":
+        raise ValidationError(f"URL not on the read allowlist: {url}")
+
+
+@pytest.mark.asyncio
+async def test_list_tabs_closes_an_off_list_tab_in_the_same_hold():
+    backend = FakeBackend()
+    s = make_session(backend)
+    s._registry.touch("h2")
+    s._cache._entries["h2"] = object()  # a cached snapshot of the off-list tab
+
+    holds = []
+    original = s._run_driver
+
+    async def counting(fn, *args, **kwargs):
+        holds.append(fn)
+        return await original(fn, *args, **kwargs)
+    s._run_driver = counting
+
+    listed = await s.list_tabs(gate=ReadGate(check_page=_refuse_u2))
+
+    assert [t["id"] for t in listed] == ["ns-h1"]
+    assert backend.closed == ["h2"]
+    assert len(holds) == 1, "listing, gating and closing must share one driver hold"
+    assert "h2" not in s._registry._last_access and "h2" not in s._cache._entries
+
+
+@pytest.mark.asyncio
+async def test_list_tabs_omits_an_off_list_tab_it_cannot_close():
+    # The last tab can't be closed: it stays open (and tracked), but is still
+    # never listed.
+    backend = FakeBackend()
+    backend.close_raises = ValueError("Cannot close the last tab")
+    s = make_session(backend)
+    s._registry.touch("h2")
+
+    listed = await s.list_tabs(gate=ReadGate(check_page=_refuse_u2))
+
+    assert [t["id"] for t in listed] == ["ns-h1"]
+    assert backend.closed == []
+    assert "h2" in s._registry._last_access
+
+
+@pytest.mark.asyncio
+async def test_list_tabs_counts_an_already_gone_off_list_tab_as_closed():
+    # Same rule as close_tab: a tab that vanished before the close is closed —
+    # its tracking is dropped, not left stale.
+    backend = FakeBackend()
+    backend.missing = {"h2"}
+    s = make_session(backend)
+    s._registry.touch("h2")
+
+    listed = await s.list_tabs(gate=ReadGate(check_page=_refuse_u2))
+
+    assert [t["id"] for t in listed] == ["ns-h1"]
+    assert "h2" not in s._registry._last_access
+
+
 @pytest.mark.asyncio
 async def test_separate_sessions_do_not_share_a_lock():
     # Per-session locking: a profile stuck on a long op must not stall another.
     busy, free = make_session(), make_session()
     await busy._lock.acquire()
 
-    await asyncio.wait_for(free.list_tabs(), timeout=1.0)  # unaffected
+    await asyncio.wait_for(free.list_tabs(gate=OPEN_READ_GATE), timeout=1.0)  # unaffected
 
 
 # -- idle reaper ------------------------------------------------------------
@@ -516,7 +577,7 @@ async def test_tools_do_not_sweep():
     backend = FakeBackend()
     s = make_session(backend)
 
-    await s.list_tabs()
+    await s.list_tabs(gate=OPEN_READ_GATE)
     await s.new_blank_tab(max_tabs=10)
     await s.select_tab("ns-h1")
     await s.query_selector("#logo", id="ns-h1", gate=OPEN_READ_GATE)
