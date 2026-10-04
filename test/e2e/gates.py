@@ -8,7 +8,7 @@ session is handed a gate that admits everything.
 """
 from pathlib import Path
 
-from browden.mcp.validator import AdmittedFile, ReadGate, UploadFileGate, WriteGate
+from browden.mcp.validator import AdmittedFile, FrameGate, ReadGate, UploadFileGate, WriteGate
 
 OPEN_GATE = WriteGate(check_page=lambda url: None,
                       check_element=lambda url, css_selector, found: None)
@@ -32,3 +32,9 @@ def open_upload_gate(file_path) -> UploadFileGate:
     return UploadFileGate(check_page=lambda url: None,
                           check_element=lambda url, css_selector, found: None,
                           admitted=admitted)
+
+
+# And for frame focus: the frame gates are unit-tested with real rules; these
+# tests pin what the session and backend do when a frame move is admitted.
+OPEN_FRAME_GATE = FrameGate(check_page=lambda url: None, check_src=lambda src: None,
+                            check_landed=lambda top_url, frame_url: None)

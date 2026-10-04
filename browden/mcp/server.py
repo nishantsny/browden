@@ -28,13 +28,11 @@ from .validator import (
     BrowdenAccessRuleSet,
     BrowdenRuntimeConfiguration,
     SessionBusyError,
-    ValidationError,
     click_gate,
+    frame_gate,
     press_key_gate,
     read_gate,
-    tab_gone_envelope,
     upload_file_gate,
-    validate_and_ensure_same_origin,
     validate_url,
     write_text_gate,
 )
@@ -474,45 +472,20 @@ async def switch_to_frame(css_selector: str, id: str) -> dict:
     ``switch_to_default_content`` (or ``switch_to_parent_frame``) to leave. A
     navigate/reload also resets the focus to the top document.
 
-    Gates, all default-deny: the tab's top URL must be on the read allowlist; the
-    iframe's declared ``src`` is checked *before* switching; and *after* switching
-    the frame's actual ``document.URL`` must be read-allowed AND same-origin with the
-    top page — cross-origin frames are refused. On any failure the driver is returned
-    to the top document and nothing inside the frame is inspected.
+    Gates, all default-deny, all in the one driver hold that switches: the focused
+    document must be on the read allowlist; the iframe's declared ``src`` is checked
+    *before* switching; and *after* switching the frame's actual ``document.URL``
+    must be read-allowed AND same-origin with the top page — cross-origin frames are
+    refused. On any failure the focus is put back where it was and nothing inside
+    the frame is inspected.
     """
     logger.info(f"Tool called: switch_to_frame (css_selector={css_selector!r}, id={id!r})")
     session = _store.route(id)
-
-    # The tab's profile decides the rules; every gate below uses this one set.
-    access_rules = _access_rules_for(session)
-
-    # The focused document must itself be readable before we descend into a frame.
-    here = await session.document_url(id=id)
-    if here is None:
-        return tab_gone_envelope(id)
-    if not ensure_url_allowed(access_rules, here):
-        raise ValidationError(f"URL not on the read allowlist: {here}")
-
-    # Pre-switch gate: refuse to even enter a frame whose DECLARED src is disallowed
-    # (defense-in-depth; src may be None for a srcdoc frame — then rely on the post gate).
-    pre = await session.frame_src(css_selector, id=id)
-    if "error" in pre:
-        return pre
-    src = pre.get("src")
-    if src:
-        validate_url(src, access_rules.read_policy)  # raises → never switch
-
-    # Switch in, then gate the ACTUAL landed document (authoritative) + same-origin.
-    entered = await session.enter_frame(css_selector, id=id)
-    if "error" in entered:
-        return entered
-    try:
-        validate_and_ensure_same_origin(entered["top_url"], entered["frame_url"], access_rules.read_policy)
-    except ValidationError:
-        await session.switch_to_default_content(id=id)  # back out; take no action inside
-        raise
+    # The tab's profile decides the rules; the session runs them in the switching hold.
+    gate = frame_gate(_access_rules_for(session))
+    result = await session.enter_frame(css_selector, id=id, gate=gate)
     logger.info("Tool finished: switch_to_frame")
-    return entered
+    return result
 
 
 @mcp.tool()
@@ -527,16 +500,8 @@ async def switch_to_parent_frame(id: str) -> dict:
     """
     logger.info(f"Tool called: switch_to_parent_frame (id={id!r})")
     session = _store.route(id)
-    access_rules = _access_rules_for(session)
-    result = await session.switch_to_parent_frame(id=id)
-    if "error" in result:
-        return result
-    try:
-        validate_and_ensure_same_origin(result["top_url"], result["frame_url"],
-                                        access_rules.read_policy)
-    except ValidationError:
-        await session.switch_to_default_content(id=id)  # retreat to the top document
-        raise
+    gate = frame_gate(_access_rules_for(session))
+    result = await session.switch_to_parent_frame(id=id, gate=gate)
     logger.info("Tool finished: switch_to_parent_frame")
     return result
 
@@ -554,13 +519,8 @@ async def switch_to_default_content(id: str) -> dict:
     """
     logger.info(f"Tool called: switch_to_default_content (id={id!r})")
     session = _store.route(id)
-    access_rules = _access_rules_for(session)
-    result = await session.switch_to_default_content(id=id)
-    if "error" in result:
-        return result
-    # frame_url == top_url here (the top document); this reduces to a read-allowed check.
-    validate_and_ensure_same_origin(result["top_url"], result["frame_url"],
-                                    access_rules.read_policy)
+    gate = frame_gate(_access_rules_for(session))
+    result = await session.switch_to_default_content(id=id, gate=gate)
     logger.info("Tool finished: switch_to_default_content")
     return result
 

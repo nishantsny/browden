@@ -46,7 +46,7 @@ from ...common.logger import logger
 from ...dom import query, serialize
 from ..validator.runtime_configuration import DEFAULT_REAP_INTERVAL_SECONDS
 from ..validator.errors import SessionBusyError, ValidationError, tab_gone_envelope
-from ..validator.read_gates import ReadGate
+from ..validator.read_gates import FrameGate, ReadGate
 from ..validator.write_gates import UploadFileGate, WriteGate
 from ...web_navigator.interface import TabNotFoundError
 from ...web_navigator.tab_id import format_tab_id, split_tab_id
@@ -361,49 +361,77 @@ class BrowserSessionManager:
                                      invalidate=True)
 
     # -- frame navigation ---------------------------------------------------
+    #
+    # Like a read or a write, a frame move is gated and performed in ONE
+    # driver-lock hold: focus the tab, judge where we are and where we're going,
+    # move — or roll back. Nothing (a concurrent navigate, a config hot-reload)
+    # can come between the verdict and the move, and a refused or failed move
+    # never leaves the driver inside a frame that wasn't admitted. See
+    # docs/design/gate-atomicity.md.
 
-    async def frame_src(self, css_selector: str, *, id: str) -> dict:
-        """Resolve the iframe at ``css_selector`` on ``id``; return its src (no switch).
+    async def enter_frame(self, css_selector: str, *, id: str, gate: FrameGate) -> dict:
+        """Switch ``id`` into the iframe at ``css_selector``, gated; invalidates the soup cache.
 
-        Read-only pre-flight for ``switch_to_frame``: lets the caller gate the
-        frame's declared target before the driver ever enters it.
+        In one hold: the focused document must pass ``gate.check_page``, the
+        frame's declared ``src`` ``gate.check_src``, and the document actually
+        landed on ``gate.check_landed`` (read-allowed + same-origin). On any
+        failure the backend restores the previous focus and the error propagates.
         """
         def work(handle):
             self._backend.select_tab(handle)
-            result = self._backend.get_frame_src(css_selector)
-            result["id"] = id
-            return result
-        return await self._with_tab(id, work, invalidate=False)
-
-    async def enter_frame(self, css_selector: str, *, id: str) -> dict:
-        """Switch ``id`` into the iframe at ``css_selector``; invalidates the soup cache.
-
-        The active document changes, so the cached top-document soup is dropped
-        (``invalidate=True``): the next DOM read re-fetches the *frame's*
-        ``page_source``. Returns the frame's ``document.URL`` and the tab's top URL
-        for the caller's post-switch allowlist + same-origin gate.
-        """
-        def work(handle):
-            self._backend.select_tab(handle)
-            result = self._backend.enter_frame(css_selector)
+            try:
+                gate.check_page(self._backend.document_url())
+                result = self._backend.enter_frame(css_selector, gate.check_src, gate.check_landed)
+            except TabNotFoundError:
+                raise
+            except BaseException:
+                self._cache.invalidate(handle)  # focus may have moved (e.g. a replay reset)
+                raise
             logger.info(f"enter_frame: {css_selector!r} on tab {id}")
             result["id"] = id
             return result
         return await self._with_tab(id, work, invalidate=True)
 
-    async def switch_to_parent_frame(self, *, id: str) -> dict:
+    async def switch_to_parent_frame(self, *, id: str, gate: FrameGate) -> dict:
+        """Move ``id`` up one frame level and re-gate where it lands, in one hold.
+
+        An ancestor may have been navigated elsewhere while we were deeper, so the
+        landed document must pass ``gate.check_landed``. On refusal (or a failure
+        reading it) the tab retreats to its top document and the error propagates.
+        """
         def work(handle):
             self._backend.select_tab(handle)
-            result = self._backend.switch_to_parent_frame()
+            try:
+                result = self._backend.switch_to_parent_frame()
+                gate.check_landed(result["top_url"], result["frame_url"])
+            except TabNotFoundError:
+                raise
+            except BaseException:
+                self._backend.retreat_to_top()
+                self._cache.invalidate(handle)
+                raise
             logger.info(f"switch_to_parent_frame on tab {id}")
             result["id"] = id
             return result
         return await self._with_tab(id, work, invalidate=True)
 
-    async def switch_to_default_content(self, *, id: str) -> dict:
+    async def switch_to_default_content(self, *, id: str, gate: FrameGate) -> dict:
+        """Return ``id`` to its top document and re-gate it, in one hold.
+
+        Another process may have moved the top page since we descended. On refusal
+        the tab is already at its top document (there is nowhere safer to retreat
+        to); the error propagates and the read tools refuse that page too.
+        """
         def work(handle):
             self._backend.select_tab(handle)
-            result = self._backend.switch_to_default_content()
+            try:
+                result = self._backend.switch_to_default_content()
+                gate.check_landed(result["top_url"], result["frame_url"])
+            except TabNotFoundError:
+                raise
+            except BaseException:
+                self._cache.invalidate(handle)
+                raise
             logger.info(f"switch_to_default_content on tab {id}")
             result["id"] = id
             return result

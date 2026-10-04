@@ -1,22 +1,24 @@
-"""Tool-level tests for the frame-navigation write... er, focus actions.
+"""Tool-level tests for the frame focus tools: the real frame gates, real rules.
 
-The session is mocked (so no real Chrome), but the frame gates run for real:
-``switch_to_frame`` gates the iframe's declared src before switching and the
-landed ``document.URL`` (read-allowed + same-origin) after; ``switch_to_parent_frame``
-and ``switch_to_default_content`` RE-gate the landed ancestor/top on every call —
-because another process may have navigated it to an untrusted page while we were
-deeper in the tree (the same reason the read tools re-check the live ``document_url`` every
-call, not just on navigate).
+The tools build a ``FrameGate`` from the tab's profile rules and hand it to the
+session, which runs it inside the one driver hold that moves the focus (pinned
+in test/unit/web_navigator/test_session_frames.py). Here the session is a small
+stand-in that runs the gate exactly as the real one does, against scripted
+``frame_url`` / ``top_url`` pairs, so every verdict below comes from the real
+gates:
 
-Each mocked session method returns exactly what the corresponding backend op would,
-so the gate sees realistic ``frame_url`` / ``top_url`` pairs.
+* ``switch_to_frame`` gates the focused page, the iframe's declared src before
+  switching, and the landed ``document.URL`` (read-allowed + same-origin) after;
+* ``switch_to_parent_frame`` / ``switch_to_default_content`` RE-gate the landed
+  ancestor/top on every call — another process may have navigated it to an
+  untrusted page while we were deeper in the tree.
 """
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 
 from browden.configs.loader import RuntimeConfigurationRefresher
-from browden.mcp.validator import BrowdenRuntimeConfiguration, ValidationError
+from browden.mcp.validator import BrowdenRuntimeConfiguration, FrameGate, ValidationError
 
 # Only app.example.com is readable...
 _READ_APP = BrowdenRuntimeConfiguration({"read": {"website_overrides": {"app.example.com": [".*"]}}})
@@ -25,124 +27,136 @@ _READ_APP = BrowdenRuntimeConfiguration({"read": {"website_overrides": {"app.exa
 _READ_OPEN = BrowdenRuntimeConfiguration({"read": {"website_overrides": {"*": [".*"]}}})
 
 TOP = "https://app.example.com/page"
+WIDGET = "https://app.example.com/widget"
 
 
-def _session(**overrides) -> MagicMock:
-    """A mocked BrowserSessionManager. Defaults are the same-origin happy path;
-    pass return values per method to shape a scenario."""
-    s = MagicMock()
-    s.document_url = AsyncMock(return_value=overrides.get("document_url", TOP))
-    s.frame_src = AsyncMock(
-        return_value=overrides.get("frame_src", {"src": None, "id": "t"}))
-    s.enter_frame = AsyncMock(
-        return_value=overrides.get("enter_frame",
-                                   {"frame_url": "https://app.example.com/widget",
-                                    "top_url": TOP, "id": "t"}))
-    s.switch_to_parent_frame = AsyncMock(
-        return_value=overrides.get("switch_to_parent_frame",
-                                   {"frame_url": "https://app.example.com/parent",
-                                    "top_url": TOP, "id": "t"}))
-    s.switch_to_default_content = AsyncMock(
-        return_value=overrides.get("switch_to_default_content",
-                                   {"frame_url": TOP, "top_url": TOP, "id": "t"}))
-    return s
+class GateRunningSession:
+    """Runs the handed ``FrameGate`` the way ``BrowserSessionManager`` does.
+
+    ``page`` is the focused document, ``src`` the iframe's declared src (None for
+    srcdoc), ``landed`` the document a move lands on. ``moves`` records what the
+    focus did: ``"entered"``, ``"up"``, ``"top"``, ``"retreated"``.
+    """
+
+    profile_dir = "/fake/profile"  # no `profiles:` block in these rules → the global ones
+
+    def __init__(self, page=TOP, src=None, landed=WIDGET, top=TOP):
+        self.page, self.src, self.landed, self.top = page, src, landed, top
+        self.moves: list[str] = []
+        self.gates: list[FrameGate] = []
+
+    async def enter_frame(self, css_selector, *, id, gate):
+        self.gates.append(gate)
+        gate.check_page(self.page)
+        if self.src:
+            gate.check_src(self.src)
+        gate.check_landed(self.top, self.landed)  # the backend rolls back on a raise
+        self.moves.append("entered")
+        return {"frame_url": self.landed, "top_url": self.top, "id": id}
+
+    async def switch_to_parent_frame(self, *, id, gate):
+        self.gates.append(gate)
+        self.moves.append("up")
+        try:
+            gate.check_landed(self.top, self.landed)
+        except ValidationError:
+            self.moves.append("retreated")
+            raise
+        return {"frame_url": self.landed, "top_url": self.top, "id": id}
+
+    async def switch_to_default_content(self, *, id, gate):
+        self.gates.append(gate)
+        self.moves.append("top")
+        gate.check_landed(self.top, self.top)
+        return {"frame_url": self.top, "top_url": self.top, "id": id}
 
 
-def _server(allowlist):
+def _server():
     import browden.mcp.server as server
     __import__("importlib").reload(server)
     return server
 
 
-# -- switch_to_frame (entry gate: before + after) ----------------------------
+async def _call(tool, rules, session, *args):
+    server = _server()
+    with patch.object(server._store, "route", return_value=session), \
+         patch.object(server, "_refresher", RuntimeConfigurationRefresher.static(rules)):
+        return await getattr(server, tool)(*args)
+
+
+# -- switch_to_frame (entry gate: page, src before, landed after) -------------
 
 @pytest.mark.asyncio
 async def test_switch_to_frame_same_origin_allowed():
-    server = _server(_READ_OPEN)
-    session = _session()
-    with patch.object(server._store, "route", return_value=session), \
-         patch.object(server, "_refresher", RuntimeConfigurationRefresher.static(_READ_OPEN)):
-        result = await server.switch_to_frame("#child", "t")
-    assert result["frame_url"] == "https://app.example.com/widget"
-    session.switch_to_default_content.assert_not_awaited()  # no retreat on success
+    session = GateRunningSession(src=WIDGET)
+    result = await _call("switch_to_frame", _READ_OPEN, session, "#child", "t")
+    assert result["frame_url"] == WIDGET
+    assert session.moves == ["entered"]
+    assert len(session.gates) == 1 and isinstance(session.gates[0], FrameGate)
+
+
+@pytest.mark.asyncio
+async def test_switch_to_frame_refuses_when_the_focused_page_is_not_readable():
+    session = GateRunningSession(page="https://evil.com/top")
+    with pytest.raises(ValidationError, match="not on the read allowlist"):
+        await _call("switch_to_frame", _READ_APP, session, "#child", "t")
+    assert session.moves == []
 
 
 @pytest.mark.asyncio
 async def test_switch_to_frame_refuses_already_untrusted_src_before_switching():
-    # Scenario: the iframe is ALREADY pointed at an untrusted site. Its declared
-    # src fails the pre-switch gate, so we never enter it.
-    server = _server(_READ_APP)
-    session = _session(frame_src={"src": "https://evil.com/ad", "id": "t"})
-    with patch.object(server._store, "route", return_value=session), \
-         patch.object(server, "_refresher", RuntimeConfigurationRefresher.static(_READ_APP)):
-        with pytest.raises(ValidationError, match="not on allowlist"):
-            await server.switch_to_frame("#child", "t")
-    session.enter_frame.assert_not_awaited()  # refused BEFORE switching
+    # The iframe is ALREADY pointed at an untrusted site: its declared src fails
+    # the pre-switch gate, so we never enter it.
+    session = GateRunningSession(src="https://evil.com/ad")
+    with pytest.raises(ValidationError, match="not on allowlist"):
+        await _call("switch_to_frame", _READ_APP, session, "#child", "t")
+    assert session.moves == []  # refused BEFORE switching
 
 
 @pytest.mark.asyncio
 async def test_switch_to_frame_refuses_cross_origin_landed_document():
-    # Scenario: src looked innocent / redirected, but the landed document is a
-    # different origin. The after-gate refuses it and retreats to the top document.
-    server = _server(_READ_OPEN)  # whole web readable — so ONLY same-origin can refuse
-    session = _session(
-        frame_src={"src": "https://app.example.com/redirector", "id": "t"},
-        enter_frame={"frame_url": "https://ads.other.com/frame", "top_url": TOP, "id": "t"})
-    with patch.object(server._store, "route", return_value=session), \
-         patch.object(server, "_refresher", RuntimeConfigurationRefresher.static(_READ_OPEN)):
-        with pytest.raises(ValidationError, match="cross-origin"):
-            await server.switch_to_frame("#child", "t")
-    session.switch_to_default_content.assert_awaited_once_with(id="t")  # retreated
+    # src looked innocent / redirected, but the landed document is a different
+    # origin. Whole web readable, so ONLY the same-origin check can refuse.
+    session = GateRunningSession(src="https://app.example.com/redirector",
+                                 landed="https://ads.other.com/frame")
+    with pytest.raises(ValidationError, match="cross-origin"):
+        await _call("switch_to_frame", _READ_OPEN, session, "#child", "t")
+    assert session.moves == []
 
 
 # -- switch_to_parent_frame / switch_to_default_content (RE-gate on ascent) ----
 
 @pytest.mark.asyncio
 async def test_parent_frame_same_origin_allowed():
-    server = _server(_READ_OPEN)
-    session = _session()
-    with patch.object(server._store, "route", return_value=session), \
-         patch.object(server, "_refresher", RuntimeConfigurationRefresher.static(_READ_OPEN)):
-        result = await server.switch_to_parent_frame("t")
+    session = GateRunningSession(landed="https://app.example.com/parent")
+    result = await _call("switch_to_parent_frame", _READ_OPEN, session, "t")
     assert result["frame_url"] == "https://app.example.com/parent"
-    session.switch_to_default_content.assert_not_awaited()
+    assert session.moves == ["up"]
 
 
 @pytest.mark.asyncio
 async def test_parent_frame_refuses_when_ancestor_moved_cross_origin():
-    # The key scenario: while we were deeper in the tree, another process navigated
-    # the PARENT frame to an untrusted (cross-origin) page. Ascending must re-verify
-    # the landed document and refuse — then retreat to the top.
-    server = _server(_READ_OPEN)  # whole web readable, so only same-origin can refuse
-    session = _session(
-        switch_to_parent_frame={"frame_url": "https://evil.com/hijacked", "top_url": TOP, "id": "t"})
-    with patch.object(server._store, "route", return_value=session), \
-         patch.object(server, "_refresher", RuntimeConfigurationRefresher.static(_READ_OPEN)):
-        with pytest.raises(ValidationError, match="cross-origin"):
-            await server.switch_to_parent_frame("t")
-    session.switch_to_default_content.assert_awaited_once_with(id="t")  # retreated to top
+    # While we were deeper in the tree, another process navigated the PARENT frame
+    # to a cross-origin page. Ascending re-verifies the landed document, refuses,
+    # and retreats to the top.
+    session = GateRunningSession(landed="https://evil.com/hijacked")
+    with pytest.raises(ValidationError, match="cross-origin"):
+        await _call("switch_to_parent_frame", _READ_OPEN, session, "t")
+    assert session.moves == ["up", "retreated"]
 
 
 @pytest.mark.asyncio
 async def test_default_content_refuses_when_top_moved_to_untrusted():
     # Another process moved the TOP page itself to an untrusted URL since we
-    # descended. Returning to default content must re-check the top document and
-    # refuse (there is nowhere safer to retreat — the read tools also refuse to read it).
-    server = _server(_READ_APP)  # only app.example.com readable
-    evil_top = "https://evil.com/landing"
-    session = _session(
-        switch_to_default_content={"frame_url": evil_top, "top_url": evil_top, "id": "t"})
-    with patch.object(server._store, "route", return_value=session), \
-         patch.object(server, "_refresher", RuntimeConfigurationRefresher.static(_READ_APP)):
-        with pytest.raises(ValidationError, match="not on allowlist"):
-            await server.switch_to_default_content("t")
+    # descended. Returning to default content re-checks it and refuses (there is
+    # nowhere safer to retreat — the read tools also refuse to read it).
+    session = GateRunningSession(top="https://evil.com/landing")
+    with pytest.raises(ValidationError, match="not on allowlist"):
+        await _call("switch_to_default_content", _READ_APP, session, "t")
 
 
 @pytest.mark.asyncio
 async def test_default_content_allowed_when_top_still_trusted():
-    server = _server(_READ_APP)
-    session = _session()  # default: top is app.example.com (trusted)
-    with patch.object(server._store, "route", return_value=session), \
-         patch.object(server, "_refresher", RuntimeConfigurationRefresher.static(_READ_APP)):
-        result = await server.switch_to_default_content("t")
+    session = GateRunningSession()
+    result = await _call("switch_to_default_content", _READ_APP, session, "t")
     assert result["top_url"] == TOP

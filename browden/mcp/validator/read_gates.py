@@ -153,3 +153,28 @@ def validate_and_ensure_same_origin(
         raise ValidationError(
             f"cross-origin frame refused (same-origin only): frame host {frame_host!r} "
             f"!= page host {top_host!r}")
+
+
+@dataclass(frozen=True)
+class FrameGate:
+    """The frame gates for one ``switch_to_frame`` / ascent request, bound to one rule set.
+
+    Built once per request from a single read of the access rules, and run by the
+    session *inside the one driver-lock hold that moves the focus* — so the
+    document descended from, the frame's declared target and the document landed
+    on are all judged in the hold that switches, by the same rules. All three raise
+    :class:`ValidationError` to refuse. See docs/design/gate-atomicity.md.
+    """
+    check_page: Callable[[str], None]          # (url): the focused document, before descending
+    check_src: Callable[[str], None]           # (src): the iframe's declared target, before switching
+    check_landed: Callable[[str, str], None]   # (top_url, frame_url): read-allowed + same-origin
+
+
+def frame_gate(access_rules: BrowdenAccessRuleSet) -> FrameGate:
+    """The frame gates, bound to ``access_rules``."""
+    read = read_gate(access_rules)
+    return FrameGate(
+        check_page=read.check_page,
+        check_src=lambda src: validate_url(src, access_rules.read_policy),
+        check_landed=lambda top_url, frame_url: validate_and_ensure_same_origin(
+            top_url, frame_url, access_rules.read_policy))
