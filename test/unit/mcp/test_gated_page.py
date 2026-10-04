@@ -67,6 +67,9 @@ class PageBackend:
     def select_tab(self, handle):
         self._log("select_tab")
 
+    def in_frame(self):
+        return False  # no frame model: always at the top document
+
     def document_url(self):
         self._log("document_url")
         url = self.url

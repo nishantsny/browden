@@ -10,10 +10,12 @@ from pathlib import Path
 from ...common.logger import logger
 from ...common.tab import TabInfo
 from ...dependencies.selenium import (
+    By,
     ChromeOptions,
     InvalidElementStateException,
     JavascriptException,
     Keys,
+    NoSuchElementException,
     NoSuchWindowException,
     StaleElementReferenceException,
     WebDriverWait,
@@ -39,20 +41,23 @@ from ..utils.network_utils import get_free_port
 # or a blank frame another origin wrote), the frame keeps its own ``about:`` URL,
 # which the gates refuse. A top-level ``about:blank`` tab has no parent and is
 # reported as itself.
-_EFFECTIVE_DOCUMENT_URL_JS = """
-const inherited = (u) => /^about:(blank|srcdoc)([?#]|$)/.test(u);
-let w = window;
-let url = document.URL;
-while (inherited(url) && w !== w.parent) {
-  try {
-    w = w.parent;
-    url = w.document.URL;
-  } catch (e) {
-    return document.URL;
+_EFFECTIVE_URL_FN = """
+function effectiveUrl() {
+  const inherited = (u) => /^about:(blank|srcdoc)([?#]|$)/.test(u);
+  let w = window;
+  let url = document.URL;
+  while (inherited(url) && w !== w.parent) {
+    try {
+      w = w.parent;
+      url = w.document.URL;
+    } catch (e) {
+      return document.URL;
+    }
   }
+  return url;
 }
-return url;
 """
+_EFFECTIVE_DOCUMENT_URL_JS = _EFFECTIVE_URL_FN + "return effectiveUrl();"
 
 # W3C `key` value -> the Selenium `Keys` constant that dispatches it. Covers
 # exactly the control keys the press-key gate authorizes (validator.ACTIVATION_KEYS);
@@ -559,13 +564,16 @@ class SeleniumChromeBackend(WebNavigatorBackend):
         return self._tabinfo(drv, selected=True)
 
     # One script, so the URL and the content are of the same instant: page JS
-    # can't navigate in between.
-    _PAGE_SNAPSHOT_JS = "return [document.URL, document.documentElement.outerHTML];"
+    # can't navigate in between. The URL is the *effective* one, as document_url
+    # reports it: a frame the page wrote (about:srcdoc, a scripted about:blank) is
+    # judged by the page that wrote it, never by a bare about: URL the read policy
+    # would wave through.
+    _PAGE_SNAPSHOT_JS = _EFFECTIVE_URL_FN + "return [effectiveUrl(), document.documentElement.outerHTML];"
     # Capped at two matches: a write needs exactly one, and two shows it isn't.
-    _TARGET_SNAPSHOT_JS = """
+    _TARGET_SNAPSHOT_JS = _EFFECTIVE_URL_FN + """
         const els = document.querySelectorAll(arguments[0]);
         const first = els.length ? els[0] : null;
-        return [document.URL, document.documentElement.outerHTML, els.length,
+        return [effectiveUrl(), document.documentElement.outerHTML, els.length,
                 first && first.tagName.toLowerCase(), first];
     """
 
@@ -577,8 +585,14 @@ class SeleniumChromeBackend(WebNavigatorBackend):
             url, html = drv.execute_script(self._PAGE_SNAPSHOT_JS)
         except NoSuchWindowException:
             raise TabNotFoundError("there is no active tab") from None
-        except Exception:
-            # Script can't run here (a chrome:// page); see document_url.
+        except Exception as e:
+            # Script can't run here (a chrome:// page); see document_url. Inside a
+            # frame there is no fallback: current_url is the TOP page's, so it
+            # would gate one document and hand back another.
+            if self.in_frame():
+                raise FrameFocusError(
+                    "can't read the focused frame's URL, so it can't be gated — "
+                    "switch_to_default_content, then switch_to_frame again") from e
             return PageSnapshot(url=self.current_url(), html=drv.page_source)
         return PageSnapshot(url=url, html=html)
 

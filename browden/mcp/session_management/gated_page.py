@@ -17,13 +17,18 @@ What each method gates (docs/design/gate-atomicity.md):
 * **Screenshots** gate the URL before the capture and again after it.
 * **Writes** gate the URL, then judge the element on a snapshot taken in one
   script with the live match and its URL, and act on that same element.
+* **Frame moves** gate the document descended from, the iframe's declared
+  ``src`` and the document landed on, in the hold that moves the focus; a
+  refused or failed move never leaves the focus inside an unadmitted frame. Any
+  move drops the tab's cached snapshots (a ``srcdoc`` frame is judged by its
+  parent's URL, so the cache's URL key alone can't tell them apart).
 """
 from ...common.logger import logger
 from ...dom import query, serialize
-from ...web_navigator.interface import InvalidSelectorError
+from ...web_navigator.interface import FrameFocusError, InvalidSelectorError, TabNotFoundError
 from ...web_navigator.soup_cache import SoupCache
 from ..validator.errors import ValidationError
-from ..validator.read_gates import ReadGate
+from ..validator.read_gates import FrameGate, ReadGate
 from ..validator.write_gates import UploadFileGate, WriteGate
 
 
@@ -102,10 +107,21 @@ class GatedPage:
         if entry is not None and not self._cache.is_stale(entry):
             return entry.soup, False
         if entry is not None:
+            was_in_frame = self._backend.in_frame()
             try:
                 self._reload(gate)
             except _Bounced as b:
                 raise ValidationError(f"URL not on the read allowlist: {b.envelope['url']}") from None
+            if was_in_frame:
+                # The reload returned the tab to its top document. Refuse rather
+                # than hand back the top page's elements as if they were the
+                # frame's — before fetching it, and with the stale entry gone so
+                # the next read fetches the top fresh instead of reloading again.
+                self._cache.invalidate(self._handle)
+                raise FrameFocusError(
+                    "the tab's cached snapshot expired and the page was reloaded, which "
+                    "returned it to its top document — switch_to_frame again to read "
+                    "inside the frame")
         return self._fetch(gate), entry is not None
 
     def screenshot(self, gate: ReadGate) -> bytes:
@@ -200,3 +216,64 @@ class GatedPage:
     def press_key(self, css_selector: str, key: str, gate: WriteGate) -> dict:
         return self._write(css_selector, gate, lambda ref: self._backend.press_key_target(ref, key),
                            f"press_key: sent {key!r} to {css_selector!r} on tab {self._id}")
+
+    # -- frame focus ------------------------------------------------------------
+
+    def _moved(self, result: dict) -> dict:
+        self._cache.invalidate(self._handle)
+        result["id"] = self._id
+        return result
+
+    def enter_frame(self, css_selector: str, gate: FrameGate) -> dict:
+        """Switch into the iframe at ``css_selector``, gated, or not at all.
+
+        The focused document must pass ``gate.check_page``; the backend then
+        checks the iframe's declared src (``gate.check_src``) before switching and
+        the landed document (``gate.check_landed``: read-allowed + same-origin)
+        after, restoring the previous focus on any failure.
+        """
+        try:
+            gate.check_page(self._backend.document_url())
+            result = self._backend.enter_frame(css_selector, gate.check_src, gate.check_landed)
+        except TabNotFoundError:
+            raise  # the tab is gone: the session renders the tab-gone envelope
+        except BaseException:
+            self._cache.invalidate(self._handle)  # focus may have moved (e.g. a replay reset)
+            raise
+        logger.info(f"enter_frame: {css_selector!r} on tab {self._id}")
+        return self._moved(result)
+
+    def switch_to_parent_frame(self, gate: FrameGate) -> dict:
+        """Move up one frame level and re-gate the landing; on refusal, retreat to the top.
+
+        An ancestor may have been navigated elsewhere while focus was deeper.
+        """
+        try:
+            result = self._backend.switch_to_parent_frame()
+            gate.check_landed(result["top_url"], result["frame_url"])
+        except TabNotFoundError:
+            raise  # the tab is gone: the session renders the tab-gone envelope
+        except BaseException:
+            self._backend.retreat_to_top()
+            self._cache.invalidate(self._handle)
+            raise
+        logger.info(f"switch_to_parent_frame on tab {self._id}")
+        return self._moved(result)
+
+    def switch_to_default_content(self, gate: FrameGate) -> dict:
+        """Return to the top document and re-gate it.
+
+        The top page may have moved since focus descended. On refusal the tab is
+        already at its top (there is nowhere safer to retreat to); the read tools
+        refuse that page too.
+        """
+        try:
+            result = self._backend.switch_to_default_content()
+            gate.check_landed(result["top_url"], result["frame_url"])
+        except TabNotFoundError:
+            raise  # the tab is gone: the session renders the tab-gone envelope
+        except BaseException:
+            self._cache.invalidate(self._handle)
+            raise
+        logger.info(f"switch_to_default_content on tab {self._id}")
+        return self._moved(result)
