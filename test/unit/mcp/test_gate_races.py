@@ -11,9 +11,13 @@ each one through every race that applies to its kind:
   allowed URL the server redirects off-list (``BOUNCE`` → ``SECRET``).
 * **LANDING** — the tool's own navigation/reload is redirected off-list and
   paused there while a ``list_tabs`` is queued behind it.
+* **FRAME** — the tool moves a tab's frame focus into a document it must refuse
+  (a cross-origin frame, or an ancestor that moved cross-origin) and is paused
+  *mid-move* — switched, not yet checked — while a read is queued behind it.
 
 After every race the same invariant must hold: no off-list content left the
-browser, and no action landed on a page without a write rule. Adding a tool to
+browser, no action landed on a page without a write rule, and no content was
+read from — and no focus left resting in — a frame that wasn't admitted. Adding a tool to
 ``TOOLS`` is all it takes to put it under every race of its kind.
 
 Built on ``atomicity_harness``: a real ``BrowserSessionManager`` (real FIFO
@@ -36,6 +40,8 @@ SHOP = "https://shop.example/item"        # readable, and every write action is 
 OTHER = "https://other.example/item"      # readable, but no write rule at all
 BOUNCE = "https://shop.example/go"        # readable — but the server 302s it to SECRET
 SECRET = "https://secret.example/inbox"   # not readable
+WIDGET = "https://shop.example/widget"    # a same-origin frame on SHOP: admitted
+FOREIGN = "https://other.example/widget"  # readable, but cross-origin to SHOP: refused as a frame
 
 
 def _page(text, button, field_label):
@@ -58,7 +64,13 @@ PAGES = {
     SHOP: _page("shop", "Add to cart", "Grocery tip"),
     OTHER: _page("other", "Add to cart", "Grocery tip"),
     SECRET: _page("SECRET MAIL", "Delete account", "New password"),
+    WIDGET: _page("widget", "Add to cart", "Grocery tip"),
+    FOREIGN: _page("FOREIGN FRAME", "Add to cart", "Grocery tip"),
 }
+
+# SHOP's iframes. FOREIGN is readable on its own, so only the same-origin check
+# refuses it as a frame — the check a split, check-outside-the-hold move skips.
+FRAMES = {SHOP: {"#child": WIDGET, "#foreign": FOREIGN}}
 
 _RULES = BrowdenRuntimeConfiguration({
     "read": {"tranco": {"enabled": False},
@@ -70,7 +82,7 @@ _RULES = BrowdenRuntimeConfiguration({
     "allowed_upload_locations": [_UPLOAD_DIR.name],
 })
 
-READ, WRITE, LANDING = "read", "write", "landing"
+READ, WRITE, LANDING, FRAME = "read", "write", "landing", "frame"
 
 
 @dataclass(frozen=True)
@@ -79,6 +91,7 @@ class Tool:
     call: Callable                      # server -> awaitable
     park_points: tuple[str, ...]        # backend calls the tool makes, to pause it at
     redirects: dict = field(default_factory=dict)  # extra redirects the tool's scenario needs
+    setup: Callable | None = None       # backend -> None: the tab's state before the call
 
 
 # THE classification. A new tool that reads page content, writes, navigates or
@@ -105,11 +118,21 @@ TOOLS = {
     "navigate": Tool(LANDING, lambda s: s.navigate(BOUNCE, id=TAB), ("navigate",)),
     "force_reload_tab": Tool(LANDING, lambda s: s.force_reload_tab(id=TAB), ("reload",),
                              redirects={SHOP: SECRET}),
+    # FRAME: each call is one the gate must refuse, raced mid-move.
+    "switch_to_frame": Tool(FRAME, lambda s: s.switch_to_frame("#foreign", id=TAB),
+                            ("document_url", "enter_frame")),
+    # Two levels deep, where the middle frame has since been navigated
+    # cross-origin by the page (the backend can't model page JS, so it's set up).
+    "switch_to_parent_frame": Tool(FRAME, lambda s: s.switch_to_parent_frame(id=TAB),
+                                   ("switch_to_parent_frame",),
+                                   setup=lambda b: b.path.extend(
+                                       [("#mid", FOREIGN), ("#child", WIDGET)])),
 }
 
 
 def _backend(url=SHOP, redirects=None):
-    return OnePageBackend(url, dict(PAGES), redirects={BOUNCE: SECRET, **(redirects or {})})
+    return OnePageBackend(url, dict(PAGES), redirects={BOUNCE: SECRET, **(redirects or {})},
+                          frames=FRAMES)
 
 
 def _assert_nothing_escaped(backend):
@@ -118,6 +141,10 @@ def _assert_nothing_escaped(backend):
     assert leaked == [], f"off-list content left the browser: {leaked}"
     misplaced = [a for a in backend.actions if a[0] != SHOP]
     assert misplaced == [], f"a write landed on a page with no write rule: {misplaced}"
+    foreign = [r for r in backend.reads if r[0] == FOREIGN]
+    assert foreign == [], f"content was read from a frame that wasn't admitted: {foreign}"
+    resting = [f for f in backend.path if f[1] == FOREIGN]
+    assert resting == [], f"focus was left inside a frame that wasn't admitted: {backend.path}"
 
 
 @pytest.fixture
@@ -227,4 +254,50 @@ async def test_an_off_list_landing_is_bounced_before_any_other_request_runs(serv
     assert SECRET not in [t.get("url") for t in tabs]
     assert backend.closed == [], "list_tabs saw the tab off-list and closed it"
     assert backend.url == "about:blank"
+    _assert_nothing_escaped(backend)
+
+
+# -- frames: controls, then a read raced against a refused move ----------------
+
+async def test_control_a_same_origin_frame_is_entered_and_read(server):
+    backend = _backend(SHOP)
+    with _serving(server, backend):
+        await server.switch_to_frame("#child", id=TAB)
+        await server.query_selector("#x", id=TAB)
+    assert backend.path == [("#child", WIDGET)]
+    assert backend.reads == [(WIDGET, "html")]
+
+
+@pytest.mark.parametrize("name", _of(FRAME))
+async def test_control_a_refused_frame_move_leaves_no_focus_inside(server, name):
+    backend = _backend(SHOP)
+    if TOOLS[name].setup:
+        TOOLS[name].setup(backend)
+    with _serving(server, backend), pytest.raises(ValidationError, match="cross-origin"):
+        await TOOLS[name].call(server)
+    _assert_nothing_escaped(backend)
+
+
+_FRAME_RACES = [(name, park) for name in _of(FRAME) for park in TOOLS[name].park_points]
+
+
+@pytest.mark.parametrize("name,park", _FRAME_RACES)
+async def test_no_read_sees_the_focus_inside_a_frame_mid_refusal(server, name, park):
+    # The move is paused at ``park`` — for the switch itself, AFTER switching into
+    # the frame and BEFORE it is checked. A read on the same tab queues behind it.
+    # The check and the rollback must finish in that same hold, so the read can
+    # only ever see an admitted document. A move split across holds (check here,
+    # switch there, back out later) lets the queued read in between them.
+    backend = _backend(SHOP)
+    if TOOLS[name].setup:
+        TOOLS[name].setup(backend)
+    with _serving(server, backend) as session:
+        backend.park_next(park)
+        task = asyncio.create_task(TOOLS[name].call(server))
+        assert await asyncio.to_thread(backend.parked.wait, 5), f"{name} never called {park}"
+        read = asyncio.create_task(server.query_selector("#x", id=TAB))
+        await until_queued(session)
+        backend.resume.set()
+        moved, _ = await asyncio.gather(task, read, return_exceptions=True)
+    assert isinstance(moved, ValidationError), moved  # the move itself is refused
     _assert_nothing_escaped(backend)

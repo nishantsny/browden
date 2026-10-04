@@ -226,12 +226,6 @@ is built from a single snapshot.
 - **The action's effect.** A click that navigates, or that runs JS, can do
   anything the page does once clicked. For anchors, gate 2b bounds where an
   `href` can navigate, but the gates judge the control, not its consequences.
-- **Frame moves aren't in the race table.** `TOOLS` races reads, writes and
-  landings against the invariant "no off-list content left the browser, no write
-  on a page without a write rule". A frame move does neither, so it needs its own
-  race kind (invariant: the focus never rests in an unadmitted frame) and frame
-  support in `atomicity_harness`. Until then frame moves are one-hold by
-  construction (a single `_with_tab` call), pinned by unit tests, not by races.
 - **A frame the page itself navigates.** Like the top page's own JS above, a
   frame's scripts can move it after it was admitted. Every later read and write
   gates the frame's live `document.URL`, so its content is still judged — but
@@ -255,12 +249,15 @@ is built from a single snapshot.
 4. Writes judge a fresh snapshot of the live page, never the soup cache, and act
    on the element that snapshot returned.
 5. Classify the tool in `TOOLS` in `test/unit/mcp/test_gate_races.py` (as
-   `READ`, `WRITE` or `LANDING`, with the backend calls it makes as its
+   `READ`, `WRITE`, `LANDING` or `FRAME`, with the backend calls it makes as its
    `park_points`). That one entry runs it through every race of its kind: paused
    at each of those calls while a `navigate` to a readable-but-unwritable page,
-   and to an allowed URL that redirects off-list, queues behind it. The
-   invariant checked after every race is the same: no off-list content left the
-   browser, and no write landed on a page without a write rule.
+   and to an allowed URL that redirects off-list, queues behind it — or, for a
+   `FRAME` move the gate must refuse, paused mid-move (switched, not yet
+   checked) while a read queues behind it. The invariant checked after every
+   race is the same: no off-list content left the browser, no write landed on a
+   page without a write rule, and nothing was read from — or left focused in —
+   a frame that wasn't admitted.
 6. A tool that moves frame focus takes a `FrameGate` and runs it in the hold
    that moves; a refused or failed move leaves the focus where it was (entry) or
    at the top (ascent), never in an unadmitted frame — and drops the tab's

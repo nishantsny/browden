@@ -27,15 +27,22 @@ class OnePageBackend:
 
     ``redirects`` maps a URL to where loading it actually lands — on
     ``navigate`` and on ``reload`` alike, the way a server-side 302 does.
-    ``reads`` records ``(url, what)`` for every time page content left the
-    browser (a page or write-target snapshot, a screenshot); ``actions`` records every write as
-    ``(url it landed on, action, selector)``.
+    ``frames`` maps a document's URL to its iframes, ``{selector: frame URL}``;
+    ``path`` is the tab's frame focus, ``[(selector, frame URL), ...]``
+    outermost first (empty = the top document), reset by a navigate or reload.
+    ``reads`` records ``(document url, what)`` for every time page content left
+    the browser (a page or write-target snapshot, a screenshot) — the *focused*
+    document's URL, so a read inside a frame is recorded against the frame;
+    ``actions`` records every write as ``(url it landed on, action, selector)``.
     """
 
-    def __init__(self, url: str, pages: dict, redirects: dict | None = None):
+    def __init__(self, url: str, pages: dict, redirects: dict | None = None,
+                 frames: dict | None = None):
         self.url = url
         self.pages = pages
         self.redirects = redirects or {}
+        self.frames = frames or {}
+        self.path: list[tuple[str, str]] = []
         self.reads: list[tuple[str, str]] = []
         self.actions: list[tuple[str, str, str]] = []
         self.closed: list[str] = []
@@ -66,11 +73,15 @@ class OnePageBackend:
     def select_tab(self, handle):
         assert handle == "h1"
 
+    def _doc(self):
+        """The focused document's URL: the innermost frame's, else the top page's."""
+        return self.path[-1][1] if self.path else self.url
+
     def in_frame(self):
-        return False  # no frame model: always at the top document
+        return bool(self.path)
 
     def document_url(self):
-        url = self.url
+        url = self._doc()
         self._maybe_park("document_url")
         return url
 
@@ -90,37 +101,73 @@ class OnePageBackend:
         self.closed.append(handle)
 
     def page_snapshot(self):
-        self.reads.append((self.url, "html"))
-        snap = PageSnapshot(url=self.url, html=self.pages.get(self.url, "<html></html>"))
+        doc = self._doc()
+        self.reads.append((doc, "html"))
+        snap = PageSnapshot(url=doc, html=self.pages.get(doc, "<html></html>"))
         self._maybe_park("page_snapshot")
         return snap
 
     def target_snapshot(self, css_selector):
         # The live match is the parse's, which is all these pages need; the ref
-        # names the page it was taken on.
-        self.reads.append((self.url, "target"))
-        html = self.pages.get(self.url, "<html></html>")
+        # names the document it was taken on.
+        doc = self._doc()
+        self.reads.append((doc, "target"))
+        html = self.pages.get(doc, "<html></html>")
         page, _, _, total, _ = query.css_all(SoupCache.parse(html), css_selector, 2, 0)
-        snap = TargetSnapshot(url=self.url, html=html, count=total,
+        snap = TargetSnapshot(url=doc, html=html, count=total,
                               tag=page[0].name if page else None,
-                              ref=(self.url, css_selector) if page else None)
+                              ref=(doc, css_selector) if page else None)
         self._maybe_park("target_snapshot")
         return snap
 
     def screenshot(self):
-        self.reads.append((self.url, "screenshot"))
+        doc = self._doc()
+        self.reads.append((doc, "screenshot"))
         self._maybe_park("screenshot")
-        return b"\x89PNG " + self.url.encode()
+        return b"\x89PNG " + doc.encode()
 
     def navigate(self, url):
+        self.path = []  # a new top document: frame focus is gone
         self.url = self.redirects.get(url, url)
         self._maybe_park("navigate")
         return self._tab()
 
     def reload(self):
+        self.path = []
         self.url = self.redirects.get(self.url, self.url)
         self._maybe_park("reload")
         return self._tab()
+
+    # -- frames: the real backend's contract (check, switch, check, or roll back) --
+
+    def enter_frame(self, css_selector, check_src, check_landed):
+        frame_url = self.frames.get(self._doc(), {}).get(css_selector)
+        if frame_url is None:
+            raise ValueError(f"no iframe matches {css_selector!r}")
+        check_src(frame_url)
+        top = self.url
+        self.path.append((css_selector, frame_url))  # switched in — not yet admitted
+        try:
+            self._maybe_park("enter_frame")          # a slow switch, mid-move
+            check_landed(top, frame_url)
+        except BaseException:
+            self.path.pop()                          # roll back, as the real one does
+            raise
+        return {"frame_url": frame_url, "top_url": top}
+
+    def switch_to_parent_frame(self):
+        if self.path:
+            self.path.pop()
+        self._maybe_park("switch_to_parent_frame")  # moved up — not yet re-checked
+        return {"frame_url": self._doc(), "top_url": self.url}
+
+    def switch_to_default_content(self):
+        self.path = []
+        self._maybe_park("switch_to_default_content")
+        return {"frame_url": self.url, "top_url": self.url}
+
+    def retreat_to_top(self):
+        self.path = []
 
     def _act(self, action, ref):
         # Recorded on the page the tab is on when the action lands, which a ref
