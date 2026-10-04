@@ -26,6 +26,10 @@ dev = ["pytest>=8", "pytest-asyncio>=0.23", "ruff>=0.8", "psutil>=5.9"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
+# Keep a test's tmp_path only if it failed. Each e2e test's tmp_path holds a
+# whole Chrome profile (~60-115 MB), so pytest's default — keep every run's,
+# last three runs — leaves ~1.5-2 GB per full e2e run on disk.
+tmp_path_retention_policy = "failed"
 
 # Ruff's default rule set (pyflakes + a pycodestyle core) — deliberately
 # minimal: it catches real defects (unused/undefined names, syntax-level

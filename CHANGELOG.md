@@ -59,6 +59,11 @@ All notable changes to browden are documented here. The format follows
   from a snapshot of the page it left.
 
 ### Changed
+- **Local test runs keep temp dirs only for failed tests (maintainers).**
+  `tmp_path_retention_policy = "failed"` in `pyproject.toml`. Each e2e test's
+  `tmp_path` holds a whole Chrome profile, and pytest's default kept every
+  test's for the last three runs: about 1.5-2 GB per full e2e run left in
+  `/tmp`. A failing test's dir is still kept for debugging.
 - **No test stubs a private method (tests).** 19 stubs in 13 tests replaced a
   private helper: the backend's `_launch_chrome`, `_wait_for_devtools`,
   `_free_port`, `_chrome_args`, `_clear_stale_singletons`, `_terminate` and
