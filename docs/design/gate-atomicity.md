@@ -148,7 +148,7 @@ ascent  session.switch_to_parent_frame / switch_to_default_content(id=, gate=Fra
   that can't be closed (the last one) is still never listed.
 - **A frame move is gated like a read (#118).** `FrameGate` (`read_gates.py`,
   built by `frame_gate`) judges the document descended from, the iframe's
-  declared `src` and the document landed on (read-allowed and same-origin with
+  declared `src` and the document landed on (read-allowed and same exact origin as
   the top page), all in the hold that moves the focus. The backend records a
   frame only once it is admitted and restores the previous focus on any failure,
   so the driver never rests inside a frame that wasn't. Once focus is inside a
@@ -226,10 +226,14 @@ is built from a single snapshot.
 - **The action's effect.** A click that navigates, or that runs JS, can do
   anything the page does once clicked. For anchors, gate 2b bounds where an
   `href` can navigate, but the gates judge the control, not its consequences.
-- **A frame the page itself navigates.** Like the top page's own JS above, a
-  frame's scripts can move it after it was admitted. Every later read and write
-  gates the frame's live `document.URL`, so its content is still judged — but
-  the same-origin check runs only on entry and ascent.
+- **A frame the page itself navigates, within one hold.** Every operation
+  re-enters a tab's frames through the replay, which re-checks them: the top
+  page must be the one the frames were entered from, and each frame must still
+  hold a document of the origin admitted on entry, or the frame is lost. So
+  same-origin holds at the start of every operation, not only on entry and
+  ascent. Like the top page's own JS above, a frame's scripts can still move it
+  *during* a hold, after the replay; the read or write then gates the frame's
+  live URL, so its content is still judged by the read and write rules.
 - **A reload during the hold** takes effect on the next request. The request in
   flight finishes under the rules it was judged by, which is the refresher's
   stated contract.

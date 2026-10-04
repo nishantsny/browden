@@ -115,7 +115,13 @@ All notable changes to browden are documented here. The format follows
   read, the frame has been removed from the page, or a stale-snapshot reload
   returned the tab to its top document, the call is refused with a
   `FrameFocusError` (once; the tab is then at its top document) and the agent
-  re-enters the frame.
+  re-enters the frame. Same-origin is the exact origin (scheme, host and port), and it holds on
+  every call, not only on entry: each call re-enters the frame only while the
+  top page is unchanged and the frame still holds a document of its admitted
+  origin, otherwise the frame is lost. A `screenshot` inside a frame also gates
+  the top page's URL, since the capture shows the whole viewport. Writes inside
+  a frame are allowed, each judged by the frame's own URL under its own rules
+  (a `srcdoc` frame has its parent page's URL, so the parent's rules apply).
   Every frame tool judges against the tab's own profile's rules. A frame the
   page wrote itself (`srcdoc`, or an `about:blank` frame filled in by script)
   has no URL of its own and is judged by the URL of the same-origin page that
