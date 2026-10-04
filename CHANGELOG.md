@@ -37,7 +37,8 @@ All notable changes to browden are documented here. The format follows
   hidden target through applies *only* to the control — the label itself is still
   held to full visibility, so nothing invisible to a human is clickable, and
   decoy/`disabled`/`type=hidden` targets are refused either way. `press-key` is
-  unchanged (#146).
+  unchanged. Worked sample:
+  [`configs/samples/allow_label_activation.yaml`](./configs/samples/allow_label_activation.yaml) (#146).
 
 ### Security
 - **A reload redirected off-list no longer fetches the page it landed on.**
