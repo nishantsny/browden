@@ -13,6 +13,7 @@ from dataclasses import dataclass
 from urllib.parse import urlparse, urlunparse
 
 from ...common.logger import logger
+from ...common.origin import same_origin
 from .allowlist import HostRuleMatcher, ReadPolicy
 from .access_rule_set import BrowdenAccessRuleSet
 from .errors import ValidationError
@@ -123,3 +124,59 @@ def read_gate(access_rules: BrowdenAccessRuleSet) -> ReadGate:
         if not ensure_url_allowed(access_rules, url):
             raise ValidationError(f"URL not on the read allowlist: {url}")
     return ReadGate(check_page=check_page)
+
+
+def validate_and_ensure_same_origin(
+    top_url: str, frame_url: str, gate: "HostRuleMatcher | ReadPolicy",
+) -> None:
+    """Gate a frame focus has landed on: read-allowed AND same-origin. Raises on refusal.
+
+    Called after a switch into a frame (and on every ascent), with the landed
+    document's effective URL and the tab's top-level URL. Both conditions hold:
+
+    1. ``frame_url`` must be admitted by the read policy (``validate_url``) — a frame
+       is a distinct document and must itself be readable to be inspected.
+    2. ``frame_url`` must have the top page's exact **origin** (scheme, host, port —
+       :func:`~browden.common.origin.same_origin`): the browser's own boundary, so
+       ``http://shop.example`` inside ``https://www.shop.example`` is refused.
+
+    Same-origin is a deliberate scope limit, not a crutch for the write gates:
+    reads and writes inside a frame are judged by the frame's own URL, each under
+    its own gate (the read allowlist, the action's host and element rules). A
+    frame the page wrote (``srcdoc``) has its parent's URL, so the parent's rules
+    apply to it. Admitting cross-origin frames is left for later.
+
+    On a raise the caller restores the previous focus (entry) or retreats to the
+    top document (ascent); nothing is read or done inside a refused frame.
+    ``top_url`` is trusted here: the caller has already gated it.
+    """
+    validate_url(frame_url, gate)  # the landed document must itself be read-allowed
+    if not same_origin(top_url, frame_url):
+        raise ValidationError(
+            f"cross-origin frame refused (same-origin only): {frame_url!r} is not "
+            f"the same origin as the page {top_url!r}")
+
+
+@dataclass(frozen=True)
+class FrameGate:
+    """The frame gates for one ``switch_to_frame`` / ascent request, bound to one rule set.
+
+    Built once per request from a single read of the access rules, and run by the
+    session *inside the one driver-lock hold that moves the focus* — so the
+    document descended from, the frame's declared target and the document landed
+    on are all judged in the hold that switches, by the same rules. All three raise
+    :class:`ValidationError` to refuse. See docs/design/gate-atomicity.md.
+    """
+    check_page: Callable[[str], None]          # (url): the focused document, before descending
+    check_src: Callable[[str], None]           # (src): the iframe's declared target, before switching
+    check_landed: Callable[[str, str], None]   # (top_url, frame_url): read-allowed + same-origin
+
+
+def frame_gate(access_rules: BrowdenAccessRuleSet) -> FrameGate:
+    """The frame gates, bound to ``access_rules``."""
+    read = read_gate(access_rules)
+    return FrameGate(
+        check_page=read.check_page,
+        check_src=lambda src: validate_url(src, access_rules.read_policy),
+        check_landed=lambda top_url, frame_url: validate_and_ensure_same_origin(
+            top_url, frame_url, access_rules.read_policy))

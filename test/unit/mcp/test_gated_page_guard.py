@@ -22,15 +22,21 @@ EXEMPT = {ROOT / "web_navigator" / "interface.py", GATED_PAGE}
 EXEMPT_DIRS = {ROOT / "web_navigator" / "selenium_chrome"}
 
 LIFECYCLE = {"get_profile_dir", "is_running", "shutdown", "list_tabs", "list_handles",
-             "new_blank_tab", "close_tab", "select_tab"}
+             "new_blank_tab", "close_tab", "select_tab",
+             "in_frame"}  # a bookkeeping lookup: never touches the driver
+# Frame moves are content: they decide which document every later read sees.
 CONTENT = {"page_snapshot", "target_snapshot", "document_url", "current_url", "screenshot",
            "navigate", "reload", "click_target", "insert_text_target", "press_key_target",
-           "upload_file_target"}
+           "upload_file_target",
+           "enter_frame", "switch_to_parent_frame", "switch_to_default_content",
+           "retreat_to_top"}
 # Content method names no other class in browden uses, so any call of them —
 # whatever the receiver is called — is a backend call. (``navigate``,
-# ``screenshot`` and ``reload`` are also session / GatedPage methods; they are
-# caught by their receiver instead.)
-BACKEND_ONLY_NAMES = CONTENT - {"navigate", "screenshot", "reload"}
+# ``screenshot``, ``reload`` and the three frame moves are also session /
+# GatedPage methods; they are caught by their receiver instead.)
+SHARED_NAMES = {"navigate", "screenshot", "reload",
+                "enter_frame", "switch_to_parent_frame", "switch_to_default_content"}
+BACKEND_ONLY_NAMES = CONTENT - SHARED_NAMES
 BACKEND_RECEIVERS = {"backend", "_backend"}
 
 

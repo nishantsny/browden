@@ -71,6 +71,13 @@ All notable changes to browden are documented here. The format follows
   in the path the agent passes nor a symlink planted inside one reaches outside it; the file must also exist, be a regular file, and be under a 25 MiB cap. A
   profile's locations are additive over the global ones, like every other rule. Worked
   sample: [`configs/samples/allow_receipt_upload.yaml`](./configs/samples/allow_receipt_upload.yaml) (#147).
+- **iframe inspection (#117).** New `switch_to_frame`, `switch_to_parent_frame`
+  and `switch_to_default_content` tools focus a tab on an `<iframe>`, so the
+  existing DOM-read tools (`query_selector`, `get_element_by_id`, `screenshot`,
+  …) can inspect its contents, which were previously invisible (the tools only
+  ever saw the top document). The frame focus is replayed across the
+  window-refocus that nearly every op performs, and reset on `navigate` /
+  reload (#118).
 
 ### Security
 - **A reload redirected off-list no longer fetches the page it landed on.**
@@ -89,6 +96,42 @@ All notable changes to browden are documented here. The format follows
   refused as stale). A screenshot re-checks the URL after the capture. The soup
   cache is keyed by URL, so a tab whose page navigated itself is never answered
   from a snapshot of the page it left.
+- **`switch_to_frame` is same-origin only and gates the frame as its own
+  document, in the one driver hold that switches.** The focused page must be
+  read-allowed, the iframe's declared `src` is checked *before* switching, and
+  the frame's actual `document.URL` must be read-allowed **and** same-origin
+  with the top page *after* switching. All of it runs in the same hold as the
+  switch, so nothing (a concurrent `navigate`, a config hot-reload) can land
+  between a check and the move. The frame is recorded only once admitted; on any
+  failure, including an error reading the landed URL, the focus is put back
+  where it was. Cross-origin frames stay refused in this release: reads and
+  writes inside a frame are judged by the frame's own URL, but allowing other
+  origins is left to a later change. `switch_to_parent_frame` /
+  `switch_to_default_content` **re-verify the landed document on every call**,
+  not just on entry: another process may have navigated an ancestor (or the top
+  page) to an untrusted URL while we were deeper in the tree. On refusal the
+  focus retreats to the top document and the call raises. Inside a frame the
+  gates never judge the top page in its place: if the frame's URL can't be
+  read, the frame has been removed from the page, or a stale-snapshot reload
+  returned the tab to its top document, the call is refused with a
+  `FrameFocusError` (once; the tab is then at its top document) and the agent
+  re-enters the frame. Same-origin is the exact origin (scheme, host and port), and it holds on
+  every call, not only on entry: each call re-enters the frame only while the
+  top page is unchanged and the frame still holds a document of its admitted
+  origin, otherwise the frame is lost. A `screenshot` inside a frame also gates
+  the top page's URL, since the capture shows the whole viewport. Writes inside
+  a frame are allowed, each judged by the frame's own URL under its own rules
+  (a `srcdoc` frame has its parent page's URL, so the parent's rules apply). Returning to the top page (`switch_to_default_content`, or an ascent that
+  reaches it) needs only the read check, so a tab at `about:blank` or an
+  override-allowed `file://` page can always be returned to, and
+  `force_reload_tab` recovers from a lost frame in one call. A worked sample,
+  [`configs/samples/allow_iframe_access.yaml`](./configs/samples/allow_iframe_access.yaml),
+  shows which frames a portal page can enter and where writes inside them apply.
+  Every frame tool judges against the tab's own profile's rules. A frame the
+  page wrote itself (`srcdoc`, or an `about:blank` frame filled in by script)
+  has no URL of its own and is judged by the URL of the same-origin page that
+  wrote it; one the browser keeps from reading that page (a sandboxed frame's
+  opaque origin) keeps its `about:` URL and is refused (#118).
 
 ### Changed
 - **Local test runs keep temp dirs only for failed tests (maintainers).**

@@ -86,6 +86,9 @@ class FakeBackend:
         self._check(handle)
         self.active = handle  # focus: subsequent focus-free ops act on this tab
 
+    def in_frame(self):
+        return False  # no frame model: always at the top document
+
     def document_url(self):
         self._check(self.active)
         return f"https://example.test/{self.active}"

@@ -101,6 +101,15 @@ nav     session.navigate(url, id=, gate=ReadGate)         one hold:
 
 reload  session.force_reload_tab(id=, gate=ReadGate)      one hold:
             gate.check_page(document_url) · reload · gate the landing → bounce · only then snapshot
+
+frame   session.enter_frame(sel, id=, gate=FrameGate)     one hold:
+            select_tab · gate.check_page(document_url)
+            resolve iframe · gate.check_src(src) · switch · landed = document.URL
+            gate.check_landed(top, landed) · only then record the frame
+            any failure from the switch on → restore the previous focus
+
+ascent  session.switch_to_parent_frame / switch_to_default_content(id=, gate=FrameGate)
+            select_tab · move · gate.check_landed(top, landed) → refused: retreat to the top
 ```
 
 - **`WriteGate`** (`validator/write_gates.py`) and **`ReadGate`**
@@ -137,6 +146,17 @@ reload  session.force_reload_tab(id=, gate=ReadGate)      one hold:
   listing, the read gate on each tab's URL and the close of any off-list tab
   are one hold, so no other request sees an off-list tab in between. A tab
   that can't be closed (the last one) is still never listed.
+- **A frame move is gated like a read (#118).** `FrameGate` (`read_gates.py`,
+  built by `frame_gate`) judges the document descended from, the iframe's
+  declared `src` and the document landed on (read-allowed and same exact origin as
+  the top page), all in the hold that moves the focus. The backend records a
+  frame only once it is admitted and restores the previous focus on any failure,
+  so the driver never rests inside a frame that wasn't. Once focus is inside a
+  frame, `document_url()` never falls back to the top page's URL: if the frame's
+  own can't be read it raises `FrameFocusError`, since gating the top page would
+  judge one document and read another. A stale-snapshot reload inside a frame,
+  and a frame removed from the page, refuse the next call the same way rather
+  than answering from the top page as if it were the frame.
 - **The bounce is part of the hold.** `GatedPage._bounce` navigates to
   `about:blank` and drops any snapshot the landing left in the soup cache
   before the hold ends, so no other request ever sees a tab resting off-list.
@@ -206,6 +226,14 @@ is built from a single snapshot.
 - **The action's effect.** A click that navigates, or that runs JS, can do
   anything the page does once clicked. For anchors, gate 2b bounds where an
   `href` can navigate, but the gates judge the control, not its consequences.
+- **A frame the page itself navigates, within one hold.** Every operation
+  re-enters a tab's frames through the replay, which re-checks them: the top
+  page must be the one the frames were entered from, and each frame must still
+  hold a document of the origin admitted on entry, or the frame is lost. So
+  same-origin holds at the start of every operation, not only on entry and
+  ascent. Like the top page's own JS above, a frame's scripts can still move it
+  *during* a hold, after the replay; the read or write then gates the frame's
+  live URL, so its content is still judged by the read and write rules.
 - **A reload during the hold** takes effect on the next request. The request in
   flight finishes under the rules it was judged by, which is the refresher's
   stated contract.
@@ -225,9 +253,16 @@ is built from a single snapshot.
 4. Writes judge a fresh snapshot of the live page, never the soup cache, and act
    on the element that snapshot returned.
 5. Classify the tool in `TOOLS` in `test/unit/mcp/test_gate_races.py` (as
-   `READ`, `WRITE` or `LANDING`, with the backend calls it makes as its
+   `READ`, `WRITE`, `LANDING` or `FRAME`, with the backend calls it makes as its
    `park_points`). That one entry runs it through every race of its kind: paused
    at each of those calls while a `navigate` to a readable-but-unwritable page,
-   and to an allowed URL that redirects off-list, queues behind it. The
-   invariant checked after every race is the same: no off-list content left the
-   browser, and no write landed on a page without a write rule.
+   and to an allowed URL that redirects off-list, queues behind it — or, for a
+   `FRAME` move the gate must refuse, paused mid-move (switched, not yet
+   checked) while a read queues behind it. The invariant checked after every
+   race is the same: no off-list content left the browser, no write landed on a
+   page without a write rule, and nothing was read from — or left focused in —
+   a frame that wasn't admitted.
+6. A tool that moves frame focus takes a `FrameGate` and runs it in the hold
+   that moves; a refused or failed move leaves the focus where it was (entry) or
+   at the top (ascent), never in an unadmitted frame — and drops the tab's
+   cached snapshot.

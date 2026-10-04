@@ -6,6 +6,7 @@ from browden.mcp.validator import (
     ReadPolicy,
     ValidationError,
     ensure_url_allowed,
+    validate_and_ensure_same_origin,
     validate_url,
 )
 
@@ -186,3 +187,55 @@ def test_wildcard_override_does_not_re_enable_non_https():
         validate_url("http://localhost:8000/x", rp)
     with pytest.raises(ValidationError, match="scheme not allowed"):
         validate_url("file:///home/me/notes.txt", rp)
+
+
+# -- validate_and_ensure_same_origin (v1 same-origin iframe gate) ------------------------
+
+def test_frame_entry_allows_same_origin_read_allowed():
+    rp = _read_policy({"*": [".*"]})
+    assert validate_and_ensure_same_origin("https://app.example.com/page",
+                                "https://app.example.com/api/widget", rp) is None
+
+
+@pytest.mark.parametrize("top,frame", [
+    ("https://example.com/p", "https://www.example.com/inner"),   # www. is another host
+    ("https://example.com/p", "http://example.com/inner"),        # another scheme
+    ("https://example.com/p", "https://example.com:8443/inner"),  # another port
+])
+def test_frame_entry_is_exact_origin(top, frame):
+    # Same-origin is the browser's boundary — scheme, host and port — not the read
+    # policy's host canonicalization (which drops a leading www.). example.com is
+    # named, so even its plain-http page is readable: only same-origin can refuse.
+    rp = _read_policy({"*": [".*"], "example.com": [".*"]})
+    with pytest.raises(ValidationError, match="cross-origin"):
+        validate_and_ensure_same_origin(top, frame, rp)
+
+
+def test_frame_entry_treats_an_explicit_default_port_as_the_same_origin():
+    rp = _read_policy({"*": [".*"]})
+    assert validate_and_ensure_same_origin("https://example.com/p",
+                                           "https://example.com:443/inner", rp) is None
+
+
+def test_frame_entry_refuses_cross_origin_even_when_read_allowed():
+    rp = _read_policy({"*": [".*"]})  # the whole (https) web is readable...
+    with pytest.raises(ValidationError, match="cross-origin"):
+        # ...but a different-host frame is still refused in v1.
+        validate_and_ensure_same_origin("https://app.example.com/p",
+                             "https://ads.other.com/frame", rp)
+
+
+def test_frame_entry_refuses_frame_document_not_read_allowed():
+    # Same host (same-origin) but the frame's path is off the read allowlist: the
+    # read gate fails before same-origin can admit it.
+    rp = _read_policy({"app.example.com": ["^/ok"]})
+    with pytest.raises(ValidationError, match="not on allowlist"):
+        validate_and_ensure_same_origin("https://app.example.com/ok",
+                             "https://app.example.com/blocked", rp)
+
+
+def test_frame_entry_refuses_non_https_frame_document():
+    rp = _read_policy({"*": [".*"]})
+    with pytest.raises(ValidationError, match="scheme not allowed"):
+        validate_and_ensure_same_origin("https://app.example.com/p",
+                             "http://app.example.com/inner", rp)

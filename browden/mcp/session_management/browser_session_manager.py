@@ -46,7 +46,7 @@ from ...common.logger import logger
 from ...dom import query, serialize
 from ..validator.runtime_configuration import DEFAULT_REAP_INTERVAL_SECONDS
 from ..validator.errors import SessionBusyError, ValidationError, tab_gone_envelope
-from ..validator.read_gates import ReadGate
+from ..validator.read_gates import FrameGate, ReadGate
 from ..validator.write_gates import UploadFileGate, WriteGate
 from ...web_navigator.interface import TabNotFoundError
 from ...web_navigator.tab_id import format_tab_id, split_tab_id
@@ -359,6 +359,27 @@ class BrowserSessionManager:
         """
         return await self._with_page(id, lambda page: page.press_key(css_selector, key, gate),
                                      invalidate=True)
+
+    # -- frame navigation ---------------------------------------------------
+    #
+    # Like a read or a write, a frame move is gated and performed in ONE
+    # driver-lock hold, through a ``GatedPage``: it judges where the tab is and
+    # where it lands, and moves — or rolls back. Nothing (a concurrent navigate,
+    # a config hot-reload) can come between the verdict and the move, and a
+    # refused or failed move never leaves the focus inside a frame that wasn't
+    # admitted. See docs/design/gate-atomicity.md.
+
+    async def enter_frame(self, css_selector: str, *, id: str, gate: FrameGate) -> dict:
+        """Switch ``id`` into the iframe at ``css_selector`` — gated, in one hold."""
+        return await self._with_page(id, lambda page: page.enter_frame(css_selector, gate))
+
+    async def switch_to_parent_frame(self, *, id: str, gate: FrameGate) -> dict:
+        """Move ``id`` up one frame level and re-gate the landing; refused → back to the top."""
+        return await self._with_page(id, lambda page: page.switch_to_parent_frame(gate))
+
+    async def switch_to_default_content(self, *, id: str, gate: FrameGate) -> dict:
+        """Return ``id`` to its top document and re-gate it."""
+        return await self._with_page(id, lambda page: page.switch_to_default_content(gate))
 
     # -- DOM-query tools ----------------------------------------------------
 

@@ -10,7 +10,9 @@ import pytest
 from browden.common.tab import TabInfo
 from browden.dom import query
 from browden.mcp.session_management.gated_page import GatedPage
+from browden.common.origin import same_origin
 from browden.mcp.validator import (
+    FrameGate,
     ReadGate,
     UploadFileGate,
     ValidationError,
@@ -18,7 +20,12 @@ from browden.mcp.validator import (
     upload_file_gate,
 )
 from browden.mcp.validator import BrowdenAccessRuleSet
-from browden.web_navigator.interface import InvalidSelectorError, PageSnapshot, TargetSnapshot
+from browden.web_navigator.interface import (
+    FrameFocusError,
+    InvalidSelectorError,
+    PageSnapshot,
+    TargetSnapshot,
+)
 from browden.web_navigator.soup_cache import TTL_SECONDS, SoupCache
 
 SHOP = "https://shop.example/item"
@@ -66,6 +73,9 @@ class PageBackend:
 
     def select_tab(self, handle):
         self._log("select_tab")
+
+    def in_frame(self):
+        return False  # no frame model: always at the top document
 
     def document_url(self):
         self._log("document_url")
@@ -368,3 +378,122 @@ def test_an_upload_whose_gate_never_admitted_a_file_is_refused(clock, tmp_path):
     with pytest.raises(ValidationError, match="no file was admitted"):
         _page(backend, cache).upload_file("#up", gate)
     assert backend.actions == []
+
+
+# -- inside a frame ----------------------------------------------------------------
+
+class FramedBackend(PageBackend):
+    """A tab focused inside a frame: ``url`` is the top page, ``frame`` the focused
+    document's (effective) URL and ``frame_html`` its content. ``lose()`` makes the
+    frame vanish the way the real backend reports it: the tab drops to its top and
+    the next ``document_url`` raises ``FrameFocusError`` once."""
+
+    def __init__(self, top=SHOP, frame=SHOP, frame_html=_html("FRAME")):
+        super().__init__(top)
+        self.frame, self.frame_html = frame, frame_html
+        self._in_frame, self._lost = True, False
+
+    def lose(self):
+        self._in_frame, self._lost = False, True
+
+    def in_frame(self):
+        return self._in_frame
+
+    def document_url(self):
+        self._log("document_url")
+        if self._lost:
+            self._lost = False
+            raise FrameFocusError("the frame is gone")
+        return self.frame if self._in_frame else self.url
+
+    def current_url(self):
+        self._log("current_url")
+        return self.url
+
+    def page_snapshot(self):
+        self._log("page_snapshot")
+        if self._in_frame:
+            return PageSnapshot(url=self.frame, html=self.frame_html)
+        return super().page_snapshot()
+
+    def switch_to_parent_frame(self):  # one level deep: up lands on the top page
+        self._log("switch_to_parent_frame")
+        self._in_frame = False
+        return {"frame_url": self.url, "top_url": self.url}
+
+    def switch_to_default_content(self):
+        self._log("switch_to_default_content")
+        self._in_frame, self._lost = False, False
+        return {"frame_url": self.url, "top_url": self.url}
+
+    def retreat_to_top(self):
+        self._in_frame = False
+
+
+def test_a_screenshot_inside_a_frame_gates_the_top_page_too():
+    # The capture is the whole viewport. An allowed frame on an off-list top page
+    # must not get the top page photographed.
+    backend = FramedBackend(top=SECRET, frame=SHOP)
+    with pytest.raises(ValidationError, match="read allowlist"):
+        _page(backend, SoupCache()).screenshot(READ)
+    assert "screenshot" not in [name for name, _ in backend.calls]
+
+
+def test_a_screenshot_inside_a_frame_on_an_allowed_page_is_taken():
+    backend = FramedBackend(top=SHOP, frame=OTHER)
+    assert _page(backend, SoupCache()).screenshot(READ).startswith(b"png:")
+
+
+def test_a_lost_srcdoc_frame_is_not_served_from_the_cache_as_the_top_page(clock):
+    # A srcdoc frame's URL is its parent's, so its snapshot is cached under the
+    # top page's URL. When the frame is lost, that entry must go: the read after
+    # the one-time error is the TOP page, and must return the top page's HTML.
+    backend, cache = FramedBackend(top=SHOP, frame=SHOP), SoupCache(clock=clock)
+    soup, _ = _page(backend, cache).soup(READ)
+    assert soup.find(id="x").text == "FRAME"
+
+    backend.lose()
+    with pytest.raises(FrameFocusError):
+        _page(backend, cache).soup(READ)
+    soup, _ = _page(backend, cache).soup(READ)
+    assert soup.find(id="x").text == "shop"
+
+
+FILE_PAGE = "file:///home/u/page.html"
+
+
+def _frame_gate(read: ReadGate) -> FrameGate:
+    """A FrameGate with the real exact-origin rule on top of ``read``."""
+    def check_landed(top_url, frame_url):
+        read.check_page(frame_url)
+        if not same_origin(top_url, frame_url):
+            raise ValidationError(f"cross-origin frame refused: {frame_url!r} vs {top_url!r}")
+    return FrameGate(check_page=read.check_page, check_src=read.check_page, check_landed=check_landed)
+
+
+@pytest.mark.parametrize("move", ["switch_to_default_content", "switch_to_parent_frame"])
+@pytest.mark.parametrize("top", ["about:blank", FILE_PAGE])
+def test_landing_back_on_an_opaque_top_page_needs_only_the_read_check(move, top):
+    # about:blank and file:// have no origin, so "same-origin with itself" is
+    # false for them — but landing on the top page compares it with nothing: the
+    # read check alone decides. (about:blank is always readable; the file page is
+    # let in by the gate here, as an override would.)
+    backend = FramedBackend(top=top, frame=top)
+    result = getattr(_page(backend, SoupCache()), move)(_frame_gate(_read_gate(SHOP, FILE_PAGE)))
+    assert result["frame_url"] == top
+
+
+def test_landing_back_on_an_unreadable_top_page_is_still_refused():
+    backend = FramedBackend(top=SECRET, frame=SHOP)
+    with pytest.raises(ValidationError, match="read allowlist"):
+        _page(backend, SoupCache()).switch_to_default_content(_frame_gate(READ))
+
+
+def test_force_reload_recovers_from_a_lost_frame_in_one_call(clock):
+    # A reload returns the tab to its top document, so a lost frame must not make
+    # the reload itself refuse: the check before it judges the top page.
+    backend, cache = FramedBackend(top=SHOP, frame=SHOP), SoupCache(clock=clock)
+    backend.lose()
+    result = _page(backend, cache).reload(READ)
+    assert result["reloaded"] is True
+    assert "reload" in [name for name, _ in backend.calls]

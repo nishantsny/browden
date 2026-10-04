@@ -29,6 +29,7 @@ from .validator import (
     BrowdenRuntimeConfiguration,
     SessionBusyError,
     click_gate,
+    frame_gate,
     press_key_gate,
     read_gate,
     upload_file_gate,
@@ -451,6 +452,77 @@ Offset = Annotated[int, Field(description=(
     "Paginate over matched ELEMENTS: skip this many before returning. Does not "
     "paginate the text or HTML within a single element."
 ))]
+
+
+# -- frame navigation tools -------------------------------------------------
+#
+# The DOM-read tools observe only the *focused* document. These move a tab's
+# frame focus so those tools can inspect an iframe's contents; the focus persists
+# (browden replays it across the window-refocus every op performs) until moved
+# back or reset by a navigate/reload.
+
+@mcp.tool()
+@_tool
+async def switch_to_frame(css_selector: str, id: str) -> dict:
+    """Switch a tab's focus INTO the iframe matched by css_selector (same-origin only).
+
+    browden's DOM-read tools (query_selector, get_element_by_id, screenshot, …) see
+    only the focused document, so an iframe's contents are invisible until you focus
+    it here. After this succeeds those tools observe the frame; call
+    ``switch_to_default_content`` (or ``switch_to_parent_frame``) to leave. A
+    navigate/reload also resets the focus to the top document.
+
+    Gates, all default-deny, all in the one driver hold that switches: the focused
+    document must be on the read allowlist; the iframe's declared ``src`` is checked
+    *before* switching; and *after* switching the frame's actual ``document.URL``
+    must be read-allowed AND same-origin with the top page — cross-origin frames are
+    refused. On any failure the focus is put back where it was and nothing inside
+    the frame is inspected.
+    """
+    logger.info(f"Tool called: switch_to_frame (css_selector={css_selector!r}, id={id!r})")
+    session = _store.route(id)
+    # The tab's profile decides the rules; the session runs them in the switching hold.
+    gate = frame_gate(_access_rules_for(session))
+    result = await session.enter_frame(css_selector, id=id, gate=gate)
+    logger.info("Tool finished: switch_to_frame")
+    return result
+
+
+@mcp.tool()
+@_tool
+async def switch_to_parent_frame(id: str) -> dict:
+    """Switch a tab's focus up one frame level, toward the top document.
+
+    Re-gated like every other tool call, not just on entry: an ancestor frame may
+    have been navigated to an untrusted page by another process while we were deeper
+    in the tree, so the landed document must be read-allowed AND same-origin with the
+    top page. On refusal the driver retreats to the top document and the call raises.
+    """
+    logger.info(f"Tool called: switch_to_parent_frame (id={id!r})")
+    session = _store.route(id)
+    gate = frame_gate(_access_rules_for(session))
+    result = await session.switch_to_parent_frame(id=id, gate=gate)
+    logger.info("Tool finished: switch_to_parent_frame")
+    return result
+
+
+@mcp.tool()
+@_tool
+async def switch_to_default_content(id: str) -> dict:
+    """Switch a tab's focus back to its top-level document, exiting all iframes.
+
+    Re-gated like every other tool call: another process may have moved the top page
+    to an untrusted URL since we descended, so the landed top document is re-checked
+    against the read allowlist. On refusal the call raises — the driver is already at
+    the top document (there is nowhere safer to retreat to), and the read tools
+    likewise refuse to read it.
+    """
+    logger.info(f"Tool called: switch_to_default_content (id={id!r})")
+    session = _store.route(id)
+    gate = frame_gate(_access_rules_for(session))
+    result = await session.switch_to_default_content(id=id, gate=gate)
+    logger.info("Tool finished: switch_to_default_content")
+    return result
 
 
 # -- DOM-query tools --------------------------------------------------------

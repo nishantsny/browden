@@ -11,7 +11,8 @@ async def test_mcp_endpoint(mcp_server, mcp_client_session):
             "list_tabs", "new_blank_tab", "close_tab", "select_tab", "navigate",
             "click", "insert_text", "press_key", "upload_file", "get_element_by_id",
             "get_elements_by_class_name", "query_selector", "query_selector_all",
-            "screenshot", "force_reload_tab", "invalidate_dom_cache"
+            "screenshot", "force_reload_tab", "invalidate_dom_cache",
+            "switch_to_frame", "switch_to_parent_frame", "switch_to_default_content",
         }
         assert set(tools) == expected_tools
     

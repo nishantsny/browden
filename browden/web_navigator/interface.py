@@ -49,6 +49,17 @@ class TargetSnapshot:
     ref: Any
 
 
+class FrameFocusError(RuntimeError):
+    """The tab is focused inside an iframe, but that frame can't be relied on.
+
+    Raised instead of silently falling back to the top document: once focus is
+    inside a frame, judging or reading the *top* page in its place would gate one
+    document and hand back another. Two cases: the focused frame's own URL can't
+    be read (so it can't be gated), and the frame focus was lost to a reload the
+    agent didn't ask for. The agent re-enters the frame with ``switch_to_frame``.
+    """
+
+
 class WebNavigatorBackend(ABC):
     """Contract every browser backend must implement.
 
@@ -146,7 +157,10 @@ class WebNavigatorBackend(ABC):
     def document_url(self) -> str:
         """Return the focused *document*'s URL (``document.URL``) — the iframe's own URL
         when focus is inside a frame, else the top URL. Used by the read/write gates so
-        they validate the document actually being acted on. Caller focuses first."""
+        they validate the document actually being acted on. Caller focuses first.
+
+        Raises :class:`FrameFocusError` if focus is inside a frame whose URL can't be
+        read: the gates must never judge the top page in a frame's place."""
 
     @abstractmethod
     def screenshot(self) -> bytes:
@@ -191,3 +205,35 @@ class WebNavigatorBackend(ABC):
         file on this machine; *which* files may be sent anywhere is policy, judged
         by the caller before this is reached.
         """
+
+    @abstractmethod
+    def enter_frame(self, css_selector: str, check_src, check_landed) -> dict:
+        """Switch the focused tab into the iframe at ``css_selector``, gated, or not at all.
+
+        Resolves the single visible iframe (refusing a non-frame or ambiguous
+        selector) and calls ``check_src(src)`` with its absolute declared ``src``
+        before switching (skipped for a src-less frame, e.g. ``srcdoc``). Then
+        switches and calls ``check_landed(top_url, frame_url)`` on the document it
+        actually landed on. If either check raises — or anything else fails after
+        the switch — focus is restored to where it was and the exception
+        propagates. Only on success is the selector recorded (so the focus survives
+        later window-refocus) and ``{"frame_url", "top_url"}`` returned. The checks
+        are the caller's policy; this method only guarantees nothing is recorded
+        and focus is not left inside a frame that wasn't admitted.
+        """
+
+    @abstractmethod
+    def switch_to_parent_frame(self) -> dict:
+        """Move the focused tab up one frame level; return ``{"frame_url", "top_url"}``."""
+
+    @abstractmethod
+    def switch_to_default_content(self) -> dict:
+        """Return the focused tab to its top document; return ``{"frame_url", "top_url"}``."""
+
+    @abstractmethod
+    def retreat_to_top(self) -> None:
+        """Forget the focused tab's frame path and focus its top document. Runs no script."""
+
+    @abstractmethod
+    def in_frame(self) -> bool:
+        """Whether the focused tab is currently focused inside an iframe."""

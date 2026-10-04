@@ -136,9 +136,26 @@ verbatim; it is globally unique and routes itself to the right profile (multiple
 | `screenshot` | PNG of the tab's current viewport |
 | `invalidate_dom_cache` | Drop a tab's cached DOM so the next read re-fetches the live HTML (no page load — JS-built state survives) |
 | `force_reload_tab` | Reload a tab and refresh its cached DOM |
+| `switch_to_frame` | Focus a tab on the `<iframe>` matched by a CSS selector, so the DOM-read tools and `screenshot` see the frame's contents instead of the top page. **Same-origin frames only** (the exact origin: scheme, host and port): the frame's `src` must be readable before the switch, and the landed document must be readable **and** same-origin with the top page after it, or the focus goes back to where it was. A frame the page wrote itself (`srcdoc`, or an `about:blank` frame filled in by script) is judged by the page that wrote it. |
+| `switch_to_parent_frame` | Move a tab's focus up one frame level. The landed frame is checked again (readable and same-origin), since it may have navigated while focus was deeper; if it fails, the tab goes back to its top document. |
+| `switch_to_default_content` | Return a tab's focus to its top document, checking that the top page is still readable. |
 | `click` | **A write action, off by default** — click a control on a host listed in the `click` allowlist; each host declares a **required** `label` regex the control's visible text must fully match (`.*` to allow any). No host is listed out of the box. |
 | `insert_text` | **A write action, off by default** — type text into a single visible, non-readonly text field (`<textarea>`, a text `<input>`, or a `contenteditable`) on a host listed in the separate `write-text` allowlist section; the field's visible label (placeholder / aria-label / associated `<label>`) must fully match that host's **required** `label` regex. |
 | `upload_file` | **A write action, off by default** — attach a local file to a single visible, non-readonly `<input type=file>` on a host listed in the separate `upload-file` allowlist section. Additionally gated by `allowed_upload_locations`: the file must resolve to a regular file under a directory you listed, so an upload can never become an arbitrary local-file read. No host and no root are listed out of the box. |
+
+Frame focus sticks to the tab until you move it or the tab navigates or
+reloads. Every later call re-enters the frame only while it is still the one
+admitted: the top page hasn't moved and the frame still holds a document of the
+origin it had on entry. While a tab is inside a frame, every read and write
+tool is judged by the frame's own URL, not the top page's. Writes work there
+too (`click`, `insert_text`, `press_key`), each under its own rules for the
+frame's URL; a frame the page wrote itself (`srcdoc`) has its parent page's
+URL, so the parent's rules apply. A `screenshot` inside a frame also needs the
+top page to be readable, since the capture shows it. If the frame's URL can't
+be read, the frame has been removed or changed, or a read's expired snapshot
+made browden reload the page (which returns the tab to its top document), the
+call is refused rather than answered from the top page. The tab is then at its
+top document: call `switch_to_frame` again.
 
 ### Reading the DOM
 
@@ -355,6 +372,7 @@ any of them widens its own access. Setup prints both steps at the end:
 - [`allow_label_activation.yaml`](configs/samples/allow_label_activation.yaml) — `click` a `<label>` to drive a radio/checkbox the page hid in CSS, authorized by the label's own visible text.
 - [`allowlist-read-deny.yaml`](configs/samples/allowlist-read-deny.yaml) — a fully-commented tour of the read/deny system.
 - [`profile_scoped_rules.yaml`](configs/samples/profile_scoped_rules.yaml) — scope rules per browser profile: a narrow credentialed profile, an `allow_all` scratch profile, a dev-server profile.
+- [`allow_iframe_access.yaml`](configs/samples/allow_iframe_access.yaml) — read and act inside same-origin `<iframe>`s: frames are judged by their own URL under the usual read and write rules, and cross-origin frames stay refused however readable.
 - [`allow_receipt_upload.yaml`](configs/samples/allow_receipt_upload.yaml) — enable `upload-file`: attach a local receipt to a Splitwise expense, bounded by `allowed_upload_locations`.
 - [`allow_local_file_reads.yaml`](configs/samples/allow_local_file_reads.yaml) — opt `file://` local-file reads in (scoped by path).
 - [`allow_localhost_dev_server.yaml`](configs/samples/allow_localhost_dev_server.yaml) — read a local `http://localhost:PORT` dev server.

@@ -1,0 +1,94 @@
+# browden access policy — reading and acting inside <iframe>s.
+#
+# LIVE RELOAD: browden re-reads this file about every 10s while it runs, so edits
+# take effect without a restart. A save that doesn't parse (mid-edit, bad YAML) is
+# ignored and the last valid version stays in force.
+#
+# There is NO frame section. A frame is just another document, and it is judged
+# by the rules you already write — for ITS OWN URL, not the page around it:
+#
+#   switch_to_frame(sel)   the page you are on must be readable; the iframe's
+#                          src must be readable; and the document it lands on
+#                          must be readable AND the exact same origin (scheme,
+#                          host, port) as the top page. Cross-origin frames are
+#                          refused, however readable they are.
+#   reads inside a frame   the read allowlist, for the frame's URL.
+#   writes inside a frame  `click` / `write-text` / `press-key` rules, for the
+#                          frame's URL — exactly as if it were its own page.
+#   screenshot in a frame  the frame's URL AND the top page's must be readable:
+#                          the capture shows the whole viewport.
+#
+# THE PAGE THIS EXAMPLE IS BUILT AROUND (example.* domains, reserved for docs):
+#
+#   https://billing.example.com/account                      <- the top page
+#     <iframe id="history" src="/widgets/payment-history">   <- same origin
+#     <iframe id="help" srcdoc="...">                        <- written by the page
+#     <iframe id="chat" src="https://chat.example.net/embed"> <- another origin
+#
+#   switch_to_frame('#history')  -> allowed: same origin, path readable below
+#   switch_to_frame('#help')     -> allowed: a srcdoc frame has no URL of its own;
+#                                   it is judged as /account, the page that wrote it
+#   switch_to_frame('#chat')     -> REFUSED: another origin, even though
+#                                   chat.example.net is readable below
+#
+# Four independent layers, evaluated in this order for every URL/action:
+#   1. denylist        — always wins; a matching URL is refused outright.
+#   2. read allowlist  — a URL may be READ / navigated only if it matches here.
+#   3. write actions   — `click`, `write-text`, `press-key`; default-deny.
+# Frames add only the same-origin rule on top; they never loosen any layer.
+#
+# See configs/samples/allowlist-read-deny.yaml for a fully-commented tour of the
+# read/deny system.
+
+# ---- denylist: always denied, checked first -------------------------------
+denylist: {}
+
+# ---- read allowlist -------------------------------------------------------
+read:
+  enabled: true
+  tranco:
+    enabled: false   # only what is named below; nothing else is readable
+  website_overrides:
+    billing.example.com:
+      - '^/account$'               # the top page (and the srcdoc #help panel on it)
+      - '^/widgets/payment-history' # the #history frame's own URL — needed to
+                                    # enter it AND to read anything inside it
+    # Readable on its own, as a top page: navigate('https://chat.example.net/embed')
+    # works. As a frame inside billing.example.com it is still refused, because
+    # it is another origin — same-origin is a rule on top of the read allowlist,
+    # not something a read rule can grant.
+    chat.example.net: ['^/embed']
+
+# ---- write actions --------------------------------------------------------
+# Inside a frame, a write is gated on the FRAME's URL. So the rule that lets the
+# agent click "Download receipt" in the payment-history widget names the
+# widget's path, not /account.
+click:
+  billing.example.com:
+    - path: ['^/widgets/payment-history']
+      label: '(?i)download receipt'
+    # The srcdoc #help panel is judged as /account (the page that wrote it), so
+    # a click inside it needs a rule on /account — this one covers the panel's
+    # "Contact support" button and the same button on the top page alike.
+    - path: ['^/account$']
+      label: '(?i)contact support'
+
+write-text:
+  billing.example.com:
+    # The widget's own search box: typed into inside the #history frame.
+    paths: ['^/widgets/payment-history']
+    label: '(?i)search payments'
+
+# NOTES ON WHAT THIS DOES *NOT* OPEN
+#
+# * No rule here reaches chat.example.net inside a frame — no read rule, no write
+#   rule can make a cross-origin frame enterable.
+# * Exact origin means exact: http://billing.example.com, https://www.billing.example.com
+#   and https://billing.example.com:8443 are each a DIFFERENT origin from
+#   https://billing.example.com. A frame on any of them is refused here.
+# * A frame that changes under the agent is dropped, not followed: if the page
+#   removes #history, swaps it for another origin's document, or navigates the
+#   top page away, the next call is refused once and the tab is back at its top
+#   document. Call switch_to_frame again.
+# * Returning to the top (switch_to_default_content) needs only the top page to be
+#   readable.
