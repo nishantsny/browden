@@ -544,6 +544,21 @@ async def test_list_tabs_omits_an_off_list_tab_it_cannot_close():
 
 
 @pytest.mark.asyncio
+async def test_list_tabs_counts_an_already_gone_off_list_tab_as_closed():
+    # Same rule as close_tab: a tab that vanished before the close is closed —
+    # its tracking is dropped, not left stale.
+    backend = FakeBackend()
+    backend.missing = {"h2"}
+    s = make_session(backend)
+    s._registry.touch("h2")
+
+    listed = await s.list_tabs(gate=ReadGate(check_page=_refuse_u2))
+
+    assert [t["id"] for t in listed] == ["ns-h1"]
+    assert "h2" not in s._registry._last_access
+
+
+@pytest.mark.asyncio
 async def test_separate_sessions_do_not_share_a_lock():
     # Per-session locking: a profile stuck on a long op must not stall another.
     busy, free = make_session(), make_session()

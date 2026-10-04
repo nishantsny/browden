@@ -232,7 +232,7 @@ class BrowserSessionManager:
                 except ValidationError:
                     logger.warning(f"list_tabs: closing non-allowlisted tab {t.url!r} (id={self._id(t.handle)})")
                     try:
-                        self._backend.close_tab(t.handle)
+                        self._close_in_hold(t.handle)
                         closed.append(t.handle)
                     except Exception as e:
                         logger.warning(f"list_tabs: could not close tab {self._id(t.handle)}: {e}")
@@ -282,17 +282,25 @@ class BrowserSessionManager:
         self._registry.touch(tab.handle)
         return tab.as_dict(id=self._id(tab.handle))
 
+    def _close_in_hold(self, handle: str) -> None:
+        """Close ``handle``'s tab. Runs off the loop, inside the caller's driver hold.
+
+        A tab that is already gone counts as closed. Any other failure (the
+        last-tab ``ValueError``, a dead session) raises: the tab is still open, so
+        the caller must keep its cache/registry entries. On return the caller drops
+        them (``_drop``). The one close used by ``close_tab`` and ``list_tabs``; the
+        reaper's sweep has its own, more forgiving one.
+        """
+        try:
+            self._backend.close_tab(handle)
+            logger.info(f"Closed tab: {self._id(handle)}")
+        except TabNotFoundError:
+            logger.info(f"Attempted to close already-closed tab: {self._id(handle)}")
+
     async def close_tab(self, id: str) -> None:
         handle = self._handle(id)
-        # Only TabNotFoundError is swallowed: a last-tab ValueError (or any other backend
-        # failure) means the tab is still open, so its cache/registry entries must stay.
-        try:
-            await self._run_driver(self._backend.close_tab, handle)
-            logger.info(f"Closed tab: {id}")
-        except TabNotFoundError:
-            logger.info(f"Attempted to close already-closed tab: {id}")
-        self._cache.invalidate(handle)
-        self._registry.forget(handle)
+        await self._run_driver(self._close_in_hold, handle)  # raises if the tab stayed open
+        self._drop(handle)
 
     async def select_tab(self, id: str) -> dict:
         def work(handle):
