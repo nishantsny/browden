@@ -81,14 +81,14 @@ write   session.click(sel, id=, gate=WriteGate)           one hold, off the loop
 
 read    session.query_selector(sel, id=, gate=ReadGate)   one hold:
             select_tab · gate.check_page(document_url)
-            soup = cache (or TTL reload) → if reloaded: gate the landing, else bounce + refuse
+            soup = cache, or a TTL reload → gate the landing BEFORE fetching it; off-list: bounce + refuse
             query soup
 
 nav     session.navigate(url, id=, gate=ReadGate)         one hold:
             navigate(url) · gate the landing → bounce to about:blank if off-list
 
 reload  session.force_reload_tab(id=, gate=ReadGate)      one hold:
-            gate.check_page(document_url) · reload · gate the landing → bounce
+            gate.check_page(document_url) · reload · gate the landing → bounce · only then fetch
 ```
 
 - **`WriteGate`** (`validator/write_gates.py`) and **`ReadGate`**
@@ -185,6 +185,14 @@ is built from a single snapshot.
 3. Anything in that hold that navigates or reloads gates its landing with
    `_bounce_off_list_landing` before the hold ends.
 4. Writes judge a fresh parse of the live page, never the soup cache.
-5. Add the tool to `READS` in `test/unit/mcp/test_read_gate_atomicity.py` or
-   `WRITES` in `test/unit/mcp/test_write_gate_atomicity.py`, so the
-   concurrent-`navigate` race test covers it.
+5. Classify the tool in `TOOLS` in `test/unit/mcp/test_gate_races.py` (as
+   `READ`, `WRITE` or `LANDING`, with the backend calls it makes as its
+   `park_points`). That one entry runs it through every race of its kind: paused
+   at each of those calls while a `navigate` to a readable-but-unwritable page,
+   and to an allowed URL that redirects off-list, queues behind it. The
+   invariant checked after every race is the same: no off-list content left the
+   browser, and no write landed on a page without a write rule.
+6. A reload in a hold — `force_reload_tab`, or the soup cache's TTL reload —
+   gates its landing through the cache's `on_reload` hook, which runs *before*
+   the landed page is fetched. Gating after the fetch keeps the content from the
+   agent, but it has still left the browser.

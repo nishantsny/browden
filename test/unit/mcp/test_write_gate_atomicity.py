@@ -1,20 +1,17 @@
-"""A write action is decided and performed as one unit.
+"""Write-gate cases the race table doesn't cover.
 
-The write tools used to gate the tab's URL, query the element, judge it, then
-act — each step taking the session's driver lock separately. Anything that got
-the lock in between (a concurrent ``navigate`` on the same tab) or ran on the
-event loop in between (the config hot-reload) changed what the action landed
-on, or what it was judged by, after it was judged. The session now runs the
-whole gate sequence and the action in one driver-lock hold
-(docs/design/gate-atomicity.md); these tests pin that.
+The per-tool races (a concurrent ``navigate`` retargeting a write) live in
+``test_gate_races.py``, driven by its ``TOOLS`` table. What stays here: a config
+hot-reload landing mid-request (the race GHSA-4mgj-cwrw-795x reported), and what
+the single driver-lock hold reads and judges
+(docs/design/gate-atomicity.md).
 
-They use ``atomicity_harness``: a real ``BrowserSessionManager`` over a fake
-backend, with the write parked inside its HTML read.
+Uses ``atomicity_harness``: a real ``BrowserSessionManager`` over a fake backend.
 """
 import asyncio
 
 import pytest
-from atomicity_harness import PROFILE, TAB, OnePageBackend, serve, until_queued
+from atomicity_harness import PROFILE, TAB, OnePageBackend, serve
 from atomicity_harness import make_session as _session
 
 from browden.configs.loader import RuntimeConfigurationRefresher
@@ -36,13 +33,6 @@ _SHOP_ONLY = BrowdenRuntimeConfiguration({
     "press-key": {"shop.example": [{"path": [".*"], "label": r"(?i)add to cart", "keys": ["Enter"]}]},
 })
 
-# (tool call, the action the backend records) for each write tool.
-WRITES = {
-    "click": (lambda server: server.click("#go", id=TAB), ("click", "#go")),
-    "insert_text": (lambda server: server.insert_text("#f", "x", id=TAB), ("insert_text", "#f")),
-    "press_key": (lambda server: server.press_key("#go", "Enter", id=TAB), ("press_key", "#go")),
-}
-
 
 def _backend(url, pages=None):
     return OnePageBackend(url, {SHOP: _SHOP_HTML, OTHER: _OTHER_HTML} if pages is None else pages)
@@ -61,52 +51,7 @@ def server():
     return server
 
 
-# -- controls: the harness decides the way the gates say it should ----------
-
-@pytest.mark.parametrize("write", WRITES)
-async def test_control_write_on_the_allowed_page_goes_through(server, write):
-    call, action = WRITES[write]
-    backend = _backend(SHOP)
-    policy, route, _ = _serve(server, _session(backend))
-    with policy, route:
-        result = await call(server)
-    assert "error" not in result and result["id"] == TAB
-    assert backend.actions == [(SHOP, *action)]
-
-
-@pytest.mark.parametrize("write", WRITES)
-async def test_control_write_on_the_other_page_is_refused(server, write):
-    call, _ = WRITES[write]
-    backend = _backend(OTHER)
-    policy, route, _ = _serve(server, _session(backend))
-    with policy, route, pytest.raises(ValidationError):
-        await call(server)
-    assert backend.actions == []
-
-
-# -- the races ----------------------------------------------------------------
-
-@pytest.mark.parametrize("write", WRITES)
-async def test_concurrent_navigate_cannot_retarget_an_authorized_write(server, write):
-    # The write starts on SHOP, where it is allowed. While it is inside its HTML
-    # read, a navigate on the same tab queues for the driver lock. The write must
-    # not land on OTHER — a page with no write rule at all.
-    call, _ = WRITES[write]
-    backend = _backend(SHOP)
-    s = _session(backend)
-    policy, route, _ = _serve(server, s)
-    with policy, route:
-        backend.park_next("get_tab_html")
-        task = asyncio.create_task(call(server))
-        await asyncio.to_thread(backend.parked.wait, 5)
-        nav = asyncio.create_task(server.navigate(OTHER, id=TAB))
-        await until_queued(s)
-        backend.resume.set()
-        await asyncio.gather(task, nav, return_exceptions=True)
-
-    assert not [a for a in backend.actions if a[0] == OTHER], \
-        f"{write} was authorized on {SHOP} but performed on {OTHER}"
-
+# -- a hot reload mid-request ----------------------------------------------------
 
 async def test_hot_reload_mid_request_cannot_authorize_what_neither_config_allows(server):
     # old: shop.example clickable, label "Add to cart"     (element says "Delete account" -> refuse)

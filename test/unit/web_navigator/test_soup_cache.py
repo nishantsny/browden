@@ -78,3 +78,43 @@ def test_force_reload_reloads_browser_and_returns_page_info(fake_clock):
     again, reloaded = cache.get_soup("p1", backend)
     assert reloaded is False
     assert again is soup
+
+
+class _Refused(Exception):
+    pass
+
+
+def _refuse(_tab_info):
+    raise _Refused
+
+
+def test_a_stale_reload_runs_on_reload_before_fetching_and_can_abort_it(fake_clock):
+    # on_reload sees where the reload landed before any of that page is fetched;
+    # raising from it stops the fetch and leaves nothing new in the cache.
+    backend = FakeBackend()
+    clock = fake_clock()
+    cache = SoupCache(clock=clock)
+    old, _ = cache.get_soup("p1", backend)
+    clock.t += TTL_SECONDS
+    seen = []
+    try:
+        cache.get_soup("p1", backend, on_reload=lambda tab: (seen.append((tab.url, backend.get_calls)), _refuse(tab)))
+    except _Refused:
+        pass
+    else:
+        raise AssertionError("on_reload's refusal did not propagate")
+    assert seen == [("https://www.amazon.com/", 1)]  # landed URL, and no fetch since the first
+    assert backend.get_calls == 1
+
+
+def test_force_reload_runs_on_reload_before_fetching_and_can_abort_it(fake_clock):
+    backend = FakeBackend()
+    cache = SoupCache(clock=fake_clock())
+    try:
+        cache.force_reload("p1", backend, on_reload=_refuse)
+    except _Refused:
+        pass
+    else:
+        raise AssertionError("on_reload's refusal did not propagate")
+    assert backend.reload_calls == 1
+    assert backend.get_calls == 0  # the landed page was never fetched
