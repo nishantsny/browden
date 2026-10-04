@@ -1,0 +1,89 @@
+# browden access policy — activating a <label> (`click`).
+#
+# LIVE RELOAD: browden re-reads this file about every 10s while it runs, so edits
+# take effect without a restart. A save that doesn't parse (mid-edit, bad YAML) is
+# ignored and the last valid version stays in force.
+#
+# A worked example of the ONE case where `click` is pointed at a <label> rather
+# than at a button or a link.
+#
+# THE PATTERN. A very common form idiom hides the native control in CSS and draws
+# the visible one on its <label>:
+#
+#   <input type="radio" id="stage2" name="stage" value="2">
+#   <label for="stage2">After submitting the physical application</label>
+#
+#   [type="radio"]        { position: absolute; left: -9999px; }   /* or display:none */
+#   [type="radio"] + label:before { content: ''; width: 20px; height: 20px;
+#                                   border: 1px solid #5f717d; border-radius: 100%; }
+#
+# The circle a human sees and clicks is a ::before on the <label>. The <input> is
+# parked off-screen. Before this, every route into such a form was refused — the
+# input is the wrong tag for `click` and is not rendered, so `press-key` refused
+# it as invisible; the label was neither a clickable tag nor focusable — and no
+# allowlist rule helped, because those are element-integrity gates, not config.
+#
+# WHAT TO WRITE. Target the label directly and authorize it by the text a human
+# reads next to the control:
+#
+#   click('label[for="stage2"]')        -> ticks the hidden radio
+#
+# Four independent layers, evaluated in this order for every URL/action:
+#   1. denylist        — always wins; a matching URL is refused outright.
+#   2. read allowlist  — a URL may be READ / navigated only if it matches here.
+#   3. write actions   — `click` (below); default-deny, gated per host.
+#
+# See configs/samples/allowlist-read-deny.yaml for a fully-commented tour of the
+# read/deny system, and allow_grocery_cart_manipulation.yaml for ordinary
+# button/link clicking.
+
+# ---- denylist: always denied, checked first -------------------------------
+denylist: {}
+
+# ---- read allowlist -------------------------------------------------------
+read:
+  enabled: true
+  tranco:
+    enabled: true
+    top_n: 1000000
+  website_overrides:
+    # The consular-enquiry form this example is lifted from is not in the Tranco
+    # top sites, so it needs an explicit override to be readable at all.
+    vfs.mioot.com: ['^/forms/In/USA/PS/.*']
+
+# ---- write actions --------------------------------------------------------
+# `click`: activate a control. Default-deny; every gate must pass:
+#   1. host+page — the host is listed here and some rule's `path` matches the page.
+#   2. clickable — the target is a real, visible, non-decoy <button>, role="button",
+#      <input type=submit|button>, <a>, OR a <label> that resolves (by `for=`, or
+#      by wrapping) to a real, enabled, non-decoy radio or checkbox.
+#   3. label — a matching rule's `label` regex fully matches the control's visible
+#      text. For a <label> target that is the label's OWN text.
+click:
+  vfs.mioot.com:
+    - path: ['^/forms/In/USA/PS/.*']
+      # The two <label>s that drive this form's hidden controls, by the exact
+      # words a human reads. Authorizing on the label's own text is the point:
+      # it is more faithful to operator intent than the hidden input's `id`,
+      # which no human ever sees.
+      label: '(?i)(after|before) submitting (a |the )?physical application.*'
+    - path: ['^/forms/In/USA/PS/.*']
+      label: '(?i)i consent to the processing of my personal data.*'
+    - path: ['^/forms/In/USA/PS/.*']
+      # The ordinary <button> on the same page — an unrelated rule, shown here
+      # only to make the point that label activation needs no new config surface:
+      # every rule above is a plain `click` rule.
+      label: '(?i)submit'
+
+# NOTES ON WHAT THIS DOES *NOT* OPEN
+#
+# * The hidden <input> stays unreachable. The visibility relaxation applies only
+#   to the control reached THROUGH a label; the label itself is held to the full
+#   integrity check, so nothing invisible to a human becomes clickable.
+# * Only radio and checkbox qualify. A label bound to a text box merely moves
+#   focus, and one bound to a submit button would let a label's text stand in for
+#   the button's own gated text — exactly the substitution gate 3 exists to stop.
+# * Decoy, `disabled`, `aria-hidden` and `type=hidden` targets are refused either
+#   way, label route or not.
+# * `press-key` is unchanged: this is a click-shaped action. Enabling `click`
+#   here does not permit typing (`write-text`) or key presses (`press-key`).
