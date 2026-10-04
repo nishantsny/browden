@@ -139,6 +139,30 @@ verbatim; it is globally unique and routes itself to the right profile (multiple
 | `click` | **A write action, off by default** — click a control on a host listed in the `click` allowlist; each host declares a **required** `label` regex the control's visible text must fully match (`.*` to allow any). No host is listed out of the box. |
 | `insert_text` | **A write action, off by default** — type text into a single visible, non-readonly text field (`<textarea>`, a text `<input>`, or a `contenteditable`) on a host listed in the separate `write-text` allowlist section; the field's visible label (placeholder / aria-label / associated `<label>`) must fully match that host's **required** `label` regex. |
 
+### Reading the DOM
+
+The four read tools return *serialized nodes*, and every one of them truncates:
+`text` is capped at **2000 chars** unconditionally — `limit` / `offset` paginate
+matched *elements*, never the content of one element — attribute values at 256
+chars, and `html` is opt-in behind `include_html`. `max_html_bytes` caps `html`
+alone and does nothing unless `include_html=True`.
+
+So to pull a large payload out of a page — a JSON endpoint rendered in Chrome's
+`<pre>`, a long article body — ask for the HTML and raise its cap:
+
+```jsonc
+query_selector("pre", id=tab, max_html_bytes=5000000)
+→ {"text_length": 698676, "text_truncated": true, "text": "…2000 chars…"}   // ✗ include_html defaults to false
+
+query_selector("pre", id=tab, include_html=true, max_html_bytes=5000000)
+→ {"html_truncated": false, "html": "<pre>…698 KB…</pre>"}                  // ✓
+```
+
+Check `html_truncated == false` rather than trusting the returned length: the cap
+cuts UTF-8 bytes and decodes with `errors="ignore"`, so a truncated `html` ends
+silently. **[docs/dom-reads.md](./docs/dom-reads.md)** documents every cap and
+every field of a returned node.
+
 ## Profiles
 
 A **profile** is equivalent to Chrome's `--user-data-dir`: one browsing session with its own

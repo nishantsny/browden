@@ -7,6 +7,21 @@ All notable changes to browden are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+- **The DOM-read caps are now visible from the tool schema, and documented.** The
+  four read tools truncate `text` at 2000 chars unconditionally, cap attribute
+  values at 256, and hide outer HTML behind `include_html` — but none of that
+  reached an MCP client, which saw four bare typed params. A caller whose payload
+  was one large node (a JSON blob rendered in `<pre>`) would reasonably pass a big
+  `max_html_bytes`, get 2000 chars of `text` back, and conclude the tool clamps
+  output; `max_html_bytes` in fact caps `html` alone and is inert unless
+  `include_html=True`. `include_html`, `max_html_bytes`, `limit` and `offset` now
+  carry `description`s in the JSON schema, each tool's docstring states the caps,
+  and the new [docs/dom-reads.md](./docs/dom-reads.md) documents every cap and
+  every field of a returned node — with a README recipe for reading a large
+  payload out of a page. No behaviour change: the caps themselves are
+  unchanged (#148).
+
 ### Security
 - **A reload redirected off-list no longer fetches the page it landed on.**
   `force_reload_tab`, and a read whose cached snapshot had expired, reloaded the
