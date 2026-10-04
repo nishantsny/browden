@@ -7,6 +7,8 @@ All notable changes to browden are documented here. The format follows
 
 ## [Unreleased]
 
+## [1.5.0] — 2026-10-04
+
 ### Added
 - **The DOM-read caps are now visible from the tool schema, and documented.** The
   four read tools truncate `text` at 2000 chars unconditionally, cap attribute
@@ -506,7 +508,8 @@ Initial public release.
   service manager (systemd / launchd / Task Scheduler).
 - Apache-2.0.
 
-[Unreleased]: https://github.com/nishantsny/browden/compare/v1.4.0...HEAD
+[Unreleased]: https://github.com/nishantsny/browden/compare/v1.5.0...HEAD
+[1.5.0]: https://github.com/nishantsny/browden/compare/v1.4.0...v1.5.0
 [1.4.0]: https://github.com/nishantsny/browden/compare/v1.3.1...v1.4.0
 [1.3.1]: https://github.com/nishantsny/browden/compare/v1.3.0...v1.3.1
 [1.3.0]: https://github.com/nishantsny/browden/compare/v1.2.1...v1.3.0
