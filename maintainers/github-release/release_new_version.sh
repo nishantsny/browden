@@ -40,7 +40,7 @@
 # are checked in preflight (start of the run) when --release is set, so an auth
 # problem fails in seconds rather than after the ~7-minute deploy + e2e. After a
 # fully green deploy + e2e (guarded on $deploy_ok), it fail-closed verifies the
-# release preconditions (release tree == origin/main, the tag's version has a
+# release preconditions (the tested HEAD is on origin/main, the tag's version has a
 # CHANGELOG.md section, pyproject matches, the tag doesn't already exist), then
 # annotates + pushes the tag and watches the `release` workflow (which fast-forwards
 # `stable` and cuts the GitHub Release) with a 10-minute timeout, reporting
@@ -221,11 +221,14 @@ if [ -n "$RELEASE_TAG" ] && [ "$deploy_ok" = 1 ]; then
     ver="${RELEASE_TAG#v}"
     ver_re="$(printf '%s' "$ver" | sed 's/\./\\./g')"
 
-    # We release origin/main. The ff-pull above already put HEAD there; re-assert it.
+    # We tag the commit that was just deployed and e2e-tested (HEAD), and it must be
+    # on main — the same ancestry check the release workflow makes. Not "HEAD is
+    # main's tip": anything merged during the e2e would fail that check, and tagging
+    # main's new tip instead would release code the e2e never ran.
     git -C "$RELEASE_DIR" fetch --quiet origin main
     head_sha="$(git -C "$RELEASE_DIR" rev-parse HEAD)"
-    [ "$head_sha" = "$(git -C "$RELEASE_DIR" rev-parse origin/main)" ] \
-        || die "release tree HEAD is not origin/main — refusing to tag"
+    git -C "$RELEASE_DIR" merge-base --is-ancestor "$head_sha" origin/main \
+        || die "release tree HEAD ($head_sha) is not on origin/main — refusing to tag"
 
     # The tag's version MUST be described in the changelog and match pyproject, on
     # this very commit (so the release and its notes agree, and the workflow's own
