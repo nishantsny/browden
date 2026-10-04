@@ -52,7 +52,14 @@ All notable changes to browden are documented here. The format follows
   input, the control authorized by a matching rule's `label` **or** `field_ids`
   (the id half carries this one — a file input routinely has no visible label at
   all, as Splitwise's does not), and a new filesystem gate. `field_ids` is
-  therefore now accepted under `upload-file` as well as `write-text`.
+  therefore now accepted under `upload-file` as well as `write-text`. The path is
+  resolved **once**, by the gate, and that exact path is what the browser is
+  handed — never a second resolve of the caller's spelling, which could land
+  somewhere the gate never saw if a symlink inside an allowed location were
+  replaced in between. A path containing a control character is refused (the
+  driver splits a path on newlines, so one would name a second file), and a
+  `multiple` input is refused for now, so one admitted path is one file at the
+  browser.
 - **`allowed_upload_locations`: a new top-level allowlist section bounding what may leave the
   machine.** Required for `upload-file` — with none configured nothing is
   uploadable, **including under `allow_all`**, which grants authority over pages

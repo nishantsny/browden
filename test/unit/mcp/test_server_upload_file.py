@@ -8,7 +8,7 @@ to type is never thereby trusted to hand a website a local file.
 from unittest.mock import MagicMock, patch
 
 import pytest
-from gated_fakes import gated_write
+from gated_fakes import gated_upload
 
 from browden.configs.loader import RuntimeConfigurationRefresher
 from browden.mcp.validator import BrowdenRuntimeConfiguration, ValidationError
@@ -43,7 +43,7 @@ def _file_input(node_id="bill_file_expense", **attrs):
 
 def _session(*, url, elements, file_path=""):
     s = MagicMock()
-    s.upload_file = gated_write(
+    s.upload_file = gated_upload(
         url=url, elements=elements,
         result={"uploaded": True, "file_path": file_path, "url": url, "title": "Splitwise"})
     return s

@@ -20,6 +20,8 @@ from .tranco import TrancoList
 from .read_gates import ReadGate, ensure_url_allowed, read_gate, validate_url
 from .write_gates import (
     MAX_UPLOAD_BYTES,
+    AdmittedFile,
+    UploadFileGate,
     WriteGate,
     check_action_host,
     click_gate,
@@ -36,6 +38,7 @@ from .write_gates import (
 
 __all__ = [
     "ACTIVATION_KEYS",
+    "AdmittedFile",
     "BrowdenAccessRuleSet",
     "BrowdenRuntimeConfiguration",
     "HostRuleMatcher",
@@ -45,6 +48,7 @@ __all__ = [
     "ReadPolicy",
     "SessionBusyError",
     "TrancoList",
+    "UploadFileGate",
     "ValidationError",
     "WriteGate",
     "check_action_host",

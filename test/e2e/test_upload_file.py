@@ -16,7 +16,7 @@ refusal there is the difference between "attach a receipt" and "exfiltrate
 import urllib.parse
 
 import pytest
-from gates import OPEN_GATE, OPEN_READ_GATE
+from gates import OPEN_READ_GATE, open_upload_gate
 
 from browden.mcp.session_management.browser_session_manager import BrowserSessionManager
 from browden.mcp.validator import (
@@ -89,8 +89,8 @@ async def test_the_file_input_receives_the_file(session, receipt):
     page = await _page(session)
     assert await _state(session, page["id"]) == "none"
 
-    res = await session.upload_file("#bill_file_expense", str(receipt),
-                                    id=page["id"], gate=OPEN_GATE)
+    res = await session.upload_file("#bill_file_expense", id=page["id"],
+                                    gate=open_upload_gate(receipt))
     assert res["uploaded"] is True
     assert res["id"] == page["id"]
 
@@ -103,8 +103,8 @@ async def test_the_file_input_receives_the_file(session, receipt):
 async def test_an_ambiguous_selector_uploads_nothing(session, receipt):
     page = await _page(session)
     with pytest.raises(ValueError, match="ambiguous|matched 2"):
-        await session.upload_file("input[type=file]", str(receipt),
-                                  id=page["id"], gate=OPEN_GATE)
+        await session.upload_file("input[type=file]", id=page["id"],
+                                  gate=open_upload_gate(receipt))
     assert await _state(session, page["id"]) == "none"
 
 
@@ -112,7 +112,7 @@ async def test_an_ambiguous_selector_uploads_nothing(session, receipt):
 async def test_the_real_gate_admits_a_file_under_an_allowed_location(session, receipt):
     page = await _page(session)
     gate = _real_gate(receipt.parent, receipt)
-    await session.upload_file("#bill_file_expense", str(receipt), id=page["id"], gate=gate)
+    await session.upload_file("#bill_file_expense", id=page["id"], gate=gate)
     assert await _state(session, page["id"]) == "bill_file_expense:lunch.txt:LUNCH-RECEIPT"
 
 
@@ -123,5 +123,5 @@ async def test_the_real_gate_refuses_a_file_outside_the_allowed_upload_locations
     secret = tmp_path / "id_rsa"
     gate = _real_gate(receipt.parent, secret)
     with pytest.raises(ValidationError, match="outside every allowed upload location"):
-        await session.upload_file("#bill_file_expense", str(secret), id=page["id"], gate=gate)
+        await session.upload_file("#bill_file_expense", id=page["id"], gate=gate)
     assert await _state(session, page["id"]) == "none"

@@ -9,6 +9,7 @@ import pytest
 
 from browden.mcp.validator import (
     MAX_UPLOAD_BYTES,
+    upload_file_gate,
     BrowdenAccessRuleSet,
     BrowdenRuntimeConfiguration,
     ValidationError,
@@ -430,3 +431,46 @@ def test_allow_all_does_not_grant_the_filesystem():
     assert scratch.allowed_upload_locations == ()
     with pytest.raises(ValidationError, match="no allowed_upload_locations are configured"):
         validate_upload_path(scratch.allowed_upload_locations, "/etc/passwd")
+
+
+def test_a_path_with_a_newline_is_refused(allowed, tmp_path):
+    """Selenium splits a path on newlines, so one path could name two files.
+
+    The driver hands the path to the browser as keystrokes; a `multiple` input
+    given "a\nb" ends up holding BOTH, and only the first was ever judged. A
+    control character has no place in a path browden was asked to upload.
+    """
+    secret = tmp_path / "id_rsa"
+    secret.write_bytes(b"PRIVATE KEY")
+    smuggled = allowed[0] / "lunch.png"
+    with pytest.raises(ValidationError, match="control character"):
+        validate_upload_path(allowed, f"{smuggled}\n{secret}")
+
+
+def test_other_control_characters_are_refused_too(allowed):
+    for ch in ("\r", "\t", "\x00", "\x7f"):
+        with pytest.raises(ValidationError, match="control character"):
+            validate_upload_path(allowed, f"{allowed[0] / 'lunch.png'}{ch}")
+
+
+def test_the_gate_carries_the_path_it_admitted(allowed):
+    """The action reads the file off the gate; nothing downstream re-resolves it."""
+    rules = BrowdenAccessRuleSet({
+        "upload-file": {"*": {"paths": [".*"], "label": ".*"}},
+        "allowed_upload_locations": [str(allowed[0])],
+    })
+    gate = upload_file_gate(rules, str(allowed[0] / "lunch.png"))
+    gate.check_page("https://anything.test/form")
+    assert gate.admitted.path == allowed[0] / "lunch.png"
+
+
+def test_a_gate_that_refused_carries_no_path(allowed, tmp_path):
+    rules = BrowdenAccessRuleSet({
+        "upload-file": {"*": {"paths": [".*"], "label": ".*"}},
+        "allowed_upload_locations": [str(allowed[0])],
+    })
+    gate = upload_file_gate(rules, str(tmp_path / "id_rsa"))
+    with pytest.raises(ValidationError, match="outside every allowed upload location"):
+        gate.check_page("https://anything.test/form")
+    with pytest.raises(ValidationError, match="no file was admitted"):
+        gate.admitted.path

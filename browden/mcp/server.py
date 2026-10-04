@@ -360,14 +360,18 @@ async def upload_file(css_selector: str, file_path: str, id: str) -> dict:
          matches this page.
       2. ``css_selector`` must resolve to exactly one element that is a real,
          visible, non-decoy, non-readonly ``<input type="file">``. Integrity, not
-         intent.
+         intent. A ``multiple`` input is refused for now: this action uploads one
+         file, and that is the only control that could hold a second.
       3. That control must be authorized by a matching rule — by its visible
          label, or by its exact ``id``/``name`` in the rule's ``field_ids``. The
          id half matters more here than for text: a file input routinely carries
          no visible label at all, so no label regex could ever match it.
       4. ``file_path`` must resolve — through ``~``, ``..`` and every symlink —
          to an existing regular file under one of the operator's configured
-         ``allowed_upload_locations``, within the size cap. **With no ``allowed_upload_locations``
+         ``allowed_upload_locations``, within the size cap, and may contain no
+         control character (the driver splits a path on newlines, so one would
+         name a second file). The path the gate resolves is the one the browser
+         is handed; it is never resolved a second time. **With no ``allowed_upload_locations``
          configured nothing is uploadable**, including under ``allow_all``: that
          grants authority over pages and says nothing about the filesystem.
     Any gate failing raises a ValidationError and nothing is sent.
@@ -377,8 +381,10 @@ async def upload_file(css_selector: str, file_path: str, id: str) -> dict:
     session = _store.route(id)
     # The rules are read once; the session runs every gate and the upload in one
     # driver-lock hold (see docs/design/gate-atomicity.md).
-    result = await session.upload_file(css_selector, file_path, id=id,
-                                       gate=upload_file_gate(_access_rules_for(session), file_path))
+    # The file is named to the gate, not passed alongside it: the gate resolves
+    # it once, and the path it admitted is the only one the session can reach.
+    result = await session.upload_file(
+        css_selector, id=id, gate=upload_file_gate(_access_rules_for(session), file_path))
     logger.info("Tool finished: upload_file")
     return result
 

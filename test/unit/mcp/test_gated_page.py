@@ -10,7 +10,14 @@ import pytest
 from browden.common.tab import TabInfo
 from browden.dom import query
 from browden.mcp.session_management.gated_page import GatedPage
-from browden.mcp.validator import ReadGate, ValidationError, WriteGate
+from browden.mcp.validator import (
+    ReadGate,
+    UploadFileGate,
+    ValidationError,
+    WriteGate,
+    upload_file_gate,
+)
+from browden.mcp.validator import BrowdenAccessRuleSet
 from browden.web_navigator.interface import InvalidSelectorError, PageSnapshot, TargetSnapshot
 from browden.web_navigator.soup_cache import TTL_SECONDS, SoupCache
 
@@ -20,7 +27,8 @@ SECRET = "https://secret.example/inbox"
 
 
 def _html(text):
-    return f"<html><body><p id='x'>{text}</p><button id='go'>Add</button></body></html>"
+    return (f"<html><body><p id='x'>{text}</p><button id='go'>Add</button>"
+            f"<input id='up' type='file' aria-label='Receipt'></body></html>")
 
 
 PAGES = {SHOP: _html("shop"), OTHER: _html("other"), SECRET: _html("SECRET")}
@@ -35,7 +43,12 @@ class _Clock:
 
 class PageBackend:
     """One tab at ``url``. ``drift`` is where the page's own JS takes it right after
-    the next ``document_url`` — i.e. between the URL check and the fetch."""
+    the next ``document_url`` — i.e. between the URL check and the fetch.
+
+    ``on_snapshot`` runs during ``target_snapshot``, i.e. after a write's gates
+    and before its action — the window an attacker with write access inside an
+    allowed upload location would use.
+    """
 
     def __init__(self, url=SHOP, redirects=None):
         self.url = url
@@ -46,6 +59,7 @@ class PageBackend:
         self.live_count = None  # override the live match count a target snapshot reports
         self.live_tag = None    # override the live tag a target snapshot reports
         self.bad_selector = False
+        self.on_snapshot = None
 
     def _log(self, name):
         self.calls.append((name, self.url))
@@ -83,6 +97,8 @@ class PageBackend:
 
     def target_snapshot(self, css_selector):
         self._log("target_snapshot")
+        if self.on_snapshot is not None:
+            self.on_snapshot()
         if self.bad_selector:
             raise InvalidSelectorError(f"{css_selector!r} is not a valid selector")
         html = PAGES.get(self.url, "<html></html>")
@@ -95,6 +111,10 @@ class PageBackend:
     def click_target(self, ref):
         self.actions.append(("click", ref))
         return {"clicked": True}
+
+    def upload_file_target(self, ref, file_path):
+        self.actions.append(("upload", ref, file_path))
+        return {"uploaded": True, "file_path": file_path}
 
     def fetched(self):
         """URLs whose content was snapshotted, in order."""
@@ -279,3 +299,72 @@ def test_a_write_never_reads_a_page_gate_1_refuses(clock):
     with pytest.raises(ValidationError):
         _page(backend, cache).click("#go", _write_gate(SHOP))
     assert backend.fetched() == []
+
+
+# -- uploads: the file acted on is the file the gate judged ---------------------
+#
+# `upload-file` is the one action whose subject is not fully described by its
+# element: it also has a file, and the browser reads that file LATER, from the
+# path it was handed. So the path must be resolved once, by the gate, and handed
+# on — never resolved a second time at action time, which could land somewhere
+# the gate never saw.
+
+def _upload_rules(location):
+    return BrowdenAccessRuleSet({
+        "upload-file": {"shop.example": {"paths": [".*"], "label": ".*"}},
+        "allowed_upload_locations": [str(location)],
+    })
+
+
+def test_an_upload_hands_the_backend_the_path_the_gate_admitted(clock, tmp_path):
+    location = tmp_path / "receipts"
+    location.mkdir()
+    receipt = location / "lunch.png"
+    receipt.write_bytes(b"png")
+
+    backend, cache = PageBackend(), SoupCache(clock=clock)
+    gate = upload_file_gate(_upload_rules(location), str(receipt))
+    result = _page(backend, cache).upload_file("#up", gate)
+
+    assert result["uploaded"] is True
+    assert backend.actions == [("upload", ("ref", SHOP, "#up"), str(receipt))]
+
+
+def test_an_upload_is_not_re_resolved_after_the_gate_admitted_it(clock, tmp_path):
+    """The TOCTOU this design closes: resolve once, carry the result.
+
+    A symlink inside an allowed location is admitted (it resolves to a file in
+    that location), and is re-pointed at a secret outside it *after* the gate ran
+    and before the action — the window a second resolve at action time would fall
+    into. The backend must still be handed exactly what was judged.
+    """
+    location = tmp_path / "receipts"
+    location.mkdir()
+    (location / "lunch.png").write_bytes(b"png")
+    secret = tmp_path / "id_rsa"
+    secret.write_bytes(b"PRIVATE KEY")
+    link = location / "attach.png"
+    link.symlink_to(location / "lunch.png")
+
+    def swap():
+        link.unlink()
+        link.symlink_to(secret)
+
+    backend, cache = PageBackend(), SoupCache(clock=clock)
+    backend.on_snapshot = swap
+    gate = upload_file_gate(_upload_rules(location), str(link))
+    _page(backend, cache).upload_file("#up", gate)
+
+    sent = backend.actions[-1][2]
+    assert sent == str(location / "lunch.png")
+    assert "id_rsa" not in sent
+
+
+def test_an_upload_whose_gate_never_admitted_a_file_is_refused(clock, tmp_path):
+    """Fail closed if the page check is ever skipped: no file, no upload."""
+    backend, cache = PageBackend(), SoupCache(clock=clock)
+    gate = UploadFileGate(check_page=lambda url: None,
+                          check_element=lambda url, css, found: None)
+    with pytest.raises(ValidationError, match="no file was admitted"):
+        _page(backend, cache).upload_file("#up", gate)
+    assert backend.actions == []

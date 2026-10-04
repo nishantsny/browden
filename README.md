@@ -261,7 +261,8 @@ a substitute for — the third:
    `allow_all` profile. It is deliberately not per-host — it bounds what may
    leave the machine at all, independently of where it is going. A path is
    expanded and fully resolved before it is compared, so neither `../` nor a
-   symlink planted inside one reaches outside it.
+   symlink planted inside one reaches outside it. The resolved path is what the
+   browser is handed, so the file that was checked is the file that is sent.
 
 
 To refresh the Tranco snapshot, use `python3 setup/fetch_tranco.py` and restart the MCP server.

@@ -52,10 +52,13 @@ allowed_upload_locations:
 # `upload-file`: set a file input. Default-deny; every gate must pass:
 #   1. host+page — the host is listed here and some rule's `path` matches the page.
 #   2. file input — the target is a real, visible, non-decoy, non-readonly
-#      <input type="file">. A text box is NOT uploadable, whatever it is named.
+#      <input type="file">. A text box is NOT uploadable, whatever it is named,
+#      and a `multiple` input is refused for now (this action uploads one file).
 #   3. label or id — a matching rule's `label` regex fully matches the control's
 #      visible label, OR the control's exact id/name is in that rule's `field_ids`.
-#   4. allowed upload location — the file resolves to a regular file under `allowed_upload_locations`.
+#   4. allowed location — the file resolves to a regular file under
+#      `allowed_upload_locations`. The resolved path is what the browser is
+#      handed, so what was checked is what is sent.
 upload-file:
   secure.splitwise.com:
     # Splitwise is a hash-routed SPA: the add/edit-expense modal shares the path

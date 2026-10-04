@@ -47,6 +47,13 @@ def _coerce_upload_locations(locations: object) -> "tuple[Path, ...]":
     silently matching nothing. A location that doesn't exist resolves anyway (the
     non-strict form) and simply has no file under it.
 
+    Resolved **at config load**, so a location is pinned to the directory it
+    named then. Re-pointing a symlink afterwards is not seen until the config is
+    re-read (the hot reloader notices file changes, not filesystem ones), and a
+    location that does not exist yet resolves as written, so creating it later as
+    a symlink leaves it matching nothing. Both directions fail closed — an upload
+    is refused, never wrongly allowed — so the fix is to touch the config file.
+
     A path that cannot be expanded at all is dropped rather than raising: the
     schema has already rejected the shapes an operator can fix, and a rule set
     that fails to build would take the whole config down with it — for a grant

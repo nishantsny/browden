@@ -24,7 +24,7 @@ from ...web_navigator.interface import InvalidSelectorError
 from ...web_navigator.soup_cache import SoupCache
 from ..validator.errors import ValidationError
 from ..validator.read_gates import ReadGate
-from ..validator.write_gates import WriteGate, resolve_upload_path
+from ..validator.write_gates import UploadFileGate, WriteGate
 
 
 class _Bounced(Exception):
@@ -181,19 +181,20 @@ class GatedPage:
         return self._write(css_selector, gate, lambda ref: self._backend.insert_text_target(ref, value),
                            f"insert_text: set {css_selector!r} on tab {self._id}")
 
-    def upload_file(self, css_selector: str, file_path: str, gate: WriteGate) -> dict:
-        """Set the file input ``css_selector`` to ``file_path`` if ``gate`` authorizes both.
+    def upload_file(self, css_selector: str, gate: UploadFileGate) -> dict:
+        """Set the file input ``css_selector`` to the file ``gate`` admitted.
 
-        The gate's page check — run by ``_write`` before the DOM is read — has
-        already judged this path against the operator's allowed upload locations, so the
-        resolve here cannot fail and cannot widen anything. The backend is handed
-        that *resolved* path rather than the caller's spelling, for the same
-        reason the write path hands it the exact element ref it judged: what was
-        checked and what is acted on must be the same thing.
+        There is no path parameter on purpose. The file is named to the *gate*,
+        whose page check — run by ``_write`` before the DOM is read — resolves it
+        once and records the result; the backend is handed that exact path. A
+        second resolve here could land somewhere the gate never saw, if a symlink
+        or directory inside an allowed location were replaced in between, and
+        nothing would have checked where it landed. Same discipline as the
+        element: act on precisely what was judged.
         """
         return self._write(
             css_selector, gate,
-            lambda ref: self._backend.upload_file_target(ref, str(resolve_upload_path(file_path))),
+            lambda ref: self._backend.upload_file_target(ref, str(gate.admitted.path)),
             f"upload_file: set {css_selector!r} on tab {self._id}")
 
     def press_key(self, css_selector: str, key: str, gate: WriteGate) -> dict:

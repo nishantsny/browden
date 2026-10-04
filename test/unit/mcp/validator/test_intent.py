@@ -126,7 +126,12 @@ def test_label_matches_uses_aria_labelledby_text():
 def test_a_file_input_is_uploadable():
     assert is_uploadable_control(node("input", type="file"))
     assert is_uploadable_control(node("input", type="file", id="bill_file_expense"))
-    assert is_uploadable_control(node("input", type="file", multiple=""))
+
+
+def test_a_multiple_file_input_is_refused_for_now():
+    """One file per upload, so the control that could hold two is out of scope."""
+    assert not is_uploadable_control(node("input", type="file", multiple=""))
+    assert not is_uploadable_control(node("input", type="file", multiple="multiple"))
 
 
 def test_nothing_else_is_uploadable():

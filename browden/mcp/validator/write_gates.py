@@ -16,7 +16,7 @@ session, which runs it inside the same driver-lock hold that performs the action
 — see docs/design/gate-atomicity.md for why.
 """
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -220,9 +220,25 @@ def validate_upload_path(allowed_upload_locations: "tuple[Path, ...]", file_path
 
     No location configured means no upload is authorized — including under
     ``allow_all``, which grants authority over *pages* and says nothing about the
-    filesystem. Returns the resolved path to hand the backend; raises
-    :class:`ValidationError` otherwise.
+    filesystem.
+
+    Returns the resolved path, which is what the browser is then handed — see
+    :class:`AdmittedFile` for why it must be this one and not a second resolve of
+    the caller's spelling. What that does *not* close: the filesystem can still
+    change between this check and the moment the driver reads the path, so a
+    party who can write inside an allowed location can still swap what sits
+    there. That party could equally well just copy the file it wants into the
+    location and upload it within policy, so the boundary this gate draws is
+    "nothing outside the allowed locations", not "nothing an attacker chose".
     """
+    # Selenium hands the path to the driver as keystrokes and splits it on "\n",
+    # so a path containing one names TWO files and a `multiple` input would take
+    # both — the second never judged by anything here. Control characters have no
+    # business in a path browden was asked to upload, so refuse the lot.
+    if any(ord(ch) < 0x20 or ord(ch) == 0x7f for ch in file_path):
+        raise ValidationError(
+            "upload path contains a control character — refusing to upload "
+            "(a newline in a path names a second file to the browser)")
     if not allowed_upload_locations:
         raise ValidationError(
             "no allowed_upload_locations are configured — upload-file is not "
@@ -300,6 +316,50 @@ class WriteGate:
     check_element: Callable[[str, str, dict], None]  # gates 2+: (url, css_selector, found)
 
 
+class AdmittedFile:
+    """The one file this request's upload gate admitted.
+
+    Written by the gate's page check and read by the action it guards, so the
+    path that was *judged* is the path the browser is *handed*. The action
+    deliberately cannot resolve the caller's spelling for itself: resolving twice
+    means the second resolve can land somewhere the first never saw if a symlink
+    or a directory inside an allowed location is replaced in between — and that
+    result would reach the browser unchecked. One resolve, carried.
+
+    Per request, like the gate that owns it; it is never shared or reused.
+    """
+
+    __slots__ = ("_path",)
+
+    def __init__(self) -> None:
+        self._path: "Path | None" = None
+
+    def admit(self, path: Path) -> None:
+        self._path = path
+
+    @property
+    def path(self) -> Path:
+        """The admitted path. Raises if the gate's page check never ran."""
+        if self._path is None:
+            # Unreachable while GatedPage gates before it acts; fail closed
+            # rather than trust that, because what follows is a filesystem read.
+            raise ValidationError(
+                "no file was admitted by the upload gate — refusing to upload")
+        return self._path
+
+
+@dataclass(frozen=True)
+class UploadFileGate(WriteGate):
+    """A :class:`WriteGate` that also carries the file its page check admitted.
+
+    ``upload-file`` is the one action whose subject is not fully described by the
+    element it touches: it also has a *file*, judged by gate 4. This carries that
+    decision to the action, so there is no second path in play for the action to
+    pick up by mistake.
+    """
+    admitted: AdmittedFile = field(default_factory=AdmittedFile)
+
+
 def click_gate(access_rules: BrowdenAccessRuleSet) -> WriteGate:
     """The ``click`` gates, bound to ``access_rules``."""
     return WriteGate(
@@ -324,19 +384,25 @@ def press_key_gate(access_rules: BrowdenAccessRuleSet, key: str) -> WriteGate:
             access_rules, url, css_selector, found, key))
 
 
-def upload_file_gate(access_rules: BrowdenAccessRuleSet, file_path: str) -> WriteGate:
+def upload_file_gate(access_rules: BrowdenAccessRuleSet, file_path: str) -> UploadFileGate:
     """The ``upload_file`` gates for ``file_path``, bound to ``access_rules``.
 
     The filesystem gate runs in ``check_page``, i.e. **before the DOM is read**:
     there is no reason to inspect a page for an upload that is refused whatever
     the page holds, and it keeps the decision inside the one driver hold with
     every other gate (see docs/design/gate-atomicity.md).
+
+    The path it admits is recorded on the returned gate (:class:`AdmittedFile`)
+    and is the only one the action can reach.
     """
+    admitted = AdmittedFile()
+
     def check_page(url: str) -> None:
         check_action_host(access_rules, "upload-file", url)
-        validate_upload_path(access_rules.allowed_upload_locations, file_path)
+        admitted.admit(validate_upload_path(access_rules.allowed_upload_locations, file_path))
 
-    return WriteGate(
+    return UploadFileGate(
         check_page=check_page,
         check_element=lambda url, css_selector, found: validate_upload_target(
-            access_rules, url, css_selector, found))
+            access_rules, url, css_selector, found),
+        admitted=admitted)

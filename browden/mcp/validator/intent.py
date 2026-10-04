@@ -333,7 +333,9 @@ def is_uploadable_control(node: dict) -> bool:
     control by the ``upload-file`` allowlist label / ``field_ids``.
 
     A readonly file input is refused for the same reason a readonly text box is:
-    a field the human could not fill is not one the agent may fill either.
+    a field the human could not fill is not one the agent may fill either. A
+    ``multiple`` input is refused too: this action uploads one file, and that is
+    the control that could hold a second.
 
     Default-deny: every check must pass. ``node`` is a serialized element dict.
     """
@@ -343,6 +345,12 @@ def is_uploadable_control(node: dict) -> bool:
     if _fails_integrity(attrs):
         return False
     if "readonly" in attrs or attrs.get("aria-readonly") == "true":
+        return False
+    # One file per upload. A `multiple` input is the only control that can hold
+    # more than one, so refusing it here means a single admitted path is also a
+    # single file at the browser — nothing can arrive alongside it. Lifting this
+    # is a deliberate later step, with its own way to authorize a set of files.
+    if "multiple" in attrs:
         return False
     return node.get("tag") == "input" and attrs.get("type") in _UPLOADABLE_INPUT_TYPES
 
