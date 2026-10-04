@@ -1,8 +1,8 @@
 """End-to-end: the insert_text (write-text) primitive against a real (headless) Chrome.
 
-Goes through ``BrowserSessionManager.insert_text`` -> ``backend.insert_text_element`` — the same
-path the ``insert_text`` MCP tool takes after gating — so it exercises the live chain:
-find one element -> visible/enabled -> ``clear()`` + ``send_keys``. Each field
+Goes through ``BrowserSessionManager.insert_text`` -> ``GatedPage`` -> ``backend.insert_text_target`` — the same
+path the ``insert_text`` MCP tool takes — so it exercises the live chain:
+snapshot the one match -> visible/enabled -> ``clear()`` + ``send_keys``. Each field
 echoes its live value on ``input`` into an ``<output>``; re-querying that echo
 (the cache is invalidated by the write) proves the value actually landed and input
 events fired. The page is an inline ``data:`` document, so the run is offline.

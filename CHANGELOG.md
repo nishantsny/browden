@@ -14,8 +14,29 @@ All notable changes to browden are documented here. The format follows
   never received that page (the landing was bounced and the request refused),
   but its content still left the browser into browden's memory. The landing is
   now checked between the reload and the fetch.
+- **Reads and writes gate what was actually fetched, not just the URL seen first.**
+  Inside one driver hold, the page's own JS could still navigate between the
+  URL check and the fetch, and a write's gates judged a parse of the page while
+  the backend then re-found the selector live. Now a read's HTML and its
+  `document.URL` come from one script and that URL is gated; a write's page,
+  URL, live match count and element come from one script, the gates judge that
+  snapshot, and the action runs on that exact element (a replaced element is
+  refused as stale). A screenshot re-checks the URL after the capture. The soup
+  cache is keyed by URL, so a tab whose page navigated itself is never answered
+  from a snapshot of the page it left.
 
 ### Changed
+- **`GatedPage` is the only code that reads page content or acts on a page.**
+  Session methods get a `GatedPage` (`session_management/gated_page.py`) for
+  every read, write, navigation and reload, and never call the backend's content
+  methods themselves. `test/unit/mcp/test_gated_page_guard.py` fails the build
+  if any other module does, and every backend method must be classified there as
+  lifecycle or content. The soup cache is now a plain store; fetching and
+  reloading moved into `GatedPage`. **Backend interface:** `get_tab_html` is
+  replaced by `page_snapshot`, `target_snapshot` is new, and
+  `click_element` / `insert_text_element` / `press_key_element` are replaced by
+  `click_target` / `insert_text_target` / `press_key_target`, which act on the
+  element a snapshot returned.
 - **One race table for every page-touching tool (tests).**
   `test/unit/mcp/test_gate_races.py` classifies each tool that reads, writes,
   navigates or reloads in a single `TOOLS` table (`READ` / `WRITE` /

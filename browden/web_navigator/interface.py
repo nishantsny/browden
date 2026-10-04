@@ -1,5 +1,7 @@
 from abc import ABC, abstractmethod
+from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 from ..common.tab import TabInfo
 
@@ -12,6 +14,39 @@ class TabNotFoundError(LookupError):
     backend never see a driver-specific exception. Carries a clean message — no
     driver stack trace.
     """
+
+
+class InvalidSelectorError(ValueError):
+    """The browser rejected a CSS selector (``querySelectorAll`` threw)."""
+
+
+@dataclass(frozen=True)
+class PageSnapshot:
+    """The focused document's URL and HTML, read together in ONE script.
+
+    Because both come from the same instant, the URL is the one the HTML was
+    served from, so gating ``url`` gates exactly what was fetched.
+    """
+    url: str
+    html: str
+
+
+@dataclass(frozen=True)
+class TargetSnapshot:
+    """A write target, captured in ONE script with the page it sits on.
+
+    ``url`` and ``html`` are as in :class:`PageSnapshot`; ``count`` is how many
+    live elements matched the selector at that instant, ``tag`` the lowercase tag
+    name of the first, and ``ref`` an opaque reference to it (``None`` when
+    nothing matched). The ref is only good inside the driver hold that took it,
+    and is handed back to a ``*_target`` action, which acts on that exact
+    element rather than re-finding the selector.
+    """
+    url: str
+    html: str
+    count: int
+    tag: str | None
+    ref: Any
 
 
 class WebNavigatorBackend(ABC):
@@ -89,8 +124,15 @@ class WebNavigatorBackend(ABC):
         """Navigate the current tab to url. Url is pre-validated."""
 
     @abstractmethod
-    def get_tab_html(self) -> str:
-        """Return the rendered HTML (post-JS DOM) of the focused tab. Caller focuses first."""
+    def page_snapshot(self) -> PageSnapshot:
+        """The focused document's ``document.URL`` and rendered HTML (post-JS DOM), in
+        one script. Caller focuses first."""
+
+    @abstractmethod
+    def target_snapshot(self, css_selector: str) -> TargetSnapshot:
+        """The focused document plus the live elements ``css_selector`` matches, in
+        one script. Caller focuses first. Raises :class:`InvalidSelectorError` if
+        the browser rejects the selector."""
 
     @abstractmethod
     def reload(self) -> TabInfo:
@@ -115,34 +157,28 @@ class WebNavigatorBackend(ABC):
         """
 
     @abstractmethod
-    def click_element(self, css_selector: str) -> dict:
-        """Find one element by CSS selector on the active tab and click it.
+    def click_target(self, ref) -> dict:
+        """Click the element ``ref`` (from :meth:`target_snapshot`).
 
-        A write primitive. Re-finds the element *live* (the DOM-query
-        tools read a cached snapshot, which cannot click) and refuses unless it
-        is the sole match and is displayed + enabled. Returns the pre/post click
-        URL and title. Policy — which hosts, which elements — is enforced by the
-        caller (the ``click`` tool), never here.
+        A write primitive. Acts on that exact element, never re-finds a selector,
+        and refuses unless it is displayed and enabled. Returns the pre/post click
+        URL and title. Policy — which hosts, which elements — is judged by the
+        caller on the same snapshot the ref came from, never here.
         """
 
     @abstractmethod
-    def insert_text_element(self, css_selector: str, value: str) -> dict:
-        """Find one text field by CSS selector on the active tab and set its value.
+    def insert_text_target(self, ref, value: str) -> dict:
+        """Clear the text field ``ref`` (from :meth:`target_snapshot`) and type ``value``.
 
-        The write-text primitive. Like :meth:`click_element`, re-finds the element
-        *live* and refuses unless it is the sole match and is displayed + enabled;
-        then clears it and types ``value``. Policy — which hosts, which fields,
-        what value — is enforced by the caller (the ``insert_text`` tool), never here.
+        Like :meth:`click_target`: that exact element, displayed and enabled, with
+        policy judged by the caller.
         """
 
     @abstractmethod
-    def press_key_element(self, css_selector: str, key: str) -> dict:
-        """Find one element by CSS selector on the active tab, focus it, press ``key``.
+    def press_key_target(self, ref, key: str) -> dict:
+        """Focus the element ``ref`` (from :meth:`target_snapshot`) and press ``key``.
 
-        The press-key primitive. Like :meth:`click_element`, re-finds the element
-        *live* and refuses unless it is the sole match and is displayed + enabled;
-        then focuses it and dispatches a single control key (``key`` is a W3C
-        ``key`` value such as ``"Enter"`` / ``"ArrowDown"``). Policy — which hosts,
-        which elements, which keys — is enforced by the caller (the ``press_key``
-        tool), never here.
+        Like :meth:`click_target`. ``key`` is a W3C ``key`` value such as
+        ``"Enter"`` / ``"ArrowDown"``; which keys are allowed is policy, judged by
+        the caller.
         """

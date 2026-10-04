@@ -65,7 +65,7 @@ async def test_hot_reload_mid_request_cannot_authorize_what_neither_config_allow
     backend = _backend(SHOP, pages={SHOP: _OTHER_HTML})
     policy, route, _ = _serve(server, _session(backend))
     with policy, route:
-        backend.park_next("get_tab_html")
+        backend.park_next("target_snapshot")
         click = asyncio.create_task(server.click("#go", id=TAB))
         await asyncio.to_thread(backend.parked.wait, 5)
         server._refresher = RuntimeConfigurationRefresher.static(new)  # the reload lands

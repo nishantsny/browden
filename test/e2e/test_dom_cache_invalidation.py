@@ -1,11 +1,11 @@
 """End-to-end: ``invalidate_dom_cache`` against a real (headless) Chrome.
 
 Goes through ``BrowserSessionManager`` — the same path the MCP tool takes — so the
-whole chain runs: live Selenium ``get_tab_html`` -> soup cache -> ``dom.query``.
+whole chain runs: live Selenium ``page_snapshot`` -> soup cache -> ``dom.query``.
 
 The scenario the tool exists for is reproduced literally: the page mutates its own
 DOM *behind the cache's back*. That's staged by calling the **backend** directly
-(``backend.click_element``) instead of ``session.click`` — the session-level write
+(``_page_clicks_add``) instead of ``session.click`` — the session-level write
 tools invalidate the cache for you, the page's own JS obviously does not. The page
 is an inline ``data:`` document, so the run is deterministic and offline.
 """
@@ -50,12 +50,17 @@ async def _page_with_primed_cache(session):
     return page
 
 
+def _page_clicks_add(backend):
+    """Click ``#add`` on the focused tab straight through the backend, as the page's JS would."""
+    backend.click_target(backend.target_snapshot("#add").ref)
+
+
 @pytest.mark.asyncio
 async def test_invalidate_makes_the_next_read_see_a_page_side_dom_change(session, backend):
     page = await _page_with_primed_cache(session)
 
     # The page mutates itself; browden's cached parse predates the change.
-    backend.click_element("#add")
+    _page_clicks_add(backend)
 
     stale = await session.query_selector("#late", id=page["id"], gate=OPEN_READ_GATE)
     assert stale["found"] is False  # served from the pre-mutation snapshot
@@ -75,7 +80,7 @@ async def test_invalidate_keeps_live_dom_state_that_force_reload_discards(sessio
     # live DOM (JS-built state survives); force_reload re-fetches the page (it
     # doesn't). Same starting point, opposite outcomes.
     page = await _page_with_primed_cache(session)
-    backend.click_element("#add")
+    _page_clicks_add(backend)
 
     await session.invalidate_dom_cache(id=page["id"])
     assert (await session.query_selector("#late", id=page["id"], gate=OPEN_READ_GATE))["found"] is True
@@ -106,9 +111,9 @@ async def test_invalidate_drops_only_the_named_tabs_snapshot(session, backend):
     # same page, same kind of page-side mutation — must keep answering from its
     # own snapshot. Its *staleness* is what proves the invalidation was scoped.
     first = await _page_with_primed_cache(session)
-    backend.click_element("#add")  # page 1 mutates itself
+    _page_clicks_add(backend)  # page 1 mutates itself
     second = await _page_with_primed_cache(session)
-    backend.click_element("#add")  # page 2 mutates itself
+    _page_clicks_add(backend)  # page 2 mutates itself
 
     await session.invalidate_dom_cache(id=first["id"])
 

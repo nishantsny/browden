@@ -10,16 +10,22 @@ from pathlib import Path
 from ...common.logger import logger
 from ...common.tab import TabInfo
 from ...dependencies.selenium import (
-    By,
     ChromeOptions,
     InvalidElementStateException,
+    JavascriptException,
     Keys,
-    NoSuchElementException,
     NoSuchWindowException,
+    StaleElementReferenceException,
     WebDriverWait,
     webdriver,
 )
-from ..interface import TabNotFoundError, WebNavigatorBackend
+from ..interface import (
+    InvalidSelectorError,
+    PageSnapshot,
+    TabNotFoundError,
+    TargetSnapshot,
+    WebNavigatorBackend,
+)
 from ..utils.network_utils import get_free_port
 
 # W3C `key` value -> the Selenium `Keys` constant that dispatches it. Covers
@@ -416,25 +422,20 @@ class SeleniumChromeBackend(WebNavigatorBackend):
         )
 
     @staticmethod
-    def _resolve_one_visible(drv, css_selector: str):
-        """Re-find a policy-validated selector live and return its single actionable element.
+    def _vet(el):
+        """``el`` if it is still in the page, displayed and enabled; else raise.
 
-        The identical resolve-and-vet block ``click_element`` and
-        ``insert_text_element`` both run. Ambiguity is a deny: the policy layer
-        validated exactly one element on the snapshot, so anything other than one
-        live match — or a match that is hidden or disabled — means the DOM moved
-        under us, and the caller must not act on it.
+        The element came from :meth:`target_snapshot` in the same driver hold. If
+        the page replaced it since, it is stale, and the caller must not act on
+        whatever stands in its place now.
         """
-        matches = drv.find_elements(By.CSS_SELECTOR, css_selector)
-        if len(matches) == 0:
-            raise NoSuchElementException(f"no element matches {css_selector!r}")
-        if len(matches) > 1:
-            raise ValueError(f"selector {css_selector!r} matched {len(matches)} live elements")
-        el = matches[0]
-        if not el.is_displayed():
-            raise ValueError("target element is not visible")
-        if not el.is_enabled():
-            raise ValueError("target element is disabled")
+        try:
+            if not el.is_displayed():
+                raise ValueError("target element is not visible")
+            if not el.is_enabled():
+                raise ValueError("target element is disabled")
+        except StaleElementReferenceException:
+            raise ValueError("target element left the page before it could be acted on") from None
         return el
 
     def list_tabs(self) -> list[TabInfo]:
@@ -482,10 +483,43 @@ class SeleniumChromeBackend(WebNavigatorBackend):
         _wait_for_title(drv)
         return self._tabinfo(drv, selected=True)
 
-    def get_tab_html(self) -> str:
+    # One script, so the URL and the content are of the same instant: page JS
+    # can't navigate in between.
+    _PAGE_SNAPSHOT_JS = "return [document.URL, document.documentElement.outerHTML];"
+    # Capped at two matches: a write needs exactly one, and two shows it isn't.
+    _TARGET_SNAPSHOT_JS = """
+        const els = document.querySelectorAll(arguments[0]);
+        const first = els.length ? els[0] : null;
+        return [document.URL, document.documentElement.outerHTML, els.length,
+                first && first.tagName.toLowerCase(), first];
+    """
+
+    def page_snapshot(self) -> PageSnapshot:
         # Operates on the focused tab; the caller select_tab's first (uniform
         # tab-targeting contract — no method self-focuses from a handle).
-        return self._drv().page_source
+        drv = self._drv()
+        try:
+            url, html = drv.execute_script(self._PAGE_SNAPSHOT_JS)
+        except NoSuchWindowException:
+            raise TabNotFoundError("there is no active tab") from None
+        except Exception:
+            # Script can't run here (a chrome:// page); see document_url.
+            return PageSnapshot(url=self.current_url(), html=drv.page_source)
+        return PageSnapshot(url=url, html=html)
+
+    def target_snapshot(self, css_selector: str) -> TargetSnapshot:
+        drv = self._drv()
+        try:
+            url, html, count, tag, ref = drv.execute_script(self._TARGET_SNAPSHOT_JS, css_selector)
+        except NoSuchWindowException:
+            raise TabNotFoundError("there is no active tab to act in") from None
+        except (JavascriptException, InvalidElementStateException) as e:
+            # Chromedriver reports querySelectorAll's SyntaxError as "invalid
+            # element state"; match the message, not the class.
+            if "not a valid selector" not in (e.msg or ""):
+                raise
+            raise InvalidSelectorError(f"{css_selector!r} is not a valid selector") from None
+        return TargetSnapshot(url=url, html=html, count=count, tag=tag, ref=ref)
 
     def reload(self) -> TabInfo:
         drv = self._drv()
@@ -526,14 +560,13 @@ class SeleniumChromeBackend(WebNavigatorBackend):
         except NoSuchWindowException:
             raise TabNotFoundError("there is no active tab to screenshot") from None
 
-    def click_element(self, css_selector: str) -> dict:
+    def click_target(self, ref) -> dict:
         drv = self._drv()
         try:
             url_before = drv.current_url
-            el = self._resolve_one_visible(drv, css_selector)
         except NoSuchWindowException:
             raise TabNotFoundError("there is no active tab to click in") from None
-        el.click()
+        self._vet(ref).click()
         _wait_for_title(drv)
         return {
             "clicked": True,
@@ -542,12 +575,9 @@ class SeleniumChromeBackend(WebNavigatorBackend):
             "title": drv.title,
         }
 
-    def insert_text_element(self, css_selector: str, value: str) -> dict:
+    def insert_text_target(self, ref, value: str) -> dict:
         drv = self._drv()
-        try:
-            el = self._resolve_one_visible(drv, css_selector)
-        except NoSuchWindowException:
-            raise TabNotFoundError("there is no active tab to insert text into") from None
+        el = self._vet(ref)
         try:
             el.clear()
         except InvalidElementStateException:
@@ -562,13 +592,13 @@ class SeleniumChromeBackend(WebNavigatorBackend):
             "title": drv.title,
         }
 
-    def press_key_element(self, css_selector: str, key: str) -> dict:
+    def press_key_target(self, ref, key: str) -> dict:
         drv = self._drv()
         try:
             url_before = drv.current_url
-            el = self._resolve_one_visible(drv, css_selector)
         except NoSuchWindowException:
             raise TabNotFoundError("there is no active tab to press a key in") from None
+        el = self._vet(ref)
         selenium_key = _SELENIUM_KEYS.get(key)
         if selenium_key is None:
             # The gate only lets control keys through; anything else is a bug.
