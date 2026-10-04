@@ -26,6 +26,16 @@ All notable changes to browden are documented here. The format follows
   from a snapshot of the page it left.
 
 ### Changed
+- **No test stubs a private method (tests).** 19 stubs in 13 tests replaced a
+  private helper: the backend's `_launch_chrome`, `_wait_for_devtools`,
+  `_free_port`, `_chrome_args`, `_clear_stale_singletons`, `_terminate` and
+  `_wellknown_chrome_paths`, and the session's `_run_driver`. A test that
+  stubs a helper keeps passing after that helper is renamed or deleted (the
+  patch just recreates it), which is how a removed helper reached CI on #118.
+  Each test now fakes only the external boundary underneath:
+  `subprocess.Popen`, the DevTools `urlopen` probe, the port, the clock, the
+  filesystem, `asyncio.to_thread`, or a constructor argument. The private code
+  runs for real. No test was removed.
 - **`GatedPage` is the only code that reads page content or acts on a page.**
   Session methods get a `GatedPage` (`session_management/gated_page.py`) for
   every read, write, navigation and reload, and never call the backend's content
