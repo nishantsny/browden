@@ -13,7 +13,10 @@ from unittest.mock import patch
 
 from browden.common.tab import TabInfo
 from browden.configs.loader import RuntimeConfigurationRefresher
+from browden.dom import query
 from browden.mcp.session_management.browser_session_manager import BrowserSessionManager
+from browden.web_navigator.interface import PageSnapshot, TargetSnapshot
+from browden.web_navigator.soup_cache import SoupCache
 
 TAB = "ns-h1"
 PROFILE = "/fake/profile"
@@ -25,7 +28,7 @@ class OnePageBackend:
     ``redirects`` maps a URL to where loading it actually lands — on
     ``navigate`` and on ``reload`` alike, the way a server-side 302 does.
     ``reads`` records ``(url, what)`` for every time page content left the
-    browser (HTML fetched, screenshot taken); ``actions`` records every write as
+    browser (a page or write-target snapshot, a screenshot); ``actions`` records every write as
     ``(url it landed on, action, selector)``.
     """
 
@@ -83,11 +86,23 @@ class OnePageBackend:
     def close_tab(self, handle):
         self.closed.append(handle)
 
-    def get_tab_html(self):
+    def page_snapshot(self):
         self.reads.append((self.url, "html"))
+        snap = PageSnapshot(url=self.url, html=self.pages.get(self.url, "<html></html>"))
+        self._maybe_park("page_snapshot")
+        return snap
+
+    def target_snapshot(self, css_selector):
+        # The live match is the parse's, which is all these pages need; the ref
+        # names the page it was taken on.
+        self.reads.append((self.url, "target"))
         html = self.pages.get(self.url, "<html></html>")
-        self._maybe_park("get_tab_html")
-        return html
+        page, _, _, total, _ = query.css_all(SoupCache.parse(html), css_selector, 2, 0)
+        snap = TargetSnapshot(url=self.url, html=html, count=total,
+                              tag=page[0].name if page else None,
+                              ref=(self.url, css_selector) if page else None)
+        self._maybe_park("target_snapshot")
+        return snap
 
     def screenshot(self):
         self.reads.append((self.url, "screenshot"))
@@ -104,18 +119,20 @@ class OnePageBackend:
         self._maybe_park("reload")
         return self._tab()
 
-    def _act(self, action, css_selector):
-        self.actions.append((self.url, action, css_selector))
+    def _act(self, action, ref):
+        # Recorded on the page the tab is on when the action lands, which a ref
+        # from an earlier page would not match.
+        self.actions.append((self.url, action, ref[1]))
         return {"url": self.url, "title": "t"}
 
-    def click_element(self, css_selector):
-        return {"clicked": True, **self._act("click", css_selector)}
+    def click_target(self, ref):
+        return {"clicked": True, **self._act("click", ref)}
 
-    def insert_text_element(self, css_selector, value):
-        return {"inserted": True, "value": value, **self._act("insert_text", css_selector)}
+    def insert_text_target(self, ref, value):
+        return {"inserted": True, "value": value, **self._act("insert_text", ref)}
 
-    def press_key_element(self, css_selector, key):
-        return {"pressed": key, **self._act("press_key", css_selector)}
+    def press_key_target(self, ref, key):
+        return {"pressed": key, **self._act("press_key", ref)}
 
 
 def make_session(backend, clock=time.monotonic):

@@ -71,24 +71,36 @@ unit.**
 
 The session runs the check and the thing it guards in **one driver-lock hold**.
 Wherever a navigation or reload inside that hold lands, the landing is checked
-before the hold ends.
+before the hold ends. Inside the hold, every read of page content and every
+action goes through a **`GatedPage`** (`session_management/gated_page.py`),
+which gates what it actually fetched or acted on — not just the URL it saw
+first.
 
 ```
 write   session.click(sel, id=, gate=WriteGate)           one hold, off the loop:
-            select_tab · url = document_url · gate.check_page(url)
-            found = css_all(parse(get_tab_html()))           fresh parse of the live page
-            gate.check_element(url, sel, found) · click_element(sel)
+            select_tab · gate.check_page(document_url)
+            snap = target_snapshot(sel)                      ONE script: document.URL, outerHTML,
+                                                             live match count, tag, element ref
+            snap.url moved? gate.check_page(snap.url)
+            gate.check_element(snap.url, sel, css_all(parse(snap.html)))
+            live count == 1 and same tag as the parse · click_target(snap.ref)
 
 read    session.query_selector(sel, id=, gate=ReadGate)   one hold:
-            select_tab · gate.check_page(document_url)
-            soup = cache, or a TTL reload → gate the landing BEFORE fetching it; off-list: bounce + refuse
+            select_tab · url = document_url · gate.check_page(url)
+            cache entry for (tab, url)?  fresh → use it
+                                         stale → reload · gate the landing BEFORE fetching; off-list: bounce + refuse
+            else snap = page_snapshot()                      ONE script: document.URL + outerHTML
+                 gate snap.url (off-list: bounce + refuse) · cache under snap.url
             query soup
+
+shot    session.screenshot(id=, gate=ReadGate)             one hold:
+            gate.check_page(document_url) · screenshot · URL moved? gate it again
 
 nav     session.navigate(url, id=, gate=ReadGate)         one hold:
             navigate(url) · gate the landing → bounce to about:blank if off-list
 
 reload  session.force_reload_tab(id=, gate=ReadGate)      one hold:
-            gate.check_page(document_url) · reload · gate the landing → bounce · only then fetch
+            gate.check_page(document_url) · reload · gate the landing → bounce · only then snapshot
 ```
 
 - **`WriteGate`** (`validator/write_gates.py`) and **`ReadGate`**
@@ -103,7 +115,15 @@ reload  session.force_reload_tab(id=, gate=ReadGate)      one hold:
 - **There is no ungated path.** `gate` is a required argument of every session
   method that reads page content, writes, navigates, reloads or lists tabs. A
   test that wants the raw primitive passes an explicit `OPEN_GATE` /
-  `OPEN_READ_GATE`. The session exposes no ungated way to read a tab's URL (it
+  `OPEN_READ_GATE`.
+- **Only `GatedPage` touches page content.** Session methods get a `GatedPage`
+  (via `_with_page`), never the backend, for anything that reads or acts on a
+  page. `test/unit/mcp/test_gated_page_guard.py` parses every module and fails
+  if anything else calls a backend content method (`page_snapshot`,
+  `target_snapshot`, `document_url`, `screenshot`, `navigate`, `reload`, the
+  `*_target` actions) or fills the soup cache. Every backend method must be
+  classified there as lifecycle or content, so a new one is caught too. This is
+  what keeps a check-then-read across two holds from coming back. The session exposes no ungated way to read a tab's URL (it
   once had a public `document_url()`): a URL read in its own hold is stale by
   the time anything acts on it, so the gates read `backend.document_url()`
   inside the hold they guard, and nothing else reads it at all.
@@ -117,7 +137,7 @@ reload  session.force_reload_tab(id=, gate=ReadGate)      one hold:
   listing, the read gate on each tab's URL and the close of any off-list tab
   are one hold, so no other request sees an off-list tab in between. A tab
   that can't be closed (the last one) is still never listed.
-- **The bounce is part of the hold.** `_bounce_off_list_landing` navigates to
+- **The bounce is part of the hold.** `GatedPage._bounce` navigates to
   `about:blank` and drops any snapshot the landing left in the soup cache
   before the hold ends, so no other request ever sees a tab resting off-list.
   The server's old `_guard_landing` is gone.
@@ -146,17 +166,25 @@ is built from a single snapshot.
   layering, since the session now runs callbacks it doesn't own. We accepted
   that because the lock that makes the read or write safe lives in the session,
   so the decision has to run there too.
-- **The driver lock is held longer per request.** A write's hold now includes an
-  HTML fetch, a parse and the gates, as well as the action. A read's hold adds
+- **The driver lock is held longer per request.** A write's hold now includes a
+  snapshot script, a parse and the gates, as well as the action. A read's hold adds
   one `document_url` round trip. Other requests on the same profile wait that
   much longer (the 10 s busy timeout is unchanged). Correctness wins over the
   latency.
-- **Writes never use the soup cache.** Every write costs one `page_source` round
+- **Writes never use the soup cache.** Every write costs one snapshot round
   trip and one parse, even when a fresh snapshot is cached. That's what makes
   the write gate judge the live page. The fresh parse isn't stored, because a
   successful write invalidates the tab's cache anyway.
-- **A cold read focuses its tab twice** (before the URL check, and inside the
-  soup cache), within one hold. That's one extra, cheap `switch_to.window`.
+- **A read checks the URL twice on a fetch**: `document_url` before it, so an
+  off-list page is never fetched in the common case, and the snapshot's own
+  URL after it, so what was fetched is what was judged. The first costs one
+  round trip.
+- **A write needs the parse and the browser to agree.** The gates judge the
+  element as `html.parser` + soupsieve see it; the action uses the element the
+  browser's `querySelectorAll` returned in the same script. If the two disagree
+  on the count or the tag, the write is refused rather than guessed at.
+- **The cache holds one page per tab, keyed by URL.** A tab whose page's JS
+  moved it to another URL misses and refetches, even if it moves back.
 - **A refused request doesn't `touch` the tab's idle registry entry.** Before,
   the separate `document_url` call did. A refused request is not activity
   worth keeping a tab alive for.
@@ -168,20 +196,13 @@ is built from a single snapshot.
 
 ## What still isn't atomic
 
-- **Page JS inside the hold.** Between `document_url` and `get_tab_html` (or
-  `screenshot`), and between a write's parse and the backend's live
-  `_resolve_one_visible`, the page's own scripts can still navigate or change
-  the DOM. The windows are a few WebDriver round trips, and no other *request*
-  can reach them, but the page itself can. For writes, the backend refuses an
-  ambiguous or missing live match, but it does not re-judge the label. Closing
-  this fully means gating what was actually fetched: the resolved element's
-  `outerHTML`, or a `document.URL` read in the same script as the content.
-- **A cached snapshot from an earlier page.** The soup cache is keyed by tab,
-  not by URL, and is only invalidated by browden's own navigations and writes.
-  If the page's JS navigates the tab, a read gates the new live URL but can be
-  answered from a fresh-by-TTL snapshot of the previous page. That page was
-  admitted when it was fetched, but possibly under rules that have since been
-  tightened. Keying cache entries by URL would close this.
+- **Between the write's snapshot and its action.** The action runs on the
+  element the snapshot judged (by reference, not by re-finding the selector),
+  and an element the page has since replaced is refused as stale. But the page
+  can still change that same element's text or attributes in the one round trip
+  before the action, and it is not re-judged.
+- **Between a screenshot's checks.** The URL is gated before and after the
+  capture; a page that navigated away and back between them isn't seen.
 - **The action's effect.** A click that navigates, or that runs JS, can do
   anything the page does once clicked. For anchors, gate 2b bounds where an
   `href` can navigate, but the gates judge the control, not its consequences.
@@ -194,11 +215,15 @@ is built from a single snapshot.
 1. Build the gate (`read_gate`, or a `WriteGate` factory) from **one**
    `_access_rules_for(session)` call.
 2. Hand it to a session method that runs it **and** the read or action in one
-   `_with_tab` hold: through `_gated_soup` / `_check_live_url` for reads, and
-   `_gated_write` for writes.
-3. Anything in that hold that navigates or reloads gates its landing with
-   `_bounce_off_list_landing` before the hold ends.
-4. Writes judge a fresh parse of the live page, never the soup cache.
+   hold, through `_with_page`: the work gets a `GatedPage` and calls its
+   gated methods (`soup`, `screenshot`, `reload`, `navigate`, `click`, …).
+3. A new kind of read or action is a new `GatedPage` method, and a new backend
+   primitive is classified in `test_gated_page_guard.py`. It gates the URL the
+   content or element actually came from — read in the same script as the
+   content, as `page_snapshot` / `target_snapshot` do — and any navigation or
+   reload in it gates its landing with `_bounce` before anything is fetched.
+4. Writes judge a fresh snapshot of the live page, never the soup cache, and act
+   on the element that snapshot returned.
 5. Classify the tool in `TOOLS` in `test/unit/mcp/test_gate_races.py` (as
    `READ`, `WRITE` or `LANDING`, with the backend calls it makes as its
    `park_points`). That one entry runs it through every race of its kind: paused
@@ -206,7 +231,3 @@ is built from a single snapshot.
    and to an allowed URL that redirects off-list, queues behind it. The
    invariant checked after every race is the same: no off-list content left the
    browser, and no write landed on a page without a write rule.
-6. A reload in a hold — `force_reload_tab`, or the soup cache's TTL reload —
-   gates its landing through the cache's `on_reload` hook, which runs *before*
-   the landed page is fetched. Gating after the fetch keeps the content from the
-   agent, but it has still left the browser.

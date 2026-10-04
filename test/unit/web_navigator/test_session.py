@@ -4,7 +4,7 @@ import time
 import pytest
 
 from browden.common.tab import TabInfo
-from browden.web_navigator.interface import TabNotFoundError
+from browden.web_navigator.interface import PageSnapshot, TabNotFoundError
 from browden.mcp.session_management.browser_session_manager import (
     DRIVER_LOCK_TIMEOUT_SECONDS,
     IDLE_TTL_SECONDS,
@@ -94,11 +94,11 @@ class FakeBackend:
         self.calls.append(("navigate", url))
         return TabInfo(handle="h1", url=url, title="t", selected=True, profile_dir=self.profile_dir)
 
-    # get_tab_html / reload / screenshot take no handle: they act on the
+    # page_snapshot / reload / screenshot take no handle: they act on the
     # currently focused tab (self.active), which the caller select_tab's first.
-    def get_tab_html(self):
-        self.calls.append(("get_tab_html", self.active))
-        return self.source
+    def page_snapshot(self):
+        self.calls.append(("page_snapshot", self.active))
+        return PageSnapshot(url=self.document_url(), html=self.source)
 
     def reload(self):
         self.calls.append(("reload", self.active))
@@ -295,7 +295,7 @@ async def test_dom_query_on_dead_page_returns_error_and_drops_it():
     backend = FakeBackend()
     s = make_session(backend)
     # a leftover registry entry for a tab that has since been closed; no fresh
-    # cache entry, so get_soup hits the backend and discovers the dead handle
+    # cache entry, so the read hits the backend and discovers the dead handle
     s._registry.touch("h7")
     backend.missing.add("h7")
 
@@ -319,7 +319,7 @@ async def test_invalidate_dom_cache_drops_the_entry_without_driving_the_page():
     assert "h1" in s._registry._last_access  # …but the tab is still tracked
     # Nothing was reloaded, re-fetched, or even focused — existence is checked
     # with list_handles, which doesn't move the focused window.
-    assert not any(c in backend.calls for c in [("reload", "h1"), ("get_tab_html", "h1"), ("select_tab", "h1")])
+    assert not any(c in backend.calls for c in [("reload", "h1"), ("page_snapshot", "h1"), ("select_tab", "h1")])
     # Exactly one list_handles: the existence check. A second would mean the tool
     # swept idle tabs, which no tool call may do (#136 — sweeping is the reaper's
     # timer alone, and sweep_idle requires the driver lock this path doesn't hold).
@@ -362,7 +362,7 @@ async def test_force_reload_on_dead_page_returns_error():
 
 @pytest.mark.asyncio
 async def test_force_reload_partial_failure_drops_supplied_page_id():
-    """reload() succeeds but the subsequent get_tab_html() fails — the tab
+    """reload() succeeds but the subsequent page_snapshot() fails — the tab
     died between the two backend calls. The supplied handle must be dropped from
     cache + registry, and a structured error returned. Regression: an earlier
     implementation defaulted handle from current_handle() but caught the
@@ -372,18 +372,18 @@ async def test_force_reload_partial_failure_drops_supplied_page_id():
     s._registry.touch("h2")
     s._cache._entries["h2"] = object()  # type: ignore[assignment]
 
-    # Make get_tab_html raise (post-select_tab focus, mid-reload), but leave reload working.
-    def get_tab_html():
-        backend.calls.append(("get_tab_html", backend.active))
+    # Make page_snapshot raise (post-select_tab focus, mid-reload), but leave reload working.
+    def page_snapshot():
+        backend.calls.append(("page_snapshot", backend.active))
         raise TabNotFoundError(f"tab {backend.active!r} disappeared mid-reload")
-    backend.get_tab_html = get_tab_html
+    backend.page_snapshot = page_snapshot
 
     res = await s.force_reload_tab(id="ns-h2", gate=OPEN_READ_GATE)
 
     assert res == {"id": "ns-h2",
                    "error": "tab ns-h2 is no longer open — call list_tabs for current tabs"}
     assert ("reload", "h2") in backend.calls  # the partial succeeded
-    assert ("get_tab_html", "h2") in backend.calls  # …and the second call failed
+    assert ("page_snapshot", "h2") in backend.calls  # …and the second call failed
     assert "h2" not in s._cache._entries  # old entry dropped
     assert "h2" not in s._registry._last_access  # tracking dropped
 
@@ -434,17 +434,18 @@ async def test_select_dead_page_returns_envelope_and_drops_it():
 class SlowReadBackend(FakeBackend):
     """Reads take real time, so an unsynchronized pair WOULD interleave.
 
-    ``get_tab_html`` runs off the loop in ``asyncio.to_thread``; sleeping in it
+    ``page_snapshot`` runs off the loop in ``asyncio.to_thread``; sleeping in it
     gives a second coroutine every chance to slip a ``select_tab`` in between
     this one's focus and its read — which is exactly the cross-talk the lock
     exists to prevent. Each read returns the focused handle's own marker, so a
     stolen focus shows up as one tab's read returning another tab's document.
     """
 
-    def get_tab_html(self):
+    def page_snapshot(self):
         time.sleep(0.05)
-        self.calls.append(("get_tab_html", self.active))
-        return f"<html><body><p id='who'>{self.active}</p></body></html>"
+        self.calls.append(("page_snapshot", self.active))
+        return PageSnapshot(url=self.document_url(),
+                            html=f"<html><body><p id='who'>{self.active}</p></body></html>")
 
 
 @pytest.mark.asyncio
@@ -459,13 +460,10 @@ async def test_concurrent_reads_on_one_session_do_not_steal_each_others_focus():
     results = await asyncio.gather(*(s.query_selector("#who", id=f"ns-{h}", gate=OPEN_READ_GATE) for h in handles))
 
     assert [r["element"]["text"] for r in results] == list(handles)
-    # Every read is focus-then-act, never focus-focus-read-read. (A gated read
-    # focuses its tab twice in a row — once to check the live URL, once inside
-    # the soup cache — within the same hold, so repeats are collapsed.)
-    driver_calls = [c for c in backend.calls if c[0] in ("select_tab", "get_tab_html")]
-    driver_calls = [c for i, c in enumerate(driver_calls) if i == 0 or c != driver_calls[i - 1]]
+    # Every read is focus-then-act, never focus-focus-read-read.
+    driver_calls = [c for c in backend.calls if c[0] in ("select_tab", "page_snapshot")]
     assert driver_calls == [call for h in handles
-                            for call in (("select_tab", h), ("get_tab_html", h))]
+                            for call in (("select_tab", h), ("page_snapshot", h))]
 
 
 @pytest.mark.asyncio

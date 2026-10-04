@@ -1,8 +1,8 @@
 """End-to-end: the press-key primitive against a real (headless) Chrome.
 
-Goes through ``BrowserSessionManager.press_key`` -> ``backend.press_key_element`` —
-the same path the ``press_key`` MCP tool takes after gating — so it exercises the
-live chain: find one element -> visible/enabled -> JS ``focus()`` + ``send_keys``
+Goes through ``BrowserSessionManager.press_key`` -> ``GatedPage`` ->
+``backend.press_key_target`` — the same path the ``press_key`` MCP tool takes — so
+it exercises the live chain: snapshot the one match -> visible/enabled -> JS ``focus()`` + ``send_keys``
 of a control key. The page is a keyboard-operable list of ``<li tabindex>`` rows
 (the shape a coordinate ``click`` can't reach): each row's ``keydown`` handler
 echoes what happened into ``#picked``, so re-querying that echo (the cache is

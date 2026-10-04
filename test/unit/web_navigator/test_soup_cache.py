@@ -1,120 +1,51 @@
-from browden.common.tab import TabInfo
 from browden.web_navigator.soup_cache import TTL_SECONDS, SoupCache
 
-
-class FakeBackend:
-    def __init__(self):
-        self.source = "<html><body><p id='x'>hi</p></body></html>"
-        self.get_calls = 0
-        self.reload_calls = 0
-        self.focused = None  # last tab select_tab focused
-
-    def select_tab(self, handle):
-        self.focused = handle
-
-    def get_tab_html(self):
-        self.get_calls += 1
-        return self.source
-
-    def reload(self):
-        self.reload_calls += 1
-        return TabInfo(handle=self.focused or "active", url="https://www.amazon.com/", title="T", selected=True, profile_dir="/p")
+A = "https://shop.example/a"
+B = "https://shop.example/b"
 
 
-def test_first_get_parses_without_reloading(fake_clock):
-    backend = FakeBackend()
+def _soup(text):
+    return SoupCache.parse(f"<html><body><p id='x'>{text}</p></body></html>")
+
+
+def test_an_entry_answers_for_the_url_it_was_fetched_from(fake_clock):
     cache = SoupCache(clock=fake_clock())
-    soup, reloaded = cache.get_soup("p1", backend)
-    assert reloaded is False
-    assert backend.reload_calls == 0
-    assert backend.get_calls == 1
-    assert soup.find(id="x").text == "hi"
+    soup = _soup("a")
+    cache.put("p1", A, soup)
+    assert cache.get("p1", A).soup is soup
 
 
-def test_fresh_entry_returns_cached_without_backend_hit(fake_clock):
-    backend = FakeBackend()
+def test_an_entry_does_not_answer_for_another_url(fake_clock):
+    # The tab's page navigated itself elsewhere: its snapshot of the old page
+    # must not answer a read of the new one.
     cache = SoupCache(clock=fake_clock())
-    s1, _ = cache.get_soup("p1", backend)
-    s2, reloaded = cache.get_soup("p1", backend)
-    assert s2 is s1
-    assert reloaded is False
-    assert backend.get_calls == 1  # not re-fetched
+    cache.put("p1", A, _soup("a"))
+    assert cache.get("p1", B) is None
+    assert cache.get("p2", A) is None
 
 
-def test_stale_entry_triggers_reload(fake_clock):
-    backend = FakeBackend()
+def test_put_replaces_the_tabs_entry(fake_clock):
+    cache = SoupCache(clock=fake_clock())
+    cache.put("p1", A, _soup("a"))
+    cache.put("p1", B, _soup("b"))
+    assert cache.get("p1", A) is None
+    assert cache.get("p1", B).soup.find(id="x").text == "b"
+
+
+def test_an_entry_goes_stale_after_the_ttl(fake_clock):
     clock = fake_clock()
     cache = SoupCache(clock=clock)
-    cache.get_soup("p1", backend)
-    clock.t += TTL_SECONDS
-    backend.source = "<html><body><p id='y'>new</p></body></html>"
-    soup, reloaded = cache.get_soup("p1", backend)
-    assert reloaded is True
-    assert backend.reload_calls == 1
-    assert soup.find(id="y").text == "new"
+    cache.put("p1", A, _soup("a"))
+    entry = cache.get("p1", A)
+    clock.t += TTL_SECONDS - 1
+    assert not cache.is_stale(entry)
+    clock.t += 1
+    assert cache.is_stale(entry)
 
 
-def test_invalidate_forces_refetch(fake_clock):
-    backend = FakeBackend()
+def test_invalidate_drops_the_entry(fake_clock):
     cache = SoupCache(clock=fake_clock())
-    cache.get_soup("p1", backend)
+    cache.put("p1", A, _soup("a"))
     cache.invalidate("p1")
-    _soup, reloaded = cache.get_soup("p1", backend)
-    assert reloaded is False  # a fresh load, not a "stale reload"
-    assert backend.get_calls == 2
-    assert backend.reload_calls == 0
-
-
-def test_force_reload_reloads_browser_and_returns_page_info(fake_clock):
-    backend = FakeBackend()
-    cache = SoupCache(clock=fake_clock())
-    cache.get_soup("p1", backend)
-    backend.source = "<html><body><p id='z'>fresh</p></body></html>"
-    soup, tab_info = cache.force_reload("p1", backend)
-    assert backend.reload_calls == 1
-    assert soup.find(id="z").text == "fresh"
-    assert tab_info.url == "https://www.amazon.com/"
-    # and the cache now holds the fresh soup
-    again, reloaded = cache.get_soup("p1", backend)
-    assert reloaded is False
-    assert again is soup
-
-
-class _Refused(Exception):
-    pass
-
-
-def _refuse(_tab_info):
-    raise _Refused
-
-
-def test_a_stale_reload_runs_on_reload_before_fetching_and_can_abort_it(fake_clock):
-    # on_reload sees where the reload landed before any of that page is fetched;
-    # raising from it stops the fetch and leaves nothing new in the cache.
-    backend = FakeBackend()
-    clock = fake_clock()
-    cache = SoupCache(clock=clock)
-    old, _ = cache.get_soup("p1", backend)
-    clock.t += TTL_SECONDS
-    seen = []
-    try:
-        cache.get_soup("p1", backend, on_reload=lambda tab: (seen.append((tab.url, backend.get_calls)), _refuse(tab)))
-    except _Refused:
-        pass
-    else:
-        raise AssertionError("on_reload's refusal did not propagate")
-    assert seen == [("https://www.amazon.com/", 1)]  # landed URL, and no fetch since the first
-    assert backend.get_calls == 1
-
-
-def test_force_reload_runs_on_reload_before_fetching_and_can_abort_it(fake_clock):
-    backend = FakeBackend()
-    cache = SoupCache(clock=fake_clock())
-    try:
-        cache.force_reload("p1", backend, on_reload=_refuse)
-    except _Refused:
-        pass
-    else:
-        raise AssertionError("on_reload's refusal did not propagate")
-    assert backend.reload_calls == 1
-    assert backend.get_calls == 0  # the landed page was never fetched
+    cache.invalidate("never-cached")  # a no-op
+    assert cache.get("p1", A) is None

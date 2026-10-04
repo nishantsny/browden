@@ -2,8 +2,10 @@
 from selenium import webdriver
 from selenium.common.exceptions import (
     InvalidElementStateException,
+    JavascriptException,
     NoSuchElementException,
     NoSuchWindowException,
+    StaleElementReferenceException,
 )
 from selenium.webdriver.chrome.options import Options as ChromeOptions
 from selenium.webdriver.common.by import By
@@ -19,4 +21,6 @@ __all__ = [
     "NoSuchWindowException",
     "NoSuchElementException",
     "InvalidElementStateException",
+    "JavascriptException",
+    "StaleElementReferenceException",
 ]

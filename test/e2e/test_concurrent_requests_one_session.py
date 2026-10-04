@@ -7,8 +7,8 @@ not thread-safe — while the MCP server dispatches every incoming request with
 one session at once.
 
 What breaks without the lock is *content cross-talk*, not an exception. A read
-is two driver round-trips — ``select_tab(handle)`` then ``get_tab_html()`` (see
-``SoupCache.get_soup``) — so unsynchronized readers interleave and a tab comes
+is several driver round-trips — ``select_tab(handle)``, then ``document_url()`` and
+``page_snapshot()`` (see ``GatedPage.soup``) — so unsynchronized readers interleave and a tab comes
 back with whichever document won the last ``select_tab``. Before the lock this
 test failed with 6/10 tabs returning another tab's page; with it, each request
 waits its turn and re-focuses its own tab, so all ten read their own content.
