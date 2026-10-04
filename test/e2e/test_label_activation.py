@@ -18,6 +18,7 @@ The page is an inline ``data:`` document, so the run is offline.
 import urllib.parse
 
 import pytest
+from gates import OPEN_GATE, OPEN_READ_GATE
 
 from browden.mcp.session_management.browser_session_manager import BrowserSessionManager
 
@@ -61,27 +62,27 @@ def session(new_backend, tmp_path):
 
 
 async def _state(session, tab_id):
-    found = await session.query_selector("#state", id=tab_id)
+    found = await session.query_selector("#state", id=tab_id, gate=OPEN_READ_GATE)
     return found["element"]["text"]
 
 
 @pytest.mark.asyncio
 async def test_clicking_a_label_selects_its_hidden_radio(session):
     blank = await session.new_blank_tab(max_tabs=10)
-    page = await session.navigate(DATA_URL, id=blank["id"])
+    page = await session.navigate(DATA_URL, id=blank["id"], gate=OPEN_READ_GATE)
 
     assert await _state(session, page["id"]) == "none"
 
-    await session.click('label[for="stage2"]', id=page["id"])
+    await session.click('label[for="stage2"]', id=page["id"], gate=OPEN_GATE)
     assert await _state(session, page["id"]) == "stage2:on"
 
 
 @pytest.mark.asyncio
 async def test_clicking_a_label_ticks_its_display_none_checkbox(session):
     blank = await session.new_blank_tab(max_tabs=10)
-    page = await session.navigate(DATA_URL, id=blank["id"])
+    page = await session.navigate(DATA_URL, id=blank["id"], gate=OPEN_READ_GATE)
 
-    await session.click('label[for="consent"]', id=page["id"])
+    await session.click('label[for="consent"]', id=page["id"], gate=OPEN_GATE)
     assert await _state(session, page["id"]) == "consent:on"
 
 
@@ -89,12 +90,12 @@ async def test_clicking_a_label_ticks_its_display_none_checkbox(session):
 async def test_radio_group_switches_between_labels(session):
     """Selecting a second option moves the group, as a real radio group must."""
     blank = await session.new_blank_tab(max_tabs=10)
-    page = await session.navigate(DATA_URL, id=blank["id"])
+    page = await session.navigate(DATA_URL, id=blank["id"], gate=OPEN_READ_GATE)
 
-    await session.click('label[for="stage1"]', id=page["id"])
+    await session.click('label[for="stage1"]', id=page["id"], gate=OPEN_GATE)
     assert await _state(session, page["id"]) == "stage1:on"
 
-    await session.click('label[for="stage2"]', id=page["id"])
+    await session.click('label[for="stage2"]', id=page["id"], gate=OPEN_GATE)
     assert await _state(session, page["id"]) == "stage2:on"
 
 
@@ -102,9 +103,9 @@ async def test_radio_group_switches_between_labels(session):
 async def test_the_hidden_input_itself_is_still_unreachable(session):
     """Why the label route is needed at all: the input cannot be clicked or pressed."""
     blank = await session.new_blank_tab(max_tabs=10)
-    page = await session.navigate(DATA_URL, id=blank["id"])
+    page = await session.navigate(DATA_URL, id=blank["id"], gate=OPEN_READ_GATE)
 
     with pytest.raises(ValueError, match="not visible"):
-        await session.click("#stage2", id=page["id"])
+        await session.click("#stage2", id=page["id"], gate=OPEN_GATE)
     with pytest.raises(ValueError, match="not visible"):
-        await session.press_key("#stage2", "Space", id=page["id"])
+        await session.press_key("#stage2", "Space", id=page["id"], gate=OPEN_GATE)
