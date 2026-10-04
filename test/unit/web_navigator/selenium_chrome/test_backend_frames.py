@@ -133,3 +133,46 @@ def test_retreat_to_top_forgets_the_path_without_running_script():
     drv.switch_to.default_content.assert_called_once()
     drv.execute_script.assert_not_called()
     assert backend.in_frame() is False
+
+
+def _lose_the_frame(backend, drv):
+    """Enter #child, then remove it from the page and refocus the tab."""
+    backend.enter_frame("#child", _ok, _ok)
+    drv.find_elements.return_value = []  # the recorded hop no longer resolves
+    backend.select_tab("h1")             # every op refocuses, replaying the path
+
+
+def test_a_removed_frame_errors_once_instead_of_reading_the_top():
+    backend, drv = _backend()
+    _lose_the_frame(backend, drv)
+    assert backend.in_frame() is False   # the driver is back at the top...
+    with pytest.raises(FrameFocusError, match="no longer on the page"):
+        backend.document_url()           # ...but the next gated op says so
+    assert backend.document_url() == CHILD  # reported once; now at the top as told
+
+
+def test_a_removed_frame_refuses_an_ascent():
+    backend, drv = _backend()
+    _lose_the_frame(backend, drv)
+    with pytest.raises(FrameFocusError):
+        backend.switch_to_parent_frame()
+    drv.switch_to.parent_frame.assert_not_called()
+
+
+@pytest.mark.parametrize("leave", ["switch_to_default_content", "navigate", "reload"])
+def test_leaving_on_purpose_clears_a_removed_frame_silently(leave, monkeypatch):
+    import browden.web_navigator.selenium_chrome.backend as mod
+    monkeypatch.setattr(mod, "_wait_for_title", lambda drv: None)
+    backend, drv = _backend()
+    _lose_the_frame(backend, drv)
+    backend._tabinfo = lambda d, selected: None
+    getattr(backend, leave)(*(["https://app.example.com/next"] if leave == "navigate" else []))
+    assert backend.document_url() == CHILD  # no FrameFocusError: the agent left on purpose
+
+
+def test_closing_a_tab_forgets_its_lost_frame():
+    backend, drv = _backend()
+    drv.window_handles = ["h1", "h2"]
+    _lose_the_frame(backend, drv)
+    backend.close_tab("h1")
+    assert "h1" not in backend._frame_lost

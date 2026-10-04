@@ -359,6 +359,10 @@ class SeleniumChromeBackend(WebNavigatorBackend):
         # path is REPLAYED after each focus (_replay_frames) to keep a tab "inside"
         # its frame across the window-focus that nearly every op performs.
         self._frame_paths: dict[str, list[str]] = {}
+        # Tabs whose recorded frame no longer resolves: reset to their top document,
+        # and the next gated op on them reports it (FrameFocusError) instead of
+        # silently answering from the top page. See _replay_frames.
+        self._frame_lost: set[str] = set()
         self._focused: str | None = None  # the handle select_tab last focused
 
     def get_profile_dir(self) -> Path:
@@ -497,6 +501,7 @@ class SeleniumChromeBackend(WebNavigatorBackend):
         _switch(drv, handle)
         drv.close()
         self._frame_paths.pop(handle, None)  # forget the closed tab's frame focus
+        self._frame_lost.discard(handle)
         # drv.close() leaves the driver focused on the now-dead handle. The next
         # command — or _drv()'s health check, which reads current_window_handle —
         # would then mistake the session for dead and relaunch the whole browser,
@@ -521,8 +526,10 @@ class SeleniumChromeBackend(WebNavigatorBackend):
         recorded selector path before any DOM op runs — otherwise the soup cache
         would read the *top* page's ``page_source`` and the agent would silently
         lose the frame. If any hop no longer resolves to exactly one frame (the page
-        changed under us), we forget the path and stay at the top document rather
-        than act in the wrong context.
+        removed or replaced it), we forget the path, stay at the top document rather
+        than act in the wrong context, and mark the tab frame-lost: the next gated
+        op on it raises :class:`FrameFocusError` (see ``_raise_if_frame_lost``)
+        instead of quietly answering from the top page.
         """
         path = self._frame_paths.get(handle)
         if not path:
@@ -539,6 +546,7 @@ class SeleniumChromeBackend(WebNavigatorBackend):
             logger.info(f"Frame path for tab {handle} no longer valid ({e}); reset to top document")
             drv.switch_to.default_content()
             self._frame_paths[handle] = []
+            self._frame_lost.add(handle)
 
     def navigate(self, url: str) -> TabInfo:
         drv = self._drv()
@@ -599,6 +607,7 @@ class SeleniumChromeBackend(WebNavigatorBackend):
         """Drop the focused tab's frame path and return the driver to the top document."""
         if self._focused is not None:
             self._frame_paths[self._focused] = []
+            self._frame_lost.discard(self._focused)
         drv.switch_to.default_content()
 
     # -- frame navigation ---------------------------------------------------
@@ -647,6 +656,14 @@ class SeleniumChromeBackend(WebNavigatorBackend):
     def in_frame(self) -> bool:
         return bool(self._frame_paths.get(self._focused))
 
+    def _raise_if_frame_lost(self) -> None:
+        """Report, once, that the focused tab's frame vanished and it is back at its top."""
+        if self._focused in self._frame_lost:
+            self._frame_lost.discard(self._focused)
+            raise FrameFocusError(
+                "the frame this tab was focused on is no longer on the page; the tab "
+                "is back at its top document — switch_to_frame again to read inside a frame")
+
     def switch_to_parent_frame(self) -> dict:
         """Move the focused tab up one frame level (toward the top document).
 
@@ -654,6 +671,7 @@ class SeleniumChromeBackend(WebNavigatorBackend):
         the caller can re-gate the ancestor — it may have been navigated to an
         untrusted page since we descended.
         """
+        self._raise_if_frame_lost()  # "up one level" from a frame that's gone is meaningless
         drv = self._drv()
         drv.switch_to.parent_frame()
         path = self._frame_paths.get(self._focused)
@@ -670,6 +688,7 @@ class SeleniumChromeBackend(WebNavigatorBackend):
         drv = self._drv()
         drv.switch_to.default_content()
         self._frame_paths[self._focused] = []
+        self._frame_lost.discard(self._focused)  # leaving anyway: nothing to report
         return {"frame_url": drv.execute_script(_EFFECTIVE_DOCUMENT_URL_JS), "top_url": drv.current_url}
 
     def current_url(self) -> str:
@@ -694,8 +713,10 @@ class SeleniumChromeBackend(WebNavigatorBackend):
         those URLs are handled by the read policy's special cases anyway. Inside a
         frame there is no such fallback: ``current_url`` is the *top* page's URL, so
         gating on it would judge one document and read another. It raises
-        :class:`FrameFocusError` instead.
+        :class:`FrameFocusError` instead — as it does, once, when the frame the tab
+        was focused on has vanished from the page (see ``_replay_frames``).
         """
+        self._raise_if_frame_lost()
         drv = self._drv()
         try:
             return drv.execute_script(_EFFECTIVE_DOCUMENT_URL_JS)

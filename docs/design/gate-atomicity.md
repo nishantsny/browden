@@ -154,9 +154,9 @@ ascent  session.switch_to_parent_frame / switch_to_default_content(id=, gate=Fra
   so the driver never rests inside a frame that wasn't. Once focus is inside a
   frame, `document_url()` never falls back to the top page's URL: if the frame's
   own can't be read it raises `FrameFocusError`, since gating the top page would
-  judge one document and read another. A stale-snapshot reload inside a frame
-  refuses the read the same way, rather than returning the top page as the
-  frame.
+  judge one document and read another. A stale-snapshot reload inside a frame,
+  and a frame removed from the page, refuse the next call the same way rather
+  than answering from the top page as if it were the frame.
 - **The bounce is part of the hold.** `GatedPage._bounce` navigates to
   `about:blank` and drops any snapshot the landing left in the soup cache
   before the hold ends, so no other request ever sees a tab resting off-list.

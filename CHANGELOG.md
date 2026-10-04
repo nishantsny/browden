@@ -112,8 +112,10 @@ All notable changes to browden are documented here. The format follows
   page) to an untrusted URL while we were deeper in the tree. On refusal the
   focus retreats to the top document and the call raises. Inside a frame the
   gates never judge the top page in its place: if the frame's URL can't be
-  read, or a stale-snapshot reload returned the tab to its top document, the
-  call is refused with a `FrameFocusError` and the agent re-enters the frame.
+  read, the frame has been removed from the page, or a stale-snapshot reload
+  returned the tab to its top document, the call is refused with a
+  `FrameFocusError` (once; the tab is then at its top document) and the agent
+  re-enters the frame.
   Every frame tool judges against the tab's own profile's rules. A frame the
   page wrote itself (`srcdoc`, or an `about:blank` frame filled in by script)
   has no URL of its own and is judged by the URL of the same-origin page that

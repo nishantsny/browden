@@ -13,7 +13,7 @@ tools, so every verdict below comes from the same gates a client hits:
   check (which also refuses reads while still deeper) where it isn't;
 * **writes inside a frame** — judged by the *frame's* URL, not the top page's;
 * **profile scoping** — a frame readable in one profile only;
-* **a vanished frame** — reads fall back to the top document;
+* **a vanished frame** — the next read errors once, then the tab is at its top;
 * **inherited-origin frames** — ``srcdoc`` and script-written ``about:blank``
   frames are judged by the page that wrote them; a sandboxed one (opaque
   origin) is refused.
@@ -299,16 +299,20 @@ async def test_a_click_inside_a_frame_is_judged_by_the_frames_url(
 
 
 @pytest.mark.asyncio
-async def test_reads_fall_back_to_the_top_when_the_frame_is_removed(
+async def test_a_read_after_the_frame_is_removed_errors_instead_of_reading_the_top(
         frame_server, mcp_client_session, site, profiles):
     plain = profiles[0]
     async with mcp_client_session(frame_server) as mcp:
         tab = await _open(mcp, plain, f"{site}/frames/same")
         json.loads(await _switch(mcp, tab, "#child"))
 
-        # The frame removes itself; the recorded path no longer resolves, so the
-        # next read is at the top document rather than an error or a stale frame.
+        # The frame removes itself; the recorded path no longer resolves. The next
+        # read reports that rather than quietly answering from the top page...
         await _call_text(mcp, "click", {"css_selector": "#remover", "id": tab})
+        refused = await _call_text(mcp, "query_selector", {"css_selector": "#top-only", "id": tab})
+        assert "no longer on the page" in refused, refused
+
+        # ...once: the agent now knows the tab is at its top document.
         assert (await _find(mcp, tab, "#top-only"))["found"] is True
         assert (await _find(mcp, tab, "#child"))["found"] is False
 

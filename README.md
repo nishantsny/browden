@@ -145,10 +145,11 @@ verbatim; it is globally unique and routes itself to the right profile (multiple
 
 Frame focus sticks to the tab until you move it or the tab navigates or
 reloads. While a tab is inside a frame, every read and write tool is judged by
-the frame's own URL, not the top page's. If the frame's URL can't be read, or a
-read's expired snapshot made browden reload the page (which returns the tab to
-its top document), the call is refused rather than answered from the top page:
-call `switch_to_frame` again.
+the frame's own URL, not the top page's. If the frame's URL can't be read, the
+frame has been removed from the page, or a read's expired snapshot made browden
+reload the page (which returns the tab to its top document), the call is
+refused rather than answered from the top page. The tab is then at its top
+document: call `switch_to_frame` again.
 
 ### Reading the DOM
 
