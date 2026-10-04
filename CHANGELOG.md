@@ -97,22 +97,28 @@ All notable changes to browden are documented here. The format follows
   cache is keyed by URL, so a tab whose page navigated itself is never answered
   from a snapshot of the page it left.
 - **`switch_to_frame` is same-origin only and gates the frame as its own
-  document.** The iframe's declared `src` is checked against the read allowlist
-  *before* switching, and the frame's actual `document.URL` must be read-allowed
-  **and** same-origin with the top page *after* switching. Cross-origin frames
-  are refused: the click/write host gate keys off the tab's top URL, so it can't
-  govern a different-origin document (a frame-aware write gate is deferred). On
-  any failure the driver returns to the top document and nothing is inspected.
-  `switch_to_parent_frame` / `switch_to_default_content` **re-verify the
-  landed document on every call**, not just on entry: another process may have
-  navigated an ancestor (or the top page) to an untrusted URL while we were
-  deeper in the tree, so the document returned to is re-gated (read-allowed +
-  same-origin); on refusal the driver retreats to the top document and the call
-  raises. Every frame tool judges against the tab's own profile's rules. A
-  frame the page wrote itself (`srcdoc`, or an `about:blank` frame filled in by
-  script) has no URL of its own and is judged by the URL of the same-origin page
-  that wrote it; one the browser keeps from reading that page (a sandboxed
-  frame's opaque origin) keeps its `about:` URL and is refused (#118).
+  document, in the one driver hold that switches.** The focused page must be
+  read-allowed, the iframe's declared `src` is checked *before* switching, and
+  the frame's actual `document.URL` must be read-allowed **and** same-origin
+  with the top page *after* switching. All of it runs in the same hold as the
+  switch, so nothing (a concurrent `navigate`, a config hot-reload) can land
+  between a check and the move. The frame is recorded only once admitted; on any
+  failure, including an error reading the landed URL, the focus is put back
+  where it was. Cross-origin frames stay refused in this release: reads and
+  writes inside a frame are judged by the frame's own URL, but allowing other
+  origins is left to a later change. `switch_to_parent_frame` /
+  `switch_to_default_content` **re-verify the landed document on every call**,
+  not just on entry: another process may have navigated an ancestor (or the top
+  page) to an untrusted URL while we were deeper in the tree. On refusal the
+  focus retreats to the top document and the call raises. Inside a frame the
+  gates never judge the top page in its place: if the frame's URL can't be
+  read, or a stale-snapshot reload returned the tab to its top document, the
+  call is refused with a `FrameFocusError` and the agent re-enters the frame.
+  Every frame tool judges against the tab's own profile's rules. A frame the
+  page wrote itself (`srcdoc`, or an `about:blank` frame filled in by script)
+  has no URL of its own and is judged by the URL of the same-origin page that
+  wrote it; one the browser keeps from reading that page (a sandboxed frame's
+  opaque origin) keeps its `about:` URL and is refused (#118).
 
 ### Changed
 - **Local test runs keep temp dirs only for failed tests (maintainers).**
