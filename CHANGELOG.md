@@ -8,6 +8,11 @@ All notable changes to browden are documented here. The format follows
 ## [Unreleased]
 
 ### Changed
+- **A merge during the release e2e no longer blocks the tag (maintainers).**
+  `deploy.sh --release` refused to tag unless the deployed commit was still
+  `main`'s tip, so any PR merged during the ~7-minute e2e aborted a green run.
+  It now tags the commit it deployed and tested, provided that commit is on
+  `main` — the same ancestry check the `release` workflow makes.
 - **Release skill: a merged prep PR is the go-ahead (maintainers).** After the
   `release: cut vX.Y.Z` PR merges, `maintainers/github-release/SKILL.md` now
   goes straight to the `--release` deploy instead of asking again whether to

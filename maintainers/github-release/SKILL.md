@@ -13,8 +13,9 @@ description: >
 **Always** invoke the deploy script **with `--release=<tag>`** — one authoritative
 run does everything: fast-forward the release worktree to origin/main, sync the
 venv, restart the service, run the full e2e, and THEN — only if every earlier step
-passed — verify the release preconditions, tag origin/main, push the tag, and watch
-the workflow. There is no separate "deploy-first without --release" phase.
+passed — verify the release preconditions, tag the tested commit (it must be on
+origin/main), push the tag, and watch the workflow. There is no separate
+"deploy-first without --release" phase.
 
 The script is **fail-closed**: any failure in the deploy or e2e steps aborts the
 run before the tag is ever created, so a red run never publishes. It also checks
@@ -91,7 +92,8 @@ too so you fail fast (before a ~7-minute run) and can offer to fix it.
    (a real service restart + public tag; the user may prefer to run it themselves
    via `! ~/scripts/deploy.sh --release=<tag>`). The single run: checks gh auth up
    front, then deploys + e2es, and ONLY on green verifies the preconditions again,
-   tags `<tag>` at origin/main, pushes it, and watches the `release` workflow that
+   tags `<tag>` at the commit it tested (which must be on origin/main — a merge
+   during the e2e is fine), pushes it, and watches the `release` workflow that
    fast-forwards `stable` and cuts the GitHub Release. If it fails at deploy or
    e2e, **no tag is pushed** — fix and re-run. The one point of no return is the
    `git push origin <tag>`; after that the tag is out even if the workflow later
