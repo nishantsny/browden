@@ -349,76 +349,77 @@ def test_upload_host_not_listed_for_upload_rejected():
 # -- upload-file: the filesystem gate (gate 4) --------------------------------
 
 @pytest.fixture
-def roots(tmp_path):
-    root = tmp_path / "receipts"
-    root.mkdir()
-    (root / "lunch.png").write_bytes(b"png")
-    return (root,)
+def allowed(tmp_path):
+    """The operator's allowed upload locations, with one receipt in one of them."""
+    location = tmp_path / "receipts"
+    location.mkdir()
+    (location / "lunch.png").write_bytes(b"png")
+    return (location,)
 
 
-def test_a_file_under_a_root_passes(roots, tmp_path):
-    resolved = validate_upload_path(roots, str(tmp_path / "receipts" / "lunch.png"))
+def test_a_file_under_an_allowed_location_passes(allowed, tmp_path):
+    resolved = validate_upload_path(allowed, str(tmp_path / "receipts" / "lunch.png"))
     assert resolved == tmp_path / "receipts" / "lunch.png"
 
 
 def test_no_roots_configured_denies_everything(tmp_path):
     (tmp_path / "f.png").write_bytes(b"x")
-    with pytest.raises(ValidationError, match="no upload_roots are configured"):
+    with pytest.raises(ValidationError, match="no allowed_upload_locations are configured"):
         validate_upload_path((), str(tmp_path / "f.png"))
 
 
-def test_a_file_outside_every_root_is_refused(roots, tmp_path):
+def test_a_file_outside_every_allowed_location_is_refused(allowed, tmp_path):
     secret = tmp_path / "id_rsa"
     secret.write_bytes(b"PRIVATE KEY")
-    with pytest.raises(ValidationError, match="outside every configured upload root"):
-        validate_upload_path(roots, str(secret))
+    with pytest.raises(ValidationError, match="outside every allowed upload location"):
+        validate_upload_path(allowed, str(secret))
 
 
-def test_traversal_out_of_a_root_is_refused(roots, tmp_path):
+def test_traversal_out_of_an_allowed_location_is_refused(allowed, tmp_path):
     """The path is resolved before it is compared, so `../` buys nothing."""
     (tmp_path / "id_rsa").write_bytes(b"PRIVATE KEY")
-    with pytest.raises(ValidationError, match="outside every configured upload root"):
-        validate_upload_path(roots, str(tmp_path / "receipts" / ".." / "id_rsa"))
+    with pytest.raises(ValidationError, match="outside every allowed upload location"):
+        validate_upload_path(allowed, str(tmp_path / "receipts" / ".." / "id_rsa"))
 
 
-def test_a_symlink_inside_a_root_pointing_out_is_refused(roots, tmp_path):
-    """The dangerous case: the path *is* under the root; its target is not."""
+def test_a_symlink_inside_an_allowed_location_pointing_out_is_refused(allowed, tmp_path):
+    """The dangerous case: the path *is* under an allowed location; its target is not."""
     secret = tmp_path / "id_rsa"
     secret.write_bytes(b"PRIVATE KEY")
-    link = roots[0] / "innocent.png"
+    link = allowed[0] / "innocent.png"
     link.symlink_to(secret)
-    with pytest.raises(ValidationError, match="outside every configured upload root"):
-        validate_upload_path(roots, str(link))
+    with pytest.raises(ValidationError, match="outside every allowed upload location"):
+        validate_upload_path(allowed, str(link))
 
 
-def test_a_symlinked_root_still_admits_its_own_files(tmp_path):
-    """The mirror image: a root reached through a symlink must still work."""
+def test_a_symlinked_location_still_admits_its_own_files(tmp_path):
+    """The mirror image: a location reached through a symlink must still work."""
     real = tmp_path / "real-receipts"
     real.mkdir()
     (real / "lunch.png").write_bytes(b"png")
     link = tmp_path / "receipts"
     link.symlink_to(real)
-    # The rule set resolves roots on load; this is that resolved form.
+    # The rule set resolves each location on load; this is that resolved form.
     validate_upload_path((real.resolve(),), str(link / "lunch.png"))
 
 
-def test_a_missing_file_is_refused(roots, tmp_path):
+def test_a_missing_file_is_refused(allowed, tmp_path):
     with pytest.raises(ValidationError, match="not an existing regular file"):
-        validate_upload_path(roots, str(tmp_path / "receipts" / "nope.png"))
+        validate_upload_path(allowed, str(tmp_path / "receipts" / "nope.png"))
 
 
-def test_a_directory_is_refused(roots, tmp_path):
+def test_a_directory_is_refused(allowed, tmp_path):
     (tmp_path / "receipts" / "sub").mkdir()
     with pytest.raises(ValidationError, match="not an existing regular file"):
-        validate_upload_path(roots, str(tmp_path / "receipts" / "sub"))
+        validate_upload_path(allowed, str(tmp_path / "receipts" / "sub"))
 
 
-def test_an_oversize_file_is_refused(roots, tmp_path):
+def test_an_oversize_file_is_refused(allowed, tmp_path):
     big = tmp_path / "receipts" / "big.bin"
     with big.open("wb") as fh:
         fh.truncate(MAX_UPLOAD_BYTES + 1)
     with pytest.raises(ValidationError, match="over the .* upload cap"):
-        validate_upload_path(roots, str(big))
+        validate_upload_path(allowed, str(big))
 
 
 def test_allow_all_does_not_grant_the_filesystem():
@@ -426,6 +427,6 @@ def test_allow_all_does_not_grant_the_filesystem():
     scratch = BrowdenRuntimeConfiguration({
         "profiles": {"/profiles/scratch": {"allow_all": True}}}).access_rules_for("/profiles/scratch")
     check_action_host(scratch, "upload-file", "https://unlisted.test/form")  # page authority: yes
-    assert scratch.upload_roots == ()
-    with pytest.raises(ValidationError, match="no upload_roots are configured"):
-        validate_upload_path(scratch.upload_roots, "/etc/passwd")
+    assert scratch.allowed_upload_locations == ()
+    with pytest.raises(ValidationError, match="no allowed_upload_locations are configured"):
+        validate_upload_path(scratch.allowed_upload_locations, "/etc/passwd")

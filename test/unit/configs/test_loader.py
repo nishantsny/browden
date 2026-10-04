@@ -216,7 +216,7 @@ def test_load_page_scoped_rules(tmp_path):
     ('clik:\n  amazon.com:\n    label: ".*"\n', "unknown section 'clik'"),
     ('insert_text:\n  amazon.com:\n    label: ".*"\n', "unknown section 'insert_text'"),
     ("5: {}\n", "unknown section 5"),
-    ("bogus: {}\n", r"allowed: click, denylist, infra, press-key, profiles, read, upload-file, upload_roots, write-text\)"),
+    ("bogus: {}\n", r"allowed: allowed_upload_locations, click, denylist, infra, press-key, profiles, read, upload-file, write-text\)"),
     # write action
     ('click:\n  amazon.com:\n    paths: [".*"]\n    typo: x\n', "unknown keys"),
     ('click:\n  amazon.com:\n    label: 7\n', "label: must be a regex string"),
@@ -271,11 +271,11 @@ def test_load_page_scoped_rules(tmp_path):
     # allow_all is a profile-scoped flag, not a global one
     ("allow_all: true\n", "only allowed inside a profiles entry"),
     ("profiles:\n  ~/p:\n    allow_all: sure\n", "allow_all: must be a boolean"),
-    # upload_roots: the filesystem bound on upload-file
-    ("upload_roots: '~/receipts'\n", "must be a list of directory paths"),
-    ("upload_roots: [5]\n", "must be a list of directory paths"),
-    ("upload_roots: ['']\n", "must be a list of directory paths"),
-    ("upload_roots: ['relative/receipts']\n", "must be an absolute directory"),
+    # allowed_upload_locations: the filesystem bound on upload-file
+    ("allowed_upload_locations: '~/receipts'\n", "must be a list of directory paths"),
+    ("allowed_upload_locations: [5]\n", "must be a list of directory paths"),
+    ("allowed_upload_locations: ['']\n", "must be a list of directory paths"),
+    ("allowed_upload_locations: ['relative/receipts']\n", "must be an absolute directory"),
     # field_ids IS legal under upload-file (a file input rarely has a visible
     # label), but `keys` is still press-key's alone
     ('upload-file:\n  x.com:\n    - path: [".*"]\n      label: ".*"\n      keys: [Enter]\n',
@@ -294,10 +294,10 @@ def test_schema_violations_raise_config_error(tmp_path, content, match):
 
 
 def test_upload_file_rules_and_roots_load(tmp_path):
-    """The shape the Splitwise case needs: field_ids on upload-file, plus a root."""
+    """The shape the Splitwise case needs: field_ids on upload-file, plus a location."""
     f = tmp_path / "allowlist.yaml"
     f.write_text(
-        "upload_roots:\n"
+        "allowed_upload_locations:\n"
         "  - ~/receipts\n"
         "upload-file:\n"
         "  secure.splitwise.com:\n"
@@ -306,30 +306,30 @@ def test_upload_file_rules_and_roots_load(tmp_path):
         "      label: '(?i)attach an image or pdf:?'\n"
         "      field_ids: [bill_file_expense]\n")
     rules = load_runtime_configuration(f).access_rules
-    assert rules.upload_roots == (Path("~/receipts").expanduser().resolve(),)
+    assert rules.allowed_upload_locations == (Path("~/receipts").expanduser().resolve(),)
     matched = rules.rules_for("upload-file", "secure.splitwise.com", "/", "", "/expenses")
     assert [sorted(r.field_ids) for r in matched] == [["bill_file_expense"]]
 
 
-def test_no_upload_roots_means_no_upload_is_authorized(tmp_path):
+def test_no_allowed_upload_locations_means_no_upload_is_authorized(tmp_path):
     f = tmp_path / "allowlist.yaml"
     f.write_text("upload-file:\n  x.com:\n    - path: ['.*']\n      label: '.*'\n")
-    assert load_runtime_configuration(f).access_rules.upload_roots == ()
+    assert load_runtime_configuration(f).access_rules.allowed_upload_locations == ()
 
 
-def test_a_profile_adds_upload_roots_over_the_global_ones(tmp_path):
+def test_a_profile_adds_allowed_upload_locations_over_the_global_ones(tmp_path):
     f = tmp_path / "allowlist.yaml"
     f.write_text(
-        "upload_roots: ['~/receipts']\n"
+        "allowed_upload_locations: ['~/receipts']\n"
         "profiles:\n"
         "  ~/p:\n"
-        "    upload_roots: ['~/invoices']\n")
+        "    allowed_upload_locations: ['~/invoices']\n")
     configuration = load_runtime_configuration(f)
     scoped = configuration.access_rules_for(Path("~/p").expanduser())
-    assert set(scoped.upload_roots) == {Path("~/receipts").expanduser().resolve(),
+    assert set(scoped.allowed_upload_locations) == {Path("~/receipts").expanduser().resolve(),
                                         Path("~/invoices").expanduser().resolve()}
     # The global set is untouched by what a profile added.
-    assert configuration.access_rules.upload_roots == (Path("~/receipts").expanduser().resolve(),)
+    assert configuration.access_rules.allowed_upload_locations == (Path("~/receipts").expanduser().resolve(),)
 
 
 def test_load_profile_scoped_rules(tmp_path):

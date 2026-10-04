@@ -329,7 +329,7 @@ def is_uploadable_control(node: dict) -> bool:
     The ``upload-file`` analogue of :func:`is_fillable_control`: integrity +
     anti-decoy only. It says "is this a file picker a human could use", never
     *which* file may be handed to it — the file itself is bounded by the
-    operator's upload roots (see ``write_gates.validate_upload_path``) and the
+    operator's allowed upload locations (see ``write_gates.validate_upload_path``) and the
     control by the ``upload-file`` allowlist label / ``field_ids``.
 
     A readonly file input is refused for the same reason a readonly text box is:

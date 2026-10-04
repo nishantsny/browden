@@ -1,7 +1,7 @@
 """Tool-level tests for the upload_file (upload-file) action.
 
 The session is mocked, but all four gates run for real: the upload-file host
-allowlist, the filesystem root gate, file-input integrity, and the per-control
+allowlist, the allowed-location gate, file-input integrity, and the per-control
 label / field_ids check. ``upload-file`` is a section of its own — a host trusted
 to type is never thereby trusted to hand a website a local file.
 """
@@ -18,10 +18,10 @@ SPLITWISE = "https://secure.splitwise.com/"
 
 @pytest.fixture
 def receipts(tmp_path):
-    """A root with one receipt in it, and a secret outside it."""
-    root = tmp_path / "receipts"
-    root.mkdir()
-    (root / "lunch.png").write_bytes(b"png")
+    """One allowed upload location with a receipt in it, and a secret outside it."""
+    location = tmp_path / "receipts"
+    location.mkdir()
+    (location / "lunch.png").write_bytes(b"png")
     (tmp_path / "id_rsa").write_bytes(b"PRIVATE KEY")
     return tmp_path
 
@@ -29,7 +29,7 @@ def receipts(tmp_path):
 def _enabled(receipts, **extra):
     return BrowdenRuntimeConfiguration({
         "read": {"website_overrides": {"*": [".*"]}},
-        "upload_roots": [str(receipts / "receipts")],
+        "allowed_upload_locations": [str(receipts / "receipts")],
         "upload-file": {"secure.splitwise.com": [
             {"path": [".*"], "label": r"(?i)receipt", "field_ids": ["bill_file_expense"]}]},
         **extra,
@@ -81,7 +81,7 @@ async def test_a_file_outside_the_roots_is_refused_before_the_page_is_touched(re
     session = _session(url=SPLITWISE, elements=[_file_input()])
     with patch.object(server._store, "route", return_value=session), \
          patch.object(server, "_refresher", RuntimeConfigurationRefresher.static(_enabled(receipts))):
-        with pytest.raises(ValidationError, match="outside every configured upload root"):
+        with pytest.raises(ValidationError, match="outside every allowed upload location"):
             await server.upload_file("#bill_file_expense", str(receipts / "id_rsa"), "h1")
     assert session.upload_file.performed == []
 
@@ -96,7 +96,7 @@ async def test_an_authorized_host_with_no_roots_uploads_nothing(receipts):
     session = _session(url=SPLITWISE, elements=[_file_input()])
     with patch.object(server._store, "route", return_value=session), \
          patch.object(server, "_refresher", RuntimeConfigurationRefresher.static(configuration)):
-        with pytest.raises(ValidationError, match="no upload_roots are configured"):
+        with pytest.raises(ValidationError, match="no allowed_upload_locations are configured"):
             await server.upload_file("#bill_file_expense", str(receipts / "receipts" / "lunch.png"), "h1")
     assert session.upload_file.performed == []
 
@@ -106,7 +106,7 @@ async def test_upload_file_is_a_separate_section_from_write_text(receipts):
     server = _server()
     typing_only = BrowdenRuntimeConfiguration({
         "read": {"website_overrides": {"*": [".*"]}},
-        "upload_roots": [str(receipts / "receipts")],
+        "allowed_upload_locations": [str(receipts / "receipts")],
         "write-text": {"secure.splitwise.com": {"paths": [".*"], "label": ".*"}},
     })
     session = _session(url=SPLITWISE, elements=[_file_input()])

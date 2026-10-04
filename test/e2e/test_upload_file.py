@@ -9,7 +9,7 @@ browser really took the file and fired the page's handler, which is the whole
 point: no native file dialog is involved.
 
 The last two tests run the *real* gate rather than the pass-through one, because
-the filesystem root is the gate with no analogue in the other write actions — a
+the allowed-location check is the gate with no analogue in the other actions — a
 refusal there is the difference between "attach a receipt" and "exfiltrate
 ~/.ssh/id_rsa". The page is an inline ``data:`` document, so the run is offline.
 """
@@ -56,10 +56,10 @@ def session(new_backend, tmp_path):
 
 @pytest.fixture
 def receipt(tmp_path):
-    """A file under a root, plus a secret outside it."""
-    root = tmp_path / "receipts"
-    root.mkdir()
-    path = root / "lunch.txt"
+    """A file under an allowed location, plus a secret outside it."""
+    location = tmp_path / "receipts"
+    location.mkdir()
+    path = location / "lunch.txt"
     path.write_text("LUNCH-RECEIPT")
     (tmp_path / "id_rsa").write_text("PRIVATE KEY")
     return path
@@ -75,11 +75,11 @@ async def _page(session):
     return await session.navigate(DATA_URL, id=blank["id"], gate=OPEN_READ_GATE)
 
 
-def _real_gate(root, file_path):
-    """The gate a live server would build: any host, any label, one upload root."""
+def _real_gate(location, file_path):
+    """The gate a live server would build: any host, any label, one allowed upload location."""
     rules = BrowdenAccessRuleSet({
         "upload-file": {"*": {"paths": [".*"], "label": ".*"}},
-        "upload_roots": [str(root)],
+        "allowed_upload_locations": [str(location)],
     })
     return upload_file_gate(rules, str(file_path))
 
@@ -109,7 +109,7 @@ async def test_an_ambiguous_selector_uploads_nothing(session, receipt):
 
 
 @pytest.mark.asyncio
-async def test_the_real_gate_admits_a_file_under_an_upload_root(session, receipt):
+async def test_the_real_gate_admits_a_file_under_an_allowed_location(session, receipt):
     page = await _page(session)
     gate = _real_gate(receipt.parent, receipt)
     await session.upload_file("#bill_file_expense", str(receipt), id=page["id"], gate=gate)
@@ -117,11 +117,11 @@ async def test_the_real_gate_admits_a_file_under_an_upload_root(session, receipt
 
 
 @pytest.mark.asyncio
-async def test_the_real_gate_refuses_a_file_outside_the_upload_roots(session, receipt, tmp_path):
+async def test_the_real_gate_refuses_a_file_outside_the_allowed_upload_locations(session, receipt, tmp_path):
     """Nothing reaches the page: the file gate runs before the DOM is read."""
     page = await _page(session)
     secret = tmp_path / "id_rsa"
     gate = _real_gate(receipt.parent, secret)
-    with pytest.raises(ValidationError, match="outside every configured upload root"):
+    with pytest.raises(ValidationError, match="outside every allowed upload location"):
         await session.upload_file("#bill_file_expense", str(secret), id=page["id"], gate=gate)
     assert await _state(session, page["id"]) == "none"

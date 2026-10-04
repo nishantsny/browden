@@ -45,10 +45,10 @@ def _page(text, button, field_label):
             f"<input id='f' type='text' placeholder='{field_label}'></body></html>")
 
 
-# A real file under a real root: the upload gate judges the filesystem, so the
-# race needs a path that actually passes it. The directory lives for the module.
-_UPLOAD_ROOT = tempfile.TemporaryDirectory()
-_UPLOAD_FILE = str(Path(_UPLOAD_ROOT.name) / "receipt.png")
+# A real file in a real allowed location: the upload gate judges the filesystem,
+# so the race needs a path that passes it. The directory lives for the module.
+_UPLOAD_DIR = tempfile.TemporaryDirectory()
+_UPLOAD_FILE = str(Path(_UPLOAD_DIR.name) / "receipt.png")
 Path(_UPLOAD_FILE).write_bytes(b"png")
 
 
@@ -67,7 +67,7 @@ _RULES = BrowdenRuntimeConfiguration({
     "write-text": {"shop.example": {"paths": [".*"], "label": r"(?i)grocery tip"}},
     "press-key": {"shop.example": [{"path": [".*"], "label": r"(?i)add to cart", "keys": ["Enter"]}]},
     "upload-file": {"shop.example": {"paths": [".*"], "label": r"(?i)grocery tip"}},
-    "upload_roots": [_UPLOAD_ROOT.name],
+    "allowed_upload_locations": [_UPLOAD_DIR.name],
 })
 
 READ, WRITE, LANDING = "read", "write", "landing"

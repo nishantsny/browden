@@ -185,7 +185,7 @@ class GatedPage:
         """Set the file input ``css_selector`` to ``file_path`` if ``gate`` authorizes both.
 
         The gate's page check — run by ``_write`` before the DOM is read — has
-        already judged this path against the operator's upload roots, so the
+        already judged this path against the operator's allowed upload locations, so the
         resolve here cannot fail and cannot widen anything. The backend is handed
         that *resolved* path rather than the caller's spelling, for the same
         reason the write path hands it the exact element ref it judged: what was

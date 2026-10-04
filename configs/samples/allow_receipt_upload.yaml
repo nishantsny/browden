@@ -14,7 +14,7 @@
 #   1. denylist        — always wins; a matching URL is refused outright.
 #   2. read allowlist  — a URL may be READ / navigated only if it matches here.
 #   3. write actions   — `upload-file` (below); default-deny, gated per host.
-#   4. upload_roots    — which local files may be sent ANYWHERE. Independent of 3.
+#   4. allowed_upload_locations    — which local files may be sent ANYWHERE. Independent of 3.
 #
 # See configs/samples/allowlist-read-deny.yaml for a fully-commented tour of the
 # read/deny system, and allow_grocery_cart_manipulation.yaml for `click`.
@@ -43,9 +43,9 @@ read:
 #
 # A path is expanded (`~`) and fully resolved — through `..` segments and every
 # symlink — before it is compared, so neither a traversal in the path the agent
-# passes nor a symlink planted inside a root can reach outside one. Keep these
+# passes nor a symlink planted inside one can reach outside it. Keep these
 # narrow: a directory you drop receipts into, never `~` or `/`.
-upload_roots:
+allowed_upload_locations:
   - ~/receipts
 
 # ---- write actions --------------------------------------------------------
@@ -55,7 +55,7 @@ upload_roots:
 #      <input type="file">. A text box is NOT uploadable, whatever it is named.
 #   3. label or id — a matching rule's `label` regex fully matches the control's
 #      visible label, OR the control's exact id/name is in that rule's `field_ids`.
-#   4. upload root — the file resolves to a regular file under `upload_roots`.
+#   4. allowed upload location — the file resolves to a regular file under `allowed_upload_locations`.
 upload-file:
   secure.splitwise.com:
     # Splitwise is a hash-routed SPA: the add/edit-expense modal shares the path

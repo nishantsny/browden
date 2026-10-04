@@ -35,7 +35,7 @@ from .intent import (
 )
 
 # The largest file ``upload-file`` will hand to a page. Not a config knob: it is
-# a sanity bound on an action whose real authorization is the upload-roots gate,
+# a sanity bound on an action whose real authorization is the location gate,
 # and a receipt or a scanned document is orders of magnitude smaller. A workflow
 # that needs to ship something bigger than this wants a different tool.
 MAX_UPLOAD_BYTES = 25 * 1024 * 1024
@@ -196,45 +196,47 @@ def resolve_upload_path(file_path: str) -> Path:
     The single transform between what the agent asks to upload and what is judged
     and then sent, so the file the gate admitted is the file the browser opens.
     Resolving the whole chain (``~``, ``..`` segments, every symlink) is what lets
-    the root check below be a simple containment test.
+    the containment check below be a simple one.
     """
     return Path(file_path).expanduser().resolve()
 
 
-def validate_upload_path(upload_roots: "tuple[Path, ...]", file_path: str) -> Path:
-    """Gate 4 for ``upload-file``: the file must be a real file under an allowed root.
+def validate_upload_path(allowed_upload_locations: "tuple[Path, ...]", file_path: str) -> Path:
+    """Gate 4 for ``upload-file``: the file must be a real file in an allowed location.
 
     The gate with no analogue in the other write actions, and the reason this is
     an action of its own. ``click`` and ``insert_text`` act with data the agent
     already has; an upload makes browden **read the local filesystem and ship the
-    bytes to a website**. Without a root, "upload to host X" means "exfiltrate
-    ``~/.ssh/id_rsa`` to host X", and the tool is an arbitrary local-file read
-    primitive wearing a form control.
+    bytes to a website**. With nowhere declared allowed, "upload to host X" means
+    "exfiltrate ``~/.ssh/id_rsa`` to host X", and the tool is an arbitrary
+    local-file read primitive wearing a form control.
 
-    So: the path is expanded and **fully resolved**, and the resolved path must
-    sit under one of the operator's resolved ``upload_roots``. Resolving first is
-    what closes the two ways out of a root — ``../`` traversal in the path the
-    agent passes, and a symlink *inside* a root pointing anywhere on disk. It must
-    also exist, be a regular file (not a directory, FIFO or device) and be under
-    :data:`MAX_UPLOAD_BYTES`.
+    So: the path is expanded and **fully resolved**, and the result must sit under
+    one of the operator's resolved ``allowed_upload_locations``. Resolving first
+    is what closes the two ways out of an allowed location — ``../`` traversal in
+    the path the agent passes, and a symlink *inside* one pointing anywhere on
+    disk. The file must also exist, be a regular file (not a directory, FIFO or
+    device) and be under :data:`MAX_UPLOAD_BYTES`.
 
-    No roots configured means no upload is authorized — including under
+    No location configured means no upload is authorized — including under
     ``allow_all``, which grants authority over *pages* and says nothing about the
     filesystem. Returns the resolved path to hand the backend; raises
     :class:`ValidationError` otherwise.
     """
-    if not upload_roots:
+    if not allowed_upload_locations:
         raise ValidationError(
-            "no upload_roots are configured — upload-file is not authorized to "
-            "read any local file (add an upload_roots list to the allowlist)")
+            "no allowed_upload_locations are configured — upload-file is not "
+            "authorized to read any local file (add an allowed_upload_locations "
+            "list to the allowlist)")
     try:
         resolved = resolve_upload_path(file_path)
     except (OSError, ValueError, RuntimeError) as e:
         raise ValidationError(f"{file_path!r} is not a usable path: {e}") from None
-    if not any(resolved == root or resolved.is_relative_to(root) for root in upload_roots):
+    if not any(resolved == allowed or resolved.is_relative_to(allowed)
+               for allowed in allowed_upload_locations):
         raise ValidationError(
-            f"{str(resolved)!r} is outside every configured upload root "
-            f"({', '.join(str(r) for r in upload_roots)}) — refusing to upload")
+            f"{str(resolved)!r} is outside every allowed upload location "
+            f"({', '.join(str(r) for r in allowed_upload_locations)}) — refusing to upload")
     try:
         if not resolved.is_file():
             raise ValidationError(
@@ -332,7 +334,7 @@ def upload_file_gate(access_rules: BrowdenAccessRuleSet, file_path: str) -> Writ
     """
     def check_page(url: str) -> None:
         check_action_host(access_rules, "upload-file", url)
-        validate_upload_path(access_rules.upload_roots, file_path)
+        validate_upload_path(access_rules.allowed_upload_locations, file_path)
 
     return WriteGate(
         check_page=check_page,

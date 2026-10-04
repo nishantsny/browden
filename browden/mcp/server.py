@@ -367,7 +367,7 @@ async def upload_file(css_selector: str, file_path: str, id: str) -> dict:
          no visible label at all, so no label regex could ever match it.
       4. ``file_path`` must resolve — through ``~``, ``..`` and every symlink —
          to an existing regular file under one of the operator's configured
-         ``upload_roots``, within the size cap. **With no ``upload_roots``
+         ``allowed_upload_locations``, within the size cap. **With no ``allowed_upload_locations``
          configured nothing is uploadable**, including under ``allow_all``: that
          grants authority over pages and says nothing about the filesystem.
     Any gate failing raises a ValidationError and nothing is sent.

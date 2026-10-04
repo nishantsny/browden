@@ -19,7 +19,7 @@ The expected shape (see configs/samples/read_only_on_popular_websites.yaml):
                                      #   (use '.*' to allow any control on the host)
         paths: [<path regex>, ...]   # optional, defaults to [".*"]
 
-    upload_roots:                 # the only directories `upload-file` may read
+    allowed_upload_locations:                 # the only directories `upload-file` may read
       - <path>                    #   from; absent/empty => every upload denied
 
     profiles:                     # per-browser-profile rule sets (additive over
@@ -45,7 +45,7 @@ from pathlib import Path
 from ...mcp.validator.allowlist import WRITE_ACTIONS
 
 # Top-level sections that are not write actions, each checked by its own branch.
-_OTHER_SECTIONS = ("denylist", "read", "infra", "profiles", "upload_roots")
+_OTHER_SECTIONS = ("denylist", "read", "infra", "profiles", "allowed_upload_locations")
 
 
 class ConfigError(ValueError):
@@ -194,28 +194,30 @@ def _check_infra(rules, source: str) -> None:
             raise ConfigError(f"{source}: infra.{name} must be a positive integer, got {value}")
 
 
-def _check_upload_roots(roots, source: str) -> None:
-    """Validate ``upload_roots``: the directories ``upload-file`` may read from.
+def _check_upload_locations(locations, source: str) -> None:
+    """Validate ``allowed_upload_locations``: the directories ``upload-file`` may read from.
 
-    Each root must be absolute once ``~`` is expanded. A relative root would
+    Each location must be absolute once ``~`` is expanded. A relative one would
     resolve against the server's working directory, so the same config would
     bound uploads to a different directory depending on how the server was
     launched — the identical reason a ``profiles`` key must be absolute. It fails
     the load with its own spelling rather than sitting inert in a config the
     operator believes is in force.
     """
-    if not isinstance(roots, list) or not all(isinstance(r, str) and r.strip() for r in roots):
+    if not isinstance(locations, list) or not all(isinstance(r, str) and r.strip() for r in locations):
         raise ConfigError(
-            f"{source}: upload_roots must be a list of directory paths "
+            f"{source}: allowed_upload_locations must be a list of directory paths "
             f"(an empty list denies every upload)")
-    for root in roots:
+    for location in locations:
         try:
-            expanded = Path(root).expanduser()
+            expanded = Path(location).expanduser()
         except (OSError, RuntimeError, ValueError) as e:
-            raise ConfigError(f"{source}: upload_roots entry {root!r}: not a usable path: {e}") from None
+            raise ConfigError(
+                f"{source}: allowed_upload_locations entry {location!r}: "
+                f"not a usable path: {e}") from None
         if not expanded.is_absolute():
             raise ConfigError(
-                f"{source}: upload_roots entry {root!r}: must be an absolute directory "
+                f"{source}: allowed_upload_locations entry {location!r}: must be an absolute directory "
                 f"(a relative path would depend on the server's working directory)")
 
 
@@ -343,8 +345,8 @@ def _check_section(key, rules, *, source: str) -> None:
     if key == "profiles":
         _check_profiles(rules, source)
         return
-    if key == "upload_roots":
-        _check_upload_roots(rules, source)
+    if key == "allowed_upload_locations":
+        _check_upload_locations(rules, source)
         return
     if key == "allow_all":
         # Only meaningful inside a profile: "allow everything" is a thing you say
