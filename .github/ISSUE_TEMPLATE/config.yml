@@ -1,8 +1,8 @@
 blank_issues_enabled: false
 contact_links:
   - name: Security vulnerability
-    url: https://github.com/nishantsny/browden/security/advisories/new
+    url: https://github.com/nishantsny/safe-agent-browser/security/advisories/new
     about: Report allowlist/write-gate bypasses and other security issues privately — please do not open a public issue.
   - name: Questions & ideas
-    url: https://github.com/nishantsny/browden/issues
+    url: https://github.com/nishantsny/safe-agent-browser/issues
     about: For open-ended questions, start a regular issue.

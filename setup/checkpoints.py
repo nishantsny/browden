@@ -10,12 +10,12 @@ records *which* Tranco day or *which* PSL a perimeter was built from.
 This module writes that provenance next to the perimeter it describes — a small
 ``checkpoints`` block at the bottom of ``allowlist.yaml``:
 
-    # >>> browden provenance ... >>>
+    # >>> safe-agent-browser provenance ... >>>
     # checkpoints:
     #   tranco_id: XN2NN
     #   tranco_checksum_sha256: <64 hex>
     #   pal_checksum_sha256: <64 hex>
-    # <<< browden provenance <<<
+    # <<< safe-agent-browser provenance <<<
 
 It is written as YAML **comments**, deliberately: the allowlist schema treats any
 unknown top-level key as a write action, so a real ``checkpoints:`` mapping would
@@ -35,8 +35,8 @@ CHECKSUM_ALGO = "sha256"
 
 # Sentinels bound the auto-managed block so it can be found and rewritten in
 # place without disturbing the rest of the (hand-edited) config.
-_BEGIN = "# >>> browden provenance — auto-written by setup; do not edit by hand >>>"
-_END = "# <<< browden provenance <<<"
+_BEGIN = "# >>> safe-agent-browser provenance — auto-written by setup; do not edit by hand >>>"
+_END = "# <<< safe-agent-browser provenance <<<"
 
 # The keys we render, in this order, always (missing ones show as empty
 # placeholders so the block's shape is stable across partial updates — a Tranco

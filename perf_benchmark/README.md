@@ -1,9 +1,9 @@
 # perf_benchmark
 
-Resource profiling for the browden MCP **Python server process only**.
+Resource profiling for the safe-agent-browser MCP **Python server process only**.
 
 Chrome and chromedriver run as separate child PIDs and are **not** measured —
-the sampler reads exactly the `python -m browden.mcp.server` process, so the
+the sampler reads exactly the `python -m safe_agent_browser.mcp.server` process, so the
 numbers reflect the server's own footprint (selenium client objects, session
 bookkeeping, cached DOM/screenshot payloads, chromedriver sockets, asyncio).
 
@@ -18,7 +18,7 @@ uv run --no-sync python perf_benchmark/mem_profile.py --sessions 3 --tabs 5 --ch
 Requires `psutil` and a working headless Chrome (same prerequisites as the e2e
 suite). It spawns its own server on a free port under an allow-all, Tranco-off
 policy and serves a local page, so it needs no external network and won't touch
-any `~/.browden` config.
+any `~/.safe-agent-browser` config.
 
 ## Output
 
@@ -66,17 +66,17 @@ open→navigate→screenshot→close to expose FD/USS drift across session lifec
 
 - **Sampling, not accounting.** ~2 Hz psutil can miss sub-second allocation
   spikes. This tells you *how much*, not *what line* — use
-  `memray run -m browden.mcp.server …` for allocation attribution.
+  `memray run -m safe_agent_browser.mcp.server …` for allocation attribution.
 - **USS is a coarse `/proc/smaps` snapshot;** treat deltas under ~3 MB as noise.
 - **Allocator retention ≠ leak.** Python/glibc may hold freed pages, so a
   non-zero teardown residual is a signal to investigate (ideally via memray),
   not proof of a bug.
 - **"Python only" still includes selenium's client objects + urllib3 socket
   pool** per session — legitimately the server's cost, but coupled to the
-  selenium version, not just browden's code.
+  selenium version, not just safe-agent-browser's code.
 - **Single host, single run.** No cross-run percentiles, no sustained-RPS or
   latency load testing — it's a profiler, not a load-test rig.
-- **Idle CPU floor** is suppressed here by setting `BROWDEN_RELOAD_INTERVAL=3600`
+- **Idle CPU floor** is suppressed here by setting `SAFE_AGENT_BROWSER_RELOAD_INTERVAL=3600`
   (the allowlist refresher poll); real deployments tick every 10s.
 - **Requires headless Chrome** (same prerequisites as the e2e suite) and
   `psutil`.

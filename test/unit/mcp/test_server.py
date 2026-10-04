@@ -9,7 +9,7 @@ from gated_fakes import gated_list, gated_read, gated_write
 
 def test_server_instructions_state_concurrency_contract():
     """The single-tab-at-a-time contract must reach the agent via MCP instructions."""
-    import browden.mcp.server as server
+    import safe_agent_browser.mcp.server as server
     ins = (server.mcp.instructions or "").lower()
     assert "concurrent requests" in ins  # the serialize-within-a-session contract
     assert "verbatim" in ins  # spells out the tab-id pass-back contract
@@ -22,7 +22,7 @@ def test_tab_entry_point_docs_state_the_concurrency_contract():
     but are not parallel, so the descriptions have to say both — an agent that
     reads only "safe" would expect a speed-up that a single Chrome can't give.
     """
-    import browden.mcp.server as server
+    import safe_agent_browser.mcp.server as server
     for name in ("new_blank_tab", "list_tabs"):
         doc = (getattr(server, name).__doc__ or "").lower()
         assert "concurrent" in doc
@@ -31,9 +31,9 @@ def test_tab_entry_point_docs_state_the_concurrency_contract():
 
 def test_no_backend_or_session_at_import():
     """Importing server must not construct a backend, a BrowserSessionManager, or a reaper task."""
-    with patch("browden.mcp.server.SeleniumChromeBackend") as mock_backend, \
-         patch("browden.mcp.session_management.browser_session_store.BrowserSessionManager") as mock_session:
-        import browden.mcp.server as server
+    with patch("safe_agent_browser.mcp.server.SeleniumChromeBackend") as mock_backend, \
+         patch("safe_agent_browser.mcp.session_management.browser_session_store.BrowserSessionManager") as mock_session:
+        import safe_agent_browser.mcp.server as server
         importlib.reload(server)
         assert mock_backend.call_count == 0
         assert mock_session.call_count == 0
@@ -41,10 +41,10 @@ def test_no_backend_or_session_at_import():
 
 
 def test_shutdown_registered_once_and_closes_every_session():
-    import browden.mcp.session_management.browser_session_store as store_mod
-    from browden.web_navigator.selenium_chrome import SeleniumChromeBackend
+    import safe_agent_browser.mcp.session_management.browser_session_store as store_mod
+    from safe_agent_browser.web_navigator.selenium_chrome import SeleniumChromeBackend
     with patch.object(store_mod, "atexit") as mock_atexit, \
-         patch("browden.mcp.session_management.browser_session_store.BrowserSessionManager",
+         patch("safe_agent_browser.mcp.session_management.browser_session_store.BrowserSessionManager",
                side_effect=lambda *a, **k: MagicMock()):
         store = store_mod.BrowserSessionStore()
         # Building three profiles' sessions registers the atexit hook exactly once.
@@ -60,7 +60,7 @@ def test_shutdown_registered_once_and_closes_every_session():
 
 
 def test_shutdown_continues_after_one_session_fails():
-    import browden.mcp.session_management.browser_session_store as store_mod
+    import safe_agent_browser.mcp.session_management.browser_session_store as store_mod
     store = store_mod.BrowserSessionStore()
     bad, good = MagicMock(), MagicMock()
     bad.close.side_effect = RuntimeError("driver already dead")
@@ -71,11 +71,11 @@ def test_shutdown_continues_after_one_session_fails():
 
 
 def test_get_session_is_lazy_and_cached():
-    import browden.mcp.server as server
+    import safe_agent_browser.mcp.server as server
     importlib.reload(server)
     # Two backends for the same (default) profile map to one cached session;
     # the store never launches Chrome — building a backend is side-effect-free.
-    with patch("browden.mcp.session_management.browser_session_store.BrowserSessionManager") as mock_session_cls:
+    with patch("safe_agent_browser.mcp.session_management.browser_session_store.BrowserSessionManager") as mock_session_cls:
         s1 = server._store.get_or_create_session(server._backend_for(None), max_sessions=10)
         s2 = server._store.get_or_create_session(server._backend_for(None), max_sessions=10)
         assert s1 is s2
@@ -83,10 +83,10 @@ def test_get_session_is_lazy_and_cached():
 
 
 def test_distinct_profile_dirs_get_distinct_sessions(tmp_path):
-    import browden.mcp.server as server
+    import safe_agent_browser.mcp.server as server
     importlib.reload(server)
     a, b = tmp_path / "a", tmp_path / "b"
-    with patch("browden.mcp.session_management.browser_session_store.BrowserSessionManager",
+    with patch("safe_agent_browser.mcp.session_management.browser_session_store.BrowserSessionManager",
                side_effect=lambda *a, **k: MagicMock()) as mock_mgr:
         sa1 = server._store.get_or_create_session(server._backend_for(str(a)), max_sessions=10)
         sa2 = server._store.get_or_create_session(server._backend_for(str(a)), max_sessions=10)
@@ -101,9 +101,9 @@ def test_distinct_profile_dirs_get_distinct_sessions(tmp_path):
 
 def test_get_or_create_session_raises_at_the_session_cap(tmp_path):
     """A new profile beyond max_browser_sessions is refused, not launched."""
-    import browden.mcp.session_management.browser_session_store as store_mod
-    from browden.web_navigator.selenium_chrome import SeleniumChromeBackend
-    with patch("browden.mcp.session_management.browser_session_store.BrowserSessionManager",
+    import safe_agent_browser.mcp.session_management.browser_session_store as store_mod
+    from safe_agent_browser.web_navigator.selenium_chrome import SeleniumChromeBackend
+    with patch("safe_agent_browser.mcp.session_management.browser_session_store.BrowserSessionManager",
                side_effect=lambda *a, **k: MagicMock()):
         store = store_mod.BrowserSessionStore()
         store.get_or_create_session(SeleniumChromeBackend(str(tmp_path / "a")), max_sessions=2)
@@ -117,10 +117,10 @@ def test_session_cap_counts_distinct_profiles_not_repeat_requests(tmp_path):
     """The cap counts live sessions, not requests: re-requesting a profile that
     already has a session returns the cached one and never raises — even at the
     cap. Only a genuinely new profile beyond the cap is refused."""
-    import browden.mcp.session_management.browser_session_store as store_mod
-    from browden.web_navigator.selenium_chrome import SeleniumChromeBackend
+    import safe_agent_browser.mcp.session_management.browser_session_store as store_mod
+    from safe_agent_browser.web_navigator.selenium_chrome import SeleniumChromeBackend
     a, b, c = (str(tmp_path / p) for p in "abc")
-    with patch("browden.mcp.session_management.browser_session_store.BrowserSessionManager",
+    with patch("safe_agent_browser.mcp.session_management.browser_session_store.BrowserSessionManager",
                side_effect=lambda *a, **k: MagicMock()):
         store = store_mod.BrowserSessionStore()
         sa = store.get_or_create_session(SeleniumChromeBackend(a), max_sessions=2)
@@ -136,7 +136,7 @@ def test_session_cap_counts_distinct_profiles_not_repeat_requests(tmp_path):
 
 def test_digest_collision_extends_namespace(tmp_path):
     import hashlib
-    import browden.mcp.server as server
+    import safe_agent_browser.mcp.server as server
     importlib.reload(server)
     key = str(server._resolve_profile_dir(str(tmp_path / "p")))
     full = hashlib.sha256(key.encode()).hexdigest()
@@ -147,7 +147,7 @@ def test_digest_collision_extends_namespace(tmp_path):
 
 
 def test_resolve_profile_dir_is_stable_and_distinguishes_dirs(tmp_path):
-    import browden.mcp.server as server
+    import safe_agent_browser.mcp.server as server
     importlib.reload(server)
     # None is stable across calls (so the default profile maps to one session).
     assert server._resolve_profile_dir(None) == server._resolve_profile_dir(None)
@@ -158,13 +158,13 @@ def test_resolve_profile_dir_is_stable_and_distinguishes_dirs(tmp_path):
 
 
 def test_default_profile_dir_honours_xdg(monkeypatch, tmp_path):
-    import browden.mcp.server as server
+    import safe_agent_browser.mcp.server as server
     monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path))
-    assert server._default_profile_dir() == tmp_path / "browden" / "chrome-profile"
+    assert server._default_profile_dir() == tmp_path / "safe-agent-browser" / "chrome-profile"
 
 
 def test_default_cache_root_linux(monkeypatch, tmp_path):
-    import browden.mcp.server as server
+    import safe_agent_browser.mcp.server as server
     monkeypatch.delenv("XDG_CACHE_HOME", raising=False)
     # Patch Path.home() directly: it reads USERPROFILE on Windows and HOME on
     # POSIX, so setting $HOME wouldn't steer it on the Windows CI runner.
@@ -173,25 +173,25 @@ def test_default_cache_root_linux(monkeypatch, tmp_path):
 
 
 def test_default_cache_root_macos(monkeypatch, tmp_path):
-    import browden.mcp.server as server
+    import safe_agent_browser.mcp.server as server
     monkeypatch.delenv("XDG_CACHE_HOME", raising=False)
     monkeypatch.setattr(server.Path, "home", lambda: tmp_path)
     assert server._default_cache_root("darwin", "posix") == tmp_path / "Library" / "Caches"
 
 
 def test_default_cache_root_windows(monkeypatch, tmp_path):
-    import browden.mcp.server as server
+    import safe_agent_browser.mcp.server as server
     monkeypatch.delenv("XDG_CACHE_HOME", raising=False)
     monkeypatch.setenv("LOCALAPPDATA", str(tmp_path / "AppData" / "Local"))
     assert server._default_cache_root("win32", "nt") == tmp_path / "AppData" / "Local"
 
 
 def test_default_cache_root_xdg_wins_on_every_platform(monkeypatch, tmp_path):
-    import browden.mcp.server as server
+    import safe_agent_browser.mcp.server as server
     monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path))
     assert server._default_cache_root("darwin", "posix") == tmp_path  # even on mac
     # ...and the profile dir hangs the fixed subpath off it.
-    assert server._default_profile_dir() == tmp_path / "browden" / "chrome-profile"
+    assert server._default_profile_dir() == tmp_path / "safe-agent-browser" / "chrome-profile"
 
 
 def _fake_session(**methods):
@@ -204,7 +204,7 @@ def _fake_session(**methods):
 
 @pytest.mark.asyncio
 async def test_list_pages_tool_delegates_and_stamps_namespace():
-    import browden.mcp.server as server
+    import safe_agent_browser.mcp.server as server
     importlib.reload(server)
     # The session composes its own tabs' ids and returns finished wire dicts;
     # list_tabs just aggregates them across sessions.
@@ -221,7 +221,7 @@ async def test_list_pages_tool_delegates_and_stamps_namespace():
 
 @pytest.mark.asyncio
 async def test_list_pages_skips_dead_sessions_without_driving_them():
-    import browden.mcp.server as server
+    import safe_agent_browser.mcp.server as server
     importlib.reload(server)
     live = _fake_session(list_tabs=[{"id": "aa-h1", "url": "https://www.google.com/", "title": "t", "selected": "True", "profile_dir": "/a"}])
     dead = _fake_session(list_tabs=[{"id": "bb-h1", "url": "https://www.google.com/", "title": "t", "selected": "True", "profile_dir": "/b"}])
@@ -235,7 +235,7 @@ async def test_list_pages_skips_dead_sessions_without_driving_them():
 
 @pytest.mark.asyncio
 async def test_new_blank_tab_tool_delegates_and_stamps_namespace():
-    import browden.mcp.server as server
+    import safe_agent_browser.mcp.server as server
     importlib.reload(server)
     # The session composes the new tab's id itself and returns the wire dict;
     # the tool just gets the session and returns it.
@@ -255,15 +255,15 @@ async def test_new_blank_tab_hands_the_session_a_live_reap_interval(monkeypatch)
     store receives must be a getter over the live allowlist — not a number
     snapshotted when the session happened to be created.
     """
-    import browden.mcp.server as server
-    from browden.configs.loader import RuntimeConfigurationRefresher
-    from browden.mcp.validator import BrowdenRuntimeConfiguration
+    import safe_agent_browser.mcp.server as server
+    from safe_agent_browser.configs.loader import RuntimeConfigurationRefresher
+    from safe_agent_browser.mcp.validator import SafeAgentBrowserRuntimeConfiguration
     importlib.reload(server)
 
     session = _fake_session(new_blank_tab={"id": "pre-h1"})
     with patch.object(server._store, "get_or_create_session", return_value=session) as get_session:
         monkeypatch.setattr(server, "_refresher", RuntimeConfigurationRefresher.static(
-            BrowdenRuntimeConfiguration({"infra": {"reap_interval_seconds": 600}})))
+            SafeAgentBrowserRuntimeConfiguration({"infra": {"reap_interval_seconds": 600}})))
         await server.new_blank_tab(profile_dir=None)
 
         interval = get_session.call_args.kwargs["reap_interval_seconds"]
@@ -272,13 +272,13 @@ async def test_new_blank_tab_hands_the_session_a_live_reap_interval(monkeypatch)
         # A hot reload swaps the allowlist in place; the same getter must now
         # report the new cadence, with no new session and no restart.
         monkeypatch.setattr(server, "_refresher", RuntimeConfigurationRefresher.static(
-            BrowdenRuntimeConfiguration({"infra": {"reap_interval_seconds": 30}})))
+            SafeAgentBrowserRuntimeConfiguration({"infra": {"reap_interval_seconds": 30}})))
         assert interval() == 30
 
 
 @pytest.mark.asyncio
 async def test_navigate_tool_validates_then_delegates():
-    import browden.mcp.server as server
+    import safe_agent_browser.mcp.server as server
     importlib.reload(server)
     # The store routes "pre-h1" to its session; the session composes the id in
     # the wire dict it returns.
@@ -295,8 +295,8 @@ async def test_navigate_tool_validates_then_delegates():
 async def test_navigate_tool_rejects_non_allowlisted_read():
     # The shipped sample gates reads by Tranco top-sites; an obscure host is denied
     # before the session is ever routed.
-    from browden.mcp.validator import ValidationError
-    import browden.mcp.server as server
+    from safe_agent_browser.mcp.validator import ValidationError
+    import safe_agent_browser.mcp.server as server
     importlib.reload(server)
     session = _fake_session(navigate={"id": "pre-h1"})
     with patch.object(server._store, "route", return_value=session):
@@ -307,7 +307,7 @@ async def test_navigate_tool_rejects_non_allowlisted_read():
 
 @pytest.mark.asyncio
 async def test_navigate_tool_requires_page_id():
-    import browden.mcp.server as server
+    import safe_agent_browser.mcp.server as server
     importlib.reload(server)
     with pytest.raises(TypeError):
         await server.navigate("amazon.com")
@@ -318,7 +318,7 @@ async def test_navigate_bounces_when_redirect_lands_off_allowlist():
     # M3: the input URL is allowlisted (amazon.com is a Tranco top-site) but a
     # redirect parks the tab on an off-allowlist host. The landing is re-gated,
     # the tab is bounced to about:blank, and an error envelope is returned.
-    import browden.mcp.server as server
+    import safe_agent_browser.mcp.server as server
     importlib.reload(server)
     backend = OnePageBackend("about:blank", {}, redirects={
         "https://amazon.com": "https://nonexistent-xyz-9876.test/landing"})
@@ -332,7 +332,7 @@ async def test_navigate_bounces_when_redirect_lands_off_allowlist():
 async def test_navigate_passes_through_when_landing_on_allowlist():
     # A landing that is itself allowlisted (amazon.com, Tranco) is returned as-is,
     # with no about:blank bounce.
-    import browden.mcp.server as server
+    import safe_agent_browser.mcp.server as server
     importlib.reload(server)
     session = _fake_session(navigate={
         "id": "pre-h1", "url": "https://amazon.com/", "title": "t",
@@ -348,7 +348,7 @@ async def test_navigate_passes_through_when_landing_on_allowlist():
 async def test_navigate_bounces_when_landing_on_non_web_scheme():
     # A redirect that ends on a non-allowlisted scheme (chrome://, data:, blob:)
     # is NOT waved through — it is re-gated like any other landing and bounced.
-    import browden.mcp.server as server
+    import safe_agent_browser.mcp.server as server
     importlib.reload(server)
     backend = OnePageBackend("about:blank", {}, redirects={"https://amazon.com": "chrome://settings/"})
     with patch.object(server._store, "route", return_value=make_session(backend)):
@@ -361,7 +361,7 @@ async def test_navigate_bounces_when_landing_on_non_web_scheme():
 async def test_navigate_passes_through_when_landing_on_about_blank():
     # about:blank is allowed explicitly by validate_url, so a tab that legitimately
     # rests there (e.g. a 204/download) re-gates clean — no bounce, no error.
-    import browden.mcp.server as server
+    import safe_agent_browser.mcp.server as server
     importlib.reload(server)
     session = _fake_session(navigate={
         "id": "pre-h1", "url": "about:blank", "title": "", "selected": "True",
@@ -374,7 +374,7 @@ async def test_navigate_passes_through_when_landing_on_about_blank():
 
 @pytest.mark.asyncio
 async def test_invalidate_dom_cache_tool_delegates_without_driving_the_browser():
-    import browden.mcp.server as server
+    import safe_agent_browser.mcp.server as server
     importlib.reload(server)
     session = _fake_session(invalidate_dom_cache={"id": "pre-h1", "invalidated": True},
                             document_url="https://www.google.com/")
@@ -389,7 +389,7 @@ async def test_invalidate_dom_cache_tool_delegates_without_driving_the_browser()
 
 @pytest.mark.asyncio
 async def test_invalidate_dom_cache_tool_requires_page_id():
-    import browden.mcp.server as server
+    import safe_agent_browser.mcp.server as server
     importlib.reload(server)
     with pytest.raises(TypeError):
         await server.invalidate_dom_cache()
@@ -397,7 +397,7 @@ async def test_invalidate_dom_cache_tool_requires_page_id():
 
 @pytest.mark.asyncio
 async def test_invalidate_dom_cache_tool_passes_through_tab_gone_envelope():
-    import browden.mcp.server as server
+    import safe_agent_browser.mcp.server as server
     importlib.reload(server)
     envelope = {"id": "pre-h9", "error": "tab pre-h9 is no longer open — call list_tabs for current tabs"}
     session = _fake_session(invalidate_dom_cache=envelope)
@@ -407,7 +407,7 @@ async def test_invalidate_dom_cache_tool_passes_through_tab_gone_envelope():
 
 @pytest.mark.asyncio
 async def test_force_reload_page_tool_requires_page_id():
-    import browden.mcp.server as server
+    import safe_agent_browser.mcp.server as server
     importlib.reload(server)
     with pytest.raises(TypeError):
         await server.force_reload_tab()
@@ -415,7 +415,7 @@ async def test_force_reload_page_tool_requires_page_id():
 
 @pytest.mark.asyncio
 async def test_dom_tools_delegate_with_kwargs():
-    import browden.mcp.server as server
+    import safe_agent_browser.mcp.server as server
     importlib.reload(server)
     # The session gates the tab itself (with the ``gate`` it is handed), so the
     # tool just delegates — the gate is pinned in test_read_gate_atomicity.py.
@@ -439,7 +439,7 @@ async def test_dom_tools_delegate_with_kwargs():
 
 @pytest.mark.asyncio
 async def test_dom_tool_requires_page_id():
-    import browden.mcp.server as server
+    import safe_agent_browser.mcp.server as server
     importlib.reload(server)
     with pytest.raises(TypeError):
         await server.query_selector(".a")  # handle is required, no "active tab" default
@@ -447,7 +447,7 @@ async def test_dom_tool_requires_page_id():
 
 @pytest.mark.asyncio
 async def test_screenshot_tool_returns_image():
-    import browden.mcp.server as server
+    import safe_agent_browser.mcp.server as server
     importlib.reload(server)
     png = b"\x89PNG\r\n\x1a\n" + b"fakepixels"
     session = _fake_session()
@@ -464,7 +464,7 @@ async def test_screenshot_tool_returns_image():
 async def test_screenshot_tool_returns_tab_gone_envelope():
     # A closed tab comes back from the session as the standard tab-gone envelope,
     # which the tool passes through rather than wrapping as an image.
-    import browden.mcp.server as server
+    import safe_agent_browser.mcp.server as server
     importlib.reload(server)
     session = _fake_session()
     session.screenshot = gated_read(url=None, result=b"never")
@@ -477,21 +477,21 @@ async def test_screenshot_tool_returns_tab_gone_envelope():
 
 @pytest.mark.asyncio
 async def test_screenshot_tool_requires_page_id():
-    import browden.mcp.server as server
+    import safe_agent_browser.mcp.server as server
     importlib.reload(server)
     with pytest.raises(TypeError):
         await server.screenshot()  # handle is required, no "active tab" default
 
 
 def test_route_unknown_page_id_raises():
-    import browden.mcp.server as server
+    import safe_agent_browser.mcp.server as server
     importlib.reload(server)
     with pytest.raises(server.UnknownTabError):
         server._store.route("unknown-1234")
 
 
 def test_route_selects_session_by_namespace(tmp_path):
-    import browden.mcp.server as server
+    import safe_agent_browser.mcp.server as server
     importlib.reload(server)
     key = str(server._resolve_profile_dir(str(tmp_path / "p")))
     ns = server._store.digest_for(key)
@@ -505,7 +505,7 @@ def test_route_selects_session_by_namespace(tmp_path):
 @pytest.mark.asyncio
 async def test_tool_returns_envelope_for_unknown_page_id():
     """The @_tool wrapper converts UnknownTabError into the standard envelope."""
-    import browden.mcp.server as server
+    import safe_agent_browser.mcp.server as server
     importlib.reload(server)
     result = await server.query_selector("body", id="deadbeef-123")
     assert "error" in result
@@ -517,8 +517,8 @@ async def test_tool_returns_envelope_for_unknown_page_id():
 @pytest.mark.asyncio
 async def test_read_tool_refuses_tab_on_non_allowlisted_host():
     # A tab parked on a non-allowlisted site is refused before any read happens.
-    from browden.mcp.validator import ValidationError
-    import browden.mcp.server as server
+    from safe_agent_browser.mcp.validator import ValidationError
+    import safe_agent_browser.mcp.server as server
     importlib.reload(server)
     session = _fake_session()
     session.query_selector = gated_read(url="https://nonexistent-xyz-99.test/secret",
@@ -534,7 +534,7 @@ async def test_list_tabs_closes_non_allowlisted_tabs():
     # list_tabs hands the session the read gate; the session closes tabs on
     # non-allowlisted hosts and drops them from the listing (in one hold — pinned
     # in test_session.py), while allowlisted tabs are kept.
-    import browden.mcp.server as server
+    import safe_agent_browser.mcp.server as server
     importlib.reload(server)
     keep = {"id": "pre-h1", "url": "https://www.google.com/", "title": "g",
             "selected": "True", "profile_dir": "/p"}
@@ -561,12 +561,12 @@ def _profiled_session(profile_dir: str, **methods):
 async def test_click_is_authorized_per_profile(monkeypatch):
     # One config, two profiles: the same click on the same page is allowed in the
     # profile whose block authorizes it and refused in the one that doesn't.
-    import browden.mcp.server as server
-    from browden.configs.loader import RuntimeConfigurationRefresher
-    from browden.mcp.validator import BrowdenRuntimeConfiguration, ValidationError
+    import safe_agent_browser.mcp.server as server
+    from safe_agent_browser.configs.loader import RuntimeConfigurationRefresher
+    from safe_agent_browser.mcp.validator import SafeAgentBrowserRuntimeConfiguration, ValidationError
     importlib.reload(server)
 
-    allowlist = BrowdenRuntimeConfiguration({
+    allowlist = SafeAgentBrowserRuntimeConfiguration({
         "read": {"website_overrides": {"*": [".*"]}},
         "profiles": {"/profiles/shopper": {
             "click": {"shop.test": {"paths": [".*"], "label": "(?i)add to cart"}}}},
@@ -592,12 +592,12 @@ async def test_click_is_authorized_per_profile(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_reads_are_gated_by_the_tabs_own_profile(monkeypatch):
-    import browden.mcp.server as server
-    from browden.configs.loader import RuntimeConfigurationRefresher
-    from browden.mcp.validator import BrowdenRuntimeConfiguration, ValidationError
+    import safe_agent_browser.mcp.server as server
+    from safe_agent_browser.configs.loader import RuntimeConfigurationRefresher
+    from safe_agent_browser.mcp.validator import SafeAgentBrowserRuntimeConfiguration, ValidationError
     importlib.reload(server)
 
-    monkeypatch.setattr(server, "_refresher", RuntimeConfigurationRefresher.static(BrowdenRuntimeConfiguration({
+    monkeypatch.setattr(server, "_refresher", RuntimeConfigurationRefresher.static(SafeAgentBrowserRuntimeConfiguration({
         "read": {"tranco": {"enabled": False}},
         "profiles": {"/profiles/research": {
             "read": {"website_overrides": {"unranked.test": [".*"]}}}},
@@ -619,12 +619,12 @@ async def test_reads_are_gated_by_the_tabs_own_profile(monkeypatch):
 async def test_navigate_gates_the_url_against_the_target_tabs_profile(monkeypatch):
     # The tab is routed first, precisely so the URL is judged by the policy of
     # the profile it would be loaded in.
-    import browden.mcp.server as server
-    from browden.configs.loader import RuntimeConfigurationRefresher
-    from browden.mcp.validator import BrowdenRuntimeConfiguration, ValidationError
+    import safe_agent_browser.mcp.server as server
+    from safe_agent_browser.configs.loader import RuntimeConfigurationRefresher
+    from safe_agent_browser.mcp.validator import SafeAgentBrowserRuntimeConfiguration, ValidationError
     importlib.reload(server)
 
-    monkeypatch.setattr(server, "_refresher", RuntimeConfigurationRefresher.static(BrowdenRuntimeConfiguration({
+    monkeypatch.setattr(server, "_refresher", RuntimeConfigurationRefresher.static(SafeAgentBrowserRuntimeConfiguration({
         "read": {"tranco": {"enabled": False}},
         "profiles": {"/profiles/research": {
             "read": {"website_overrides": {"unranked.test": [".*"]}}}},
@@ -647,12 +647,12 @@ async def test_list_tabs_judges_each_profiles_tabs_by_its_own_rules(monkeypatch)
     # list_tabs closes a tab parked off the read allowlist. With per-profile
     # rules that verdict is per profile: the same URL is kept in the profile that
     # allows it and closed in the one that doesn't.
-    import browden.mcp.server as server
-    from browden.configs.loader import RuntimeConfigurationRefresher
-    from browden.mcp.validator import BrowdenRuntimeConfiguration
+    import safe_agent_browser.mcp.server as server
+    from safe_agent_browser.configs.loader import RuntimeConfigurationRefresher
+    from safe_agent_browser.mcp.validator import SafeAgentBrowserRuntimeConfiguration
     importlib.reload(server)
 
-    monkeypatch.setattr(server, "_refresher", RuntimeConfigurationRefresher.static(BrowdenRuntimeConfiguration({
+    monkeypatch.setattr(server, "_refresher", RuntimeConfigurationRefresher.static(SafeAgentBrowserRuntimeConfiguration({
         "read": {"tranco": {"enabled": False}},
         "profiles": {"/profiles/research": {
             "read": {"website_overrides": {"unranked.test": [".*"]}}}},

@@ -1,6 +1,6 @@
-# browden access policy — keyboard activation (`press-key`).
+# safe-agent-browser access policy — keyboard activation (`press-key`).
 #
-# LIVE RELOAD: browden re-reads this file about every 10s while it runs, so edits
+# LIVE RELOAD: safe-agent-browser re-reads this file about every 10s while it runs, so edits
 # take effect without a restart. A save that doesn't parse (mid-edit, bad YAML) is
 # ignored and the last valid version stays in force.
 #

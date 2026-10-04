@@ -1,4 +1,4 @@
-# browden MCP server — resource benchmark results
+# safe-agent-browser MCP server — resource benchmark results
 
 Python-server process only; Chrome/chromedriver excluded. Regenerate with `perf_benchmark/mem_profile.py` (see the README).
 

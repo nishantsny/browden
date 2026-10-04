@@ -11,10 +11,10 @@ via ``_config``.
 import gzip
 import shutil
 
-from browden.mcp.validator import PopularityAllowlist
-from browden.mcp.validator import popularity
-from browden.mcp.validator.popularity import PSL_FILENAME
-from browden.mcp.validator.tranco import TRANCO_FILENAME
+from safe_agent_browser.mcp.validator import PopularityAllowlist
+from safe_agent_browser.mcp.validator import popularity
+from safe_agent_browser.mcp.validator.popularity import PSL_FILENAME
+from safe_agent_browser.mcp.validator.tranco import TRANCO_FILENAME
 
 
 def _snapshot(dir_, domains):

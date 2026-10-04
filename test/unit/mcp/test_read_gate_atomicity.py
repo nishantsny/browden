@@ -12,8 +12,8 @@ Uses ``atomicity_harness``: a real ``BrowserSessionManager`` over a fake backend
 import pytest
 from atomicity_harness import TAB, OnePageBackend, make_session, serve
 
-from browden.mcp.validator import BrowdenRuntimeConfiguration, ValidationError
-from browden.web_navigator.soup_cache import TTL_SECONDS
+from safe_agent_browser.mcp.validator import SafeAgentBrowserRuntimeConfiguration, ValidationError
+from safe_agent_browser.web_navigator.soup_cache import TTL_SECONDS
 
 SHOP = "https://shop.example/item"
 SECRET = "https://secret.example/inbox"
@@ -23,7 +23,7 @@ PAGES = {
 }
 
 # Only shop.example may be read; Tranco is off so nothing else sneaks in.
-_READ_SHOP_ONLY = BrowdenRuntimeConfiguration({
+_READ_SHOP_ONLY = SafeAgentBrowserRuntimeConfiguration({
     "read": {"tranco": {"enabled": False}, "website_overrides": {"shop.example": [".*"]}},
 })
 
@@ -36,7 +36,7 @@ def _backend(url=SHOP):
 def server():
     import importlib
 
-    import browden.mcp.server as server
+    import safe_agent_browser.mcp.server as server
     importlib.reload(server)
     return server
 

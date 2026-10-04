@@ -1,6 +1,6 @@
-# Contributing to browden
+# Contributing to safe-agent-browser
 
-Thanks for your interest in improving browden! Contributions of all kinds are
+Thanks for your interest in improving safe-agent-browser! Contributions of all kinds are
 welcome — bug reports, docs, allowlist samples, and code.
 
 ## Ground rules
@@ -19,7 +19,7 @@ Requires **Python ≥ 3.11** and **Google Chrome** on the host.
 uv sync --extra dev                      # locked install from uv.lock (or: python -m venv .venv && pip install -e ".[dev]")
 uv run pytest test/unit/                 # fast; never launches a browser
 uv run pytest test/e2e/                  # drives a real Chrome
-BROWDEN_HEADLESS=1 uv run pytest test/e2e/   # on a machine with no display
+SAFE_AGENT_BROWSER_HEADLESS=1 uv run pytest test/e2e/   # on a machine with no display
 ```
 
 Dependencies are pinned in the committed `uv.lock`. If you change
@@ -36,7 +36,7 @@ host) and stands the real MCP server up on an ephemeral port.
    approach before you invest time.
 2. Branch off `main`.
 3. Keep the change focused; match the style, naming, and comment density of the
-   surrounding code. browden annotates types everywhere and prefers required
+   surrounding code. safe-agent-browser annotates types everywhere and prefers required
    fields over optional-with-`None` defaults.
 4. **Add or update tests.** New behavior needs a unit test at minimum; anything
    touching the browser path should have e2e coverage.
@@ -47,14 +47,14 @@ host) and stands the real MCP server up on an ephemeral port.
 7. Open a PR against `main`. CI runs unit tests on Linux/macOS/Windows and the
    e2e suite on headless Chrome — both must pass.
 
-## Scope: what browden is (and isn't)
+## Scope: what safe-agent-browser is (and isn't)
 
-browden is deliberately a **narrow, read-first safety perimeter**. Write actions
+safe-agent-browser is deliberately a **narrow, read-first safety perimeter**. Write actions
 (`click`, `insert_text`) are default-deny and gated per host + per visible label.
 When proposing a new tool or a new write action, keep it consistent with that
-model: small, audited, allowlist-and-label gated. Features that turn browden into
+model: small, audited, allowlist-and-label gated. Features that turn safe-agent-browser into
 a general "drive the browser" automation tool are out of scope by design — the
-README's "When NOT to use browden" table points to better tools for that.
+README's "When NOT to use safe-agent-browser" table points to better tools for that.
 
 ## Maintaining dependencies (maintainers)
 
@@ -110,5 +110,5 @@ older tags.
 
 ## Questions
 
-Open a [discussion or issue](https://github.com/nishantsny/browden/issues) — all
+Open a [discussion or issue](https://github.com/nishantsny/safe-agent-browser/issues) — all
 feedback is welcome.

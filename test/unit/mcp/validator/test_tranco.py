@@ -5,8 +5,8 @@
 """
 import gzip
 
-from browden.mcp.validator import TrancoList
-from browden.mcp.validator.tranco import DEFAULT_TOP_N, TRANCO_FILENAME
+from safe_agent_browser.mcp.validator import TrancoList
+from safe_agent_browser.mcp.validator.tranco import DEFAULT_TOP_N, TRANCO_FILENAME
 
 
 def _snapshot(dir_, domains):

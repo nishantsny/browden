@@ -1,6 +1,6 @@
-# browden
+# safe-agent-browser
 
-[![CI](https://github.com/nishantsny/browden/actions/workflows/e2e.yml/badge.svg)](https://github.com/nishantsny/browden/actions/workflows/e2e.yml)
+[![CI](https://github.com/nishantsny/safe-agent-browser/actions/workflows/e2e.yml/badge.svg)](https://github.com/nishantsny/safe-agent-browser/actions/workflows/e2e.yml)
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](./LICENSE)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue.svg)](https://www.python.org/downloads/)
 [![MCP server](https://img.shields.io/badge/MCP-server-1f6feb.svg)](https://modelcontextprotocol.io)
@@ -16,10 +16,10 @@ _Short demo video: https://youtu.be/q-W3Z9nlj58_
 
 **With great power comes great responsibility**: Only point this MCP to sites whose Terms of Service permit automated access.
 
-## When to use browden
+## When to use safe-agent-browser
 
-browden is deliberately narrow: **safe, local, undetected, and read-only, with allowlisted writes**. 
-This allows your agent to run wild on your *own* logged-in Chrome. Use browden for your daily research needs + a few writes. 
+safe-agent-browser is deliberately narrow: **safe, local, undetected, and read-only, with allowlisted writes**. 
+This allows your agent to run wild on your *own* logged-in Chrome. Use safe-agent-browser for your daily research needs + a few writes. 
 Defer to richer automation tools when you need to *drive* the browser rather than *read* it.
 
 **Typical usecases:**
@@ -28,7 +28,7 @@ Defer to richer automation tools when you need to *drive* the browser rather tha
   structurally unable to click "Buy", send mail, or delete anything.
 - You need a **prompt-injection perimeter** around the agent.
 
-## When NOT to use browden
+## When NOT to use safe-agent-browser
 
 | If you need… | Consider |
 | --- | --- |
@@ -44,7 +44,7 @@ Defer to richer automation tools when you need to *drive* the browser rather tha
 - **A trusted-website perimeter for reads.** Even *reading* untrusted websites exposes your agent to
   a myriad of prompt-injections. The MCP **allowlists readable websites** using [Tranco top sites](https://tranco-list.eu/) and an overridable list.
 - **Safe on your logged-in Chrome.** Because the agent *can't* take write actions on
-  your browser, you can point browden at your primary Chrome profile and
+  your browser, you can point safe-agent-browser at your primary Chrome profile and
   let it reuse your existing logins — the agent can read your logged-in pages but
   cannot click "Buy", change settings, send mail, or delete anything.
 - **Rules can be scoped per browser profile.** The credentialed profile stays
@@ -62,23 +62,23 @@ Defer to richer automation tools when you need to *drive* the browser rather tha
 ## Quick start
 
 ```bash
-git clone --branch stable https://github.com/nishantsny/browden.git
-cd browden
+git clone --branch stable https://github.com/nishantsny/safe-agent-browser.git
+cd safe-agent-browser
 python3 setup/onetime_setup.py
 ```
 
 > `--branch stable` installs the **latest release** — the `stable` channel only ever
 > advances to tagged releases, never mid-flight `main`. To track development instead,
 > clone without `--branch stable` (that follows `main`). To update later:
-> `git -C browden pull --ff-only`.
+> `git -C safe-agent-browser pull --ff-only`.
 
 The setup script will print a MCP config (sample below), paste that into your agent's MCP config (e.g. `~/.claude.json`)
 
 ```json
 "mcpServers": {
-  "browden": {
-    "command": "/path/to/browden/.venv/bin/python",
-    "args": ["-m", "browden.mcp.server", "--allowlist", "/home/you/.browden/allowlist.yaml"],
+  "safe-agent-browser": {
+    "command": "/path/to/safe-agent-browser/.venv/bin/python",
+    "args": ["-m", "safe_agent_browser.mcp.server", "--allowlist", "/home/you/.safe-agent-browser/allowlist.yaml"],
     "env": { "DISPLAY": ":0" }
   }
 }
@@ -97,7 +97,7 @@ clone-and-run on every OS; the notes below only cover what differs per platform.
 
 - Run the setup command with `python3`.
 - Headed Chrome needs an X11 `DISPLAY` (the `env` block in the stdio config); on
-  a machine with no display, set `BROWDEN_HEADLESS=1`.
+  a machine with no display, set `SAFE_AGENT_BROWSER_HEADLESS=1`.
 - `--mode service` installs a **systemd user** unit.
 
 ### macOS
@@ -117,7 +117,7 @@ clone-and-run on every OS; the notes below only cover what differs per platform.
 
 ## Tools
 
-browden exposes tools over a swappable `WebNavigatorBackend`
+safe-agent-browser exposes tools over a swappable `WebNavigatorBackend`
 (Selenium + Chrome by default). Each tool that acts on a specific tab takes the
 tab's `id` — the value returned by `new_blank_tab` / `list_tabs`. Pass it back
 verbatim; it is globally unique and routes itself to the right profile (multiple user profiles are supported).
@@ -153,7 +153,7 @@ frame's URL; a frame the page wrote itself (`srcdoc`) has its parent page's
 URL, so the parent's rules apply. A `screenshot` inside a frame also needs the
 top page to be readable, since the capture shows it. If the frame's URL can't
 be read, the frame has been removed or changed, or a read's expired snapshot
-made browden reload the page (which returns the tab to its top document), the
+made safe-agent-browser reload the page (which returns the tab to its top document), the
 call is refused rather than answered from the top page. The tab is then at its
 top document: call `switch_to_frame` again.
 
@@ -189,14 +189,14 @@ cookies, storage, and logins. The crucial rule:
 > **One profile = one Chrome window at a time.** A profile directory can be held
 > by only a single Chrome process (it's guarded by Chrome's `SingletonLock`).
 
-browden keeps **one browser session per profile**, launched lazily on
+safe-agent-browser keeps **one browser session per profile**, launched lazily on
 first use. That has two consequences:
 
 - **Different profiles run in parallel.** Give a request its own `profile_dir`
   and it gets an independent Chrome process — so separate profiles can be driven
   concurrently.
 - **Within one profile, the agent drives one tab at a time — but concurrent
-  requests are safe.** A single session has one focused window, so browden
+  requests are safe.** A single session has one focused window, so safe-agent-browser
   serializes every request to that profile behind a per-session lock: each one
   waits its turn, then re-selects its own tab before acting, so a burst of
   parallel calls to ten tabs returns ten correct answers instead of racing over
@@ -215,14 +215,14 @@ the credentialed profile narrow while a scratch profile browses freely.
   the agent to drive a browser. This is the normal, friction-free path. 
   The profile is persisted, so login will persist across restarts.
 - **Point it at your real Chrome profile** to reuse your existing logins. Since
-  that profile can only be open in one window, browden *becomes* that
+  that profile can only be open in one window, safe-agent-browser *becomes* that
   window: you can watch it, but you shouldn't also run your everyday Chrome on
   the same profile at the same time, and the window is there for the agent to
   drive — not for you to click around in. Note that the read perimeter is
   enforced on the whole window: a tab parked on a site outside the read
   allowlist is **closed** when the agent lists tabs (so it can neither read it
   nor learn it exists) — don't keep tabs you care about open in a
-  browden-driven window.
+  safe-agent-browser-driven window.
 
 ## Safety: the allowlist
 
@@ -300,13 +300,13 @@ read:
   tranco: {enabled: true, top_n: 1000000}
 
 profiles:
-  ~/.cache/browden/chrome-profile:          # the credentialed profile: narrow
+  ~/.cache/safe-agent-browser/chrome-profile:          # the credentialed profile: narrow
     click:
       secure.splitwise.com:
         - path: ['^/expenses.*']
           label: 'Save'
 
-  ~/.cache/browden/chrome-research:         # a scratch profile: everything, here
+  ~/.cache/safe-agent-browser/chrome-research:         # a scratch profile: everything, here
     allow_all: true
 ```
 
@@ -318,7 +318,7 @@ profiles:
   profile can move `top_n` (or drop the popularity net *for itself*) without
   repeating the rest.
 - **Keys are canonicalized** the way a caller's `profile_dir` is, so
-  `~/.cache/browden/p` and its resolved path are one profile. A *relative* key
+  `~/.cache/safe-agent-browser/p` and its resolved path are one profile. A *relative* key
   is refused at load — it would depend on the server's working directory. A
   profile directory that doesn't exist yet is fine; Chrome creates it on first
   launch.
@@ -344,24 +344,24 @@ the read gate would otherwise *rank*. Two things it deliberately keeps:
 The denylist still vetoes everything under it, and `allow_all` is only valid
 inside a profile — it describes one browsing identity, never all of them.
 
-### Protecting browden's own files
+### Protecting safe-agent-browser's own files
 
 The policy only holds if the agent can't rewrite it. That means the allowlist,
-the Tranco/PSL snapshots next to it, *and* browden's source — an agent that edits
+the Tranco/PSL snapshots next to it, *and* safe-agent-browser's source — an agent that edits
 any of them widens its own access. Setup prints both steps at the end:
 
-1. **Deny agent edits to every browden file** (`~/.browden/**` and the install
+1. **Deny agent edits to every safe-agent-browser file** (`~/.safe-agent-browser/**` and the install
    tree) in your agent's settings — `"ask"` if you'd rather approve each edit,
    never auto-approve.
 2. **Lock them down at the OS level.** Permission rules only gate the agent's
    *file* tools; any shell it runs (`Bash`, `python -c`, `sed -i`) writes to them
    directly, and command rules are trivially rephrased around. Make the files
-   root-owned and read-only instead — browden only ever reads them:
+   root-owned and read-only instead — safe-agent-browser only ever reads them:
 
    ```bash
-   sudo chown -R root:root ~/.browden
-   sudo find ~/.browden -type d -exec chmod 755 {} +   # +x = traverse, keep it
-   sudo find ~/.browden -type f -exec chmod 444 {} +   # data, never executable
+   sudo chown -R root:root ~/.safe-agent-browser
+   sudo find ~/.safe-agent-browser -type d -exec chmod 755 {} +   # +x = traverse, keep it
+   sudo find ~/.safe-agent-browser -type f -exec chmod 444 {} +   # data, never executable
    ```
 
    Afterwards, refreshing the snapshots takes `sudo`.
@@ -434,13 +434,13 @@ Key points of the flow:
 
 ## Installation reference
 
-`python3 setup/onetime_setup.py` creates a venv at `.venv` and installs browden
+`python3 setup/onetime_setup.py` creates a venv at `.venv` and installs safe-agent-browser
 into it (via `uv sync --frozen`, pinned by the committed `uv.lock`; falls back
 to stdlib `venv` + `pip` when uv is absent), copies the sample
-allowlist to `~/.browden/allowlist.yaml` (never overwriting an existing one),
+allowlist to `~/.safe-agent-browser/allowlist.yaml` (never overwriting an existing one),
 fetches the Tranco snapshot next to it, and prints the JSON block to add to your
 agent plus the hardening steps in
-[Protecting browden's own files](#protecting-browdens-own-files). It's
+[Protecting safe-agent-browser's own files](#protecting-safe-agent-browsers-own-files). It's
 idempotent, and **defaults to stdio** (shown in
 [Quick start](#quick-start)) — pass `--mode service` for the persistent SSE
 service below.
@@ -452,14 +452,14 @@ instance without touching the first).
 
 ### Background service over SSE
 
-Runs browden as a background service via the host's **native service manager** —
+Runs safe-agent-browser as a background service via the host's **native service manager** —
 systemd (Linux), launchd (macOS), or Task Scheduler (Windows) — so the Chrome
 session stays warm across agent restarts, serving SSE on port **22001** pinned to
 the venv.
 
 ```bash
-git clone --branch stable https://github.com/nishantsny/browden.git
-cd browden
+git clone --branch stable https://github.com/nishantsny/safe-agent-browser.git
+cd safe-agent-browser
 python3 setup/onetime_setup.py --mode service
 ```
 
@@ -473,14 +473,14 @@ service description:
 | Windows | Task Scheduler | a logon-triggered task running a windowless launcher |
 
 (Chrome is located on `PATH`, then at the OS's canonical install location — macOS
-`/Applications`, Windows `Program Files`; point `BROWDEN_CHROME_BINARY` at it if
+`/Applications`, Windows `Program Files`; point `SAFE_AGENT_BROWSER_CHROME_BINARY` at it if
 it lives elsewhere.)
 
 Then paste the printed block into your agent's MCP config:
 
 ```json
 "mcpServers": {
-  "browden": {
+  "safe-agent-browser": {
     "type": "sse",
     "url": "http://127.0.0.1:22001/sse"
   }
@@ -496,10 +496,10 @@ update on its own. Refresh it, then restart the service to load the new list:
 
 ```bash
 python3 setup/fetch_tranco.py                    # re-download the top-1m snapshot
-systemctl --user restart browden.service   # reload it into the running server
+systemctl --user restart safe-agent-browser.service   # reload it into the running server
 ```
 
-`fetch_tranco.py` writes the snapshot into your config dir (`~/.browden` by
+`fetch_tranco.py` writes the snapshot into your config dir (`~/.safe-agent-browser` by
 default) — the very file the server reads — so the restart is all it takes to load
 the new list. Pass `--top-n N` to keep a different number of domains, `--config-dir`
 if you installed elsewhere, and use your own `--service-name` in the restart if you
@@ -517,14 +517,14 @@ stdio is the default the [Quick start](#quick-start) sets up; the block it print
 looks like:
 
 ```json
-"browden": {
-  "command": "/path/to/browden/.venv/bin/python",
-  "args": ["-m", "browden.mcp.server", "--allowlist", "/home/you/.browden/allowlist.yaml"],
+"safe-agent-browser": {
+  "command": "/path/to/safe-agent-browser/.venv/bin/python",
+  "args": ["-m", "safe_agent_browser.mcp.server", "--allowlist", "/home/you/.safe-agent-browser/allowlist.yaml"],
   "env": { "DISPLAY": ":0" }
 }
 ```
 
-`--allowlist` is optional (it falls back to `~/.browden/allowlist.yaml`
+`--allowlist` is optional (it falls back to `~/.safe-agent-browser/allowlist.yaml`
 then the repo sample). `DISPLAY` is only needed when launching headed Chrome
 from a non-graphical parent process. Restart the agent to register the server.
 
@@ -540,7 +540,7 @@ downloads), `beautifulsoup4`, and `pyyaml`.
 uv sync --extra dev                     # locked install from uv.lock (or: python -m venv .venv && pip install -e ".[dev]")
 uv run pytest test/unit/                # never launches a browser
 uv run pytest test/e2e/                 # drives a real Chrome
-BROWDEN_HEADLESS=1 uv run pytest test/e2e/   # on a machine with no display
+SAFE_AGENT_BROWSER_HEADLESS=1 uv run pytest test/e2e/   # on a machine with no display
 ```
 
 Dependency versions are pinned in the committed `uv.lock`; `uv sync` installs
@@ -565,7 +565,7 @@ on an ephemeral port. The same suites run on every push/PR via the
   `insert_text`, `press_key` and `upload_file` (e.g. select/checkbox), each held
   to the same allowlist-and-label policy.
 
-All feedback is welcome — please [open an issue](https://github.com/nishantsny/browden/issues).
+All feedback is welcome — please [open an issue](https://github.com/nishantsny/safe-agent-browser/issues).
 
 ## Attribution
 
@@ -588,7 +588,7 @@ allowlist reproducible. This is attribution guidance, not legal advice.
 ## License
 
 [Apache License 2.0](./LICENSE) — a permissive license with an explicit patent
-grant. You can use, modify, and redistribute browden, including in proprietary
+grant. You can use, modify, and redistribute safe-agent-browser, including in proprietary
 products, provided you preserve the license and attribution notices. This
-governs browden's code; the Tranco data carries its own terms (see
+governs safe-agent-browser's code; the Tranco data carries its own terms (see
 [Attribution](#attribution)).

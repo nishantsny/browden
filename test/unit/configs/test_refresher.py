@@ -1,6 +1,6 @@
 """RuntimeConfigurationRefresher: the live allowlist and its lock-free hot-reload.
 
-The refresher owns the current BrowdenRuntimeConfiguration and swaps in a fresh one (an
+The refresher owns the current SafeAgentBrowserRuntimeConfiguration and swaps in a fresh one (an
 atomic attribute rebind — RCU) when the backing file changes. These exercise the
 pure decision (maybe_reload) plus the async poller that drives it.
 """
@@ -9,8 +9,8 @@ import gzip
 
 import pytest
 
-from browden.configs.loader.refresher import RuntimeConfigurationRefresher, _stat_signature
-from browden.mcp.validator.tranco import TRANCO_FILENAME
+from safe_agent_browser.configs.loader.refresher import RuntimeConfigurationRefresher, _stat_signature
+from safe_agent_browser.mcp.validator.tranco import TRANCO_FILENAME
 
 
 def _write(path, *, top_n: int) -> None:

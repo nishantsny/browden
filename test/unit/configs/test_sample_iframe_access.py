@@ -8,8 +8,8 @@ from pathlib import Path
 
 import pytest
 
-from browden.configs.loader import load_runtime_configuration
-from browden.mcp.validator import ValidationError, check_action_host, frame_gate
+from safe_agent_browser.configs.loader import load_runtime_configuration
+from safe_agent_browser.mcp.validator import ValidationError, check_action_host, frame_gate
 
 SAMPLE = Path(__file__).resolve().parents[3] / "configs" / "samples" / "allow_iframe_access.yaml"
 TOP = "https://billing.example.com/account"

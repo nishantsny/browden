@@ -13,9 +13,9 @@ classified fails the build, so the default for anything new is "content".
 import ast
 from pathlib import Path
 
-from browden.web_navigator.interface import WebNavigatorBackend
+from safe_agent_browser.web_navigator.interface import WebNavigatorBackend
 
-ROOT = Path(__file__).resolve().parents[3] / "browden"
+ROOT = Path(__file__).resolve().parents[3] / "safe_agent_browser"
 GATED_PAGE = ROOT / "mcp" / "session_management" / "gated_page.py"
 # The backend's own definition and implementation are where these methods live.
 EXEMPT = {ROOT / "web_navigator" / "interface.py", GATED_PAGE}
@@ -30,7 +30,7 @@ CONTENT = {"page_snapshot", "target_snapshot", "document_url", "current_url", "s
            "upload_file_target",
            "enter_frame", "switch_to_parent_frame", "switch_to_default_content",
            "retreat_to_top"}
-# Content method names no other class in browden uses, so any call of them —
+# Content method names no other class in safe-agent-browser uses, so any call of them —
 # whatever the receiver is called — is a backend call. (``navigate``,
 # ``screenshot``, ``reload`` and the three frame moves are also session /
 # GatedPage methods; they are caught by their receiver instead.)
@@ -84,7 +84,7 @@ def test_only_gated_page_touches_page_content():
     found = [v for path in _modules()
              for v in violations(path.read_text(), str(path.relative_to(ROOT.parent)))]
     assert found == [], ("page content reached outside GatedPage — route it through "
-                         "browden/mcp/session_management/gated_page.py:\n  " + "\n  ".join(found))
+                         "safe_agent_browser/mcp/session_management/gated_page.py:\n  " + "\n  ".join(found))
 
 
 def test_gated_page_is_where_the_content_calls_are():

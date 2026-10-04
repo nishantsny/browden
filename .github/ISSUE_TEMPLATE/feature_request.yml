@@ -5,9 +5,9 @@ body:
   - type: markdown
     attributes:
       value: |
-        browden is deliberately a **narrow, read-first safety perimeter**. New
+        safe-agent-browser is deliberately a **narrow, read-first safety perimeter**. New
         tools and write actions should stay consistent with that model (small,
-        audited, allowlist-and-label gated). See "When NOT to use browden" and
+        audited, allowlist-and-label gated). See "When NOT to use safe-agent-browser" and
         "Future work" in the README before filing.
   - type: textarea
     id: problem

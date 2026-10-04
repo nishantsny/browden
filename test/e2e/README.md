@@ -9,7 +9,7 @@ is automatically part of the post-deploy gate.
 Run locally with headless Chrome:
 
 ```bash
-BROWDEN_HEADLESS=1 pytest test/e2e -q
+SAFE_AGENT_BROWSER_HEADLESS=1 pytest test/e2e -q
 ```
 
 All tests are **offline and deterministic**: pages are inline `data:` documents,

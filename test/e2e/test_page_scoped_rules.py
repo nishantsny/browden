@@ -25,7 +25,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import pytest
 
-from browden.web_navigator.utils.network_utils import get_free_port
+from safe_agent_browser.web_navigator.utils.network_utils import get_free_port
 
 # Every path serves the same page: two labelled buttons the click tests act on.
 # The server never sees the URL fragment, which is exactly why match_on: url is

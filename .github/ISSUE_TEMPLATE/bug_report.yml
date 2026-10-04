@@ -1,5 +1,5 @@
 name: Bug report
-description: Something in browden misbehaves (a tool, the allowlist, setup, a crash)
+description: Something in safe-agent-browser misbehaves (a tool, the allowlist, setup, a crash)
 labels: ["bug"]
 body:
   - type: markdown
@@ -38,7 +38,7 @@ body:
   - type: input
     id: version
     attributes:
-      label: browden version / commit
+      label: safe-agent-browser version / commit
       placeholder: v0.1.0 or a commit SHA
     validations:
       required: true

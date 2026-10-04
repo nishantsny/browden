@@ -1,13 +1,13 @@
-# browden access policy — attaching a local file (`upload-file`).
+# safe-agent-browser access policy — attaching a local file (`upload-file`).
 #
-# LIVE RELOAD: browden re-reads this file about every 10s while it runs, so edits
+# LIVE RELOAD: safe-agent-browser re-reads this file about every 10s while it runs, so edits
 # take effect without a restart. A save that doesn't parse (mid-edit, bad YAML) is
 # ignored and the last valid version stays in force.
 #
 # A worked example that ENABLES the `upload-file` write action. `upload-file` sets
 # an `<input type="file">` to a file on this machine — how a receipt image gets
 # attached to an expense. Clicking such a control would open the operating
-# system's own file dialog, which is not part of the page and which browden has no
+# system's own file dialog, which is not part of the page and which safe-agent-browser has no
 # way to drive, so this is the only route.
 #
 # Five independent layers, evaluated in this order for every URL/action:

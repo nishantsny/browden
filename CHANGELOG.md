@@ -1,6 +1,6 @@
 # Changelog
 
-All notable changes to browden are documented here. The format follows
+All notable changes to safe-agent-browser are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow
 [Semantic Versioning](https://semver.org/). Only the latest release is supported
 (see [SECURITY.md](./SECURITY.md)).
@@ -8,6 +8,20 @@ All notable changes to browden are documented here. The format follows
 ## [Unreleased]
 
 ### Changed
+- **Renamed to `safe-agent-browser`.** Every artifact carrying the old name moved
+  in one pass: the distribution and console script (`safe-agent-browser`), the
+  importable package (`safe_agent_browser/`), the MCP server name — so a client's
+  tools are now `mcp__safe-agent-browser__*` — the `SAFE_AGENT_BROWSER_*`
+  environment variables, the `SafeAgentBrowserAccessRuleSet` and
+  `SafeAgentBrowserRuntimeConfiguration` classes, the default service/task name,
+  and the on-disk locations: config `~/.safe-agent-browser/` (allowlist, Tranco
+  and PSL snapshots) and cache `~/.cache/safe-agent-browser/` (default Chrome
+  profile). Breaking for an existing install: the MCP client entry has to be
+  re-pointed and reconnected, and the two directories moved to their new names —
+  a default profile left at the old cache path is not read any more, so its
+  logged-in sessions would otherwise look lost. `setup/checkpoints.py` also
+  writes a renamed provenance marker, so a config still carrying the old marker
+  gets a second block appended rather than an update in place.
 - **A merge during the release e2e no longer blocks the tag (maintainers).**
   `deploy.sh --release` refused to tag unless the deployed commit was still
   `main`'s tip, so any PR merged during the ~7-minute e2e aborted a green run.
@@ -56,7 +70,7 @@ All notable changes to browden are documented here. The format follows
   New `upload_file` tool, for the one control no existing action could drive:
   `write-text` excludes `type=file` by design, and clicking a file input opens the
   operating system's own file dialog, which is not part of the page and which
-  browden cannot drive. The motivating case is attaching a receipt image to a
+  safe-agent-browser cannot drive. The motivating case is attaching a receipt image to a
   Splitwise expense. It is a section of its own, **never** a widening of
   `write-text`'s accepted input types: reading a file off your disk and handing it
   to a website is a different capability from typing into a box, so a host already
@@ -97,7 +111,7 @@ All notable changes to browden are documented here. The format follows
   `force_reload_tab`, and a read whose cached snapshot had expired, reloaded the
   tab and fetched its HTML *before* checking where the reload landed. The agent
   never received that page (the landing was bounced and the request refused),
-  but its content still left the browser into browden's memory. The landing is
+  but its content still left the browser into safe-agent-browser's memory. The landing is
   now checked between the reload and the fetch.
 - **Reads and writes gate what was actually fetched, not just the URL seen first.**
   Inside one driver hold, the page's own JS could still navigate between the
@@ -193,7 +207,7 @@ All notable changes to browden are documented here. The format follows
   (internal).** It read a tab's URL in a hold of its own, so a check built on it
   was stale by the time anything acted. That's the separate-hold pattern
   GHSA-4mgj-cwrw-795x fixed. The gates already read `backend.document_url()`
-  inside the hold they guard, and nothing in browden used the session method.
+  inside the hold they guard, and nothing in safe-agent-browser used the session method.
 
 ## [1.4.0] — 2026-10-04
 
@@ -259,7 +273,7 @@ All notable changes to browden are documented here. The format follows
   configs are unchanged), the denylist is unioned and still wins, and `infra`
   stays global and is rejected inside a profile block. Keys are canonicalized
   the way the session layer canonicalizes a caller's `profile_dir`, so
-  `~/.cache/browden/p` and its resolved path name one profile; a relative key
+  `~/.cache/safe-agent-browser/p` and its resolved path name one profile; a relative key
   fails the load rather than sitting inert. Per-profile edits hot-reload like
   every other rule (#143).
 - **`allow_all: true` inside a profile.** Opens every write action and
@@ -286,18 +300,18 @@ All notable changes to browden are documented here. The format follows
   ever consults, so a typo like `clik:` loaded cleanly and silently authorized
   nothing. At startup this is a config error; on hot reload the last-good
   config stays in force, as for any invalid edit.
-- **`ActionAllowlist` renamed to `BrowdenRuntimeConfiguration` (internal).** The
+- **`ActionAllowlist` renamed to `SafeAgentBrowserRuntimeConfiguration` (internal).** The
   class that holds one loaded config (the `infra` caps plus the rules) now lives
   in `validator/runtime_configuration.py`; `AllowlistRefresher` and
   `load_allowlist()` became `RuntimeConfigurationRefresher` and
   `load_runtime_configuration()`. Names that refer to the config *file* are
-  unchanged (`allowlist.yaml`, `--allowlist`, `$BROWDEN_ALLOWLIST`), as are
+  unchanged (`allowlist.yaml`, `--allowlist`, `$SAFE_AGENT_BROWSER_ALLOWLIST`), as are
   error messages. Maintainers: the first deploy that pulls this fails at step 3,
   because bash keeps running the already-open old copy of the deploy script,
   which calls `load_allowlist`. It aborts before the restart; re-run it (#150).
 - **Access rules split out of the runtime configuration (internal).**
-  `BrowdenAccessRuleSet` (`validator/access_rule_set.py`) now holds the
-  denylist, the read gate and the write-action rules; `BrowdenRuntimeConfiguration`
+  `SafeAgentBrowserAccessRuleSet` (`validator/access_rule_set.py`) now holds the
+  denylist, the read gate and the write-action rules; `SafeAgentBrowserRuntimeConfiguration`
   keeps the process-wide `infra` caps and reaches the rules through
   `.access_rules`. Write actions are read by name from `WRITE_ACTIONS` rather
   than by excluding reserved keys, so a new top-level section can never be
@@ -305,7 +319,7 @@ All notable changes to browden are documented here. The format follows
   rules (#139) (#140).
 - **Gates are handed the access rules, not the whole configuration (internal).**
   `ensure_url_allowed`, `check_action_host` and the `validate_*_target` gates
-  take a `BrowdenAccessRuleSet`, and `BrowdenRuntimeConfiguration` no longer
+  take a `SafeAgentBrowserAccessRuleSet`, and `SafeAgentBrowserRuntimeConfiguration` no longer
   forwards `read_policy` / `denylist` / `is_denied` / `section` / `rules_for`:
   `.access_rules` is the only route to a decision. No gate's order or outcome
   changes; groundwork for handing each request its own profile's rules (#139)
@@ -327,17 +341,17 @@ All notable changes to browden are documented here. The format follows
   `profiles.<dir>: unknown section 'clik'`, as a top-level typo does (#153).
 - **Deploy script's post-deploy e2e runs in a private temp dir (maintainers).**
   `release_new_version.sh` points the e2e run's `TMPDIR` at a fresh
-  `browden-e2e.*` dir, so pytest's `tmp_path` dirs and Chrome's scratch dirs
+  `safe-agent-browser-e2e.*` dir, so pytest's `tmp_path` dirs and Chrome's scratch dirs
   land there instead of `/tmp`, where they had filled the root filesystem. The
   dir is removed after a green run and kept (its path in the failure message)
-  after a red one; each run first sweeps leftover `browden-e2e.*` dirs. The live
+  after a red one; each run first sweeps leftover `safe-agent-browser-e2e.*` dirs. The live
   service's Chrome never sees this `TMPDIR` (#151).
 - **Deploy script's e2e venv is no longer kept between runs (maintainers).**
   `release_new_version.sh` used to build the post-deploy e2e venv at
-  `~/.cache/browden/e2e-venv` and keep it forever (~110 MB). It now lives in
-  the run's private `browden-e2e.*` temp dir, so it is removed after a green run
+  `~/.cache/safe-agent-browser/e2e-venv` and keep it forever (~110 MB). It now lives in
+  the run's private `safe-agent-browser-e2e.*` temp dir, so it is removed after a green run
   and kept with the logs after a red one until the next run sweeps it. Setting
-  `BROWDEN_E2E_VENV` still gives a persistent venv, which the script never
+  `SAFE_AGENT_BROWSER_E2E_VENV` still gives a persistent venv, which the script never
   removes.
 - **Release skill: the version-bump PR is built in a temporary worktree
   (maintainers).** `maintainers/github-release/SKILL.md` now says to prepare
@@ -350,7 +364,7 @@ All notable changes to browden are documented here. The format follows
 ### Fixed
 - **`mcp` is pinned below 2.** The dependency was `mcp[cli]>=1.0` with no
   upper bound, so a fresh install resolved to mcp 2.x, which renamed `FastMCP`
-  and cannot import browden at all. It is now `mcp[cli]>=1.0,<2`; `uv.lock`
+  and cannot import safe-agent-browser at all. It is now `mcp[cli]>=1.0,<2`; `uv.lock`
   still pins 1.28.1, so locked installs are unchanged.
 - **Deploy script's e2e venv is built from `uv.lock` (maintainers).** It was
   built with `uv pip install -e`, which ignores the lock and resolves every
@@ -468,7 +482,7 @@ install to a reproducible, locked dependency set.
   the whole path (#79).
 - Pin the Chrome DevTools websocket origin instead of
   `--remote-allow-origins=*` (M4, #73); make `--no-sandbox` opt-in only
-  (`BROWDEN_NO_SANDBOX`, #80).
+  (`SAFE_AGENT_BROWSER_NO_SANDBOX`, #80).
 - XML-escape values rendered into the Windows task definition (#83).
 
 ### Added
@@ -499,7 +513,7 @@ install to a reproducible, locked dependency set.
 
 Initial public release.
 
-- MCP server over a real, **undetected** Chrome: browden launches Chrome
+- MCP server over a real, **undetected** Chrome: safe-agent-browser launches Chrome
   itself (no chromedriver automation flags) and attaches Selenium over the
   DevTools port.
 - Read-first tool surface: tab management (`list_tabs`, `new_blank_tab`,
@@ -519,13 +533,13 @@ Initial public release.
   service manager (systemd / launchd / Task Scheduler).
 - Apache-2.0.
 
-[Unreleased]: https://github.com/nishantsny/browden/compare/v1.5.0...HEAD
-[1.5.0]: https://github.com/nishantsny/browden/compare/v1.4.0...v1.5.0
-[1.4.0]: https://github.com/nishantsny/browden/compare/v1.3.1...v1.4.0
-[1.3.1]: https://github.com/nishantsny/browden/compare/v1.3.0...v1.3.1
-[1.3.0]: https://github.com/nishantsny/browden/compare/v1.2.1...v1.3.0
-[1.2.1]: https://github.com/nishantsny/browden/compare/v1.2.0...v1.2.1
-[1.2.0]: https://github.com/nishantsny/browden/compare/v1.1.0...v1.2.0
-[1.1.0]: https://github.com/nishantsny/browden/compare/v1.0.0...v1.1.0
-[1.0.0]: https://github.com/nishantsny/browden/compare/v0.1.0...v1.0.0
-[0.1.0]: https://github.com/nishantsny/browden/releases/tag/v0.1.0
+[Unreleased]: https://github.com/nishantsny/safe-agent-browser/compare/v1.5.0...HEAD
+[1.5.0]: https://github.com/nishantsny/safe-agent-browser/compare/v1.4.0...v1.5.0
+[1.4.0]: https://github.com/nishantsny/safe-agent-browser/compare/v1.3.1...v1.4.0
+[1.3.1]: https://github.com/nishantsny/safe-agent-browser/compare/v1.3.0...v1.3.1
+[1.3.0]: https://github.com/nishantsny/safe-agent-browser/compare/v1.2.1...v1.3.0
+[1.2.1]: https://github.com/nishantsny/safe-agent-browser/compare/v1.2.0...v1.2.1
+[1.2.0]: https://github.com/nishantsny/safe-agent-browser/compare/v1.1.0...v1.2.0
+[1.1.0]: https://github.com/nishantsny/safe-agent-browser/compare/v1.0.0...v1.1.0
+[1.0.0]: https://github.com/nishantsny/safe-agent-browser/compare/v0.1.0...v1.0.0
+[0.1.0]: https://github.com/nishantsny/safe-agent-browser/releases/tag/v0.1.0

@@ -3,13 +3,13 @@
 Regression guard for a whole class of bug: a write action gains a new page-rule
 field (e.g. ``field_ids`` for write-text, ``keys`` for press-key) that the
 *runtime* parser accepts, but the *file-load schema* (``configs/loader/schema.py``)
-does not — so the config parses fine in unit tests that build ``BrowdenRuntimeConfiguration``
+does not — so the config parses fine in unit tests that build ``SafeAgentBrowserRuntimeConfiguration``
 from a dict, yet the deployed server refuses it on load (``unknown keys [...]``)
 and the feature is dead in production.
 
-Booting the real ``python -m browden.mcp.server`` subprocess against each shipped
+Booting the real ``python -m safe_agent_browser.mcp.server`` subprocess against each shipped
 sample exercises the same ``load_runtime_configuration`` -> ``validate_allowlist_data`` ->
-``BrowdenRuntimeConfiguration`` path the live service uses on startup — the path
+``SafeAgentBrowserRuntimeConfiguration`` path the live service uses on startup — the path
 dict-constructed tests skip. ``main()`` turns a ``ConfigError`` into a
 ``parser.error`` (a non-zero exit), so a schema-rejected sample makes the process
 die before it binds, and ``harness.start()`` raises.

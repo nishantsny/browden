@@ -1,6 +1,6 @@
 """Element-level guard for the write actions (``click``, ``insert_text``, ``press_key``, ``upload_file``).
 
-The per-action host allowlist (in :class:`BrowdenAccessRuleSet`) decides
+The per-action host allowlist (in :class:`SafeAgentBrowserAccessRuleSet`) decides
 *where* an action may act and, via each host's optional ``label`` regex, *what*
 target may carry.
 This module enforces only what the allowlist can't: element *integrity*. It

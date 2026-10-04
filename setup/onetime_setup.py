@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
-"""One-time setup for Browden — cross-platform (Linux, macOS, Windows).
+"""One-time setup for Safe Agent Browser — cross-platform (Linux, macOS, Windows).
 
 Run it with any Python — `python3 setup/onetime_setup.py`; no venv needed first.
 
 What it does, in order:
-  1. Creates a venv at <repo>/.venv and installs browden into it
+  1. Creates a venv at <repo>/.venv and installs safe-agent-browser into it
      (via `uv`, falling back to stdlib venv + pip). Pass --python to use an
      existing interpreter instead and skip this step.
   2. Copies configs/samples/read_only_on_popular_websites.yaml to
-     <config-dir>/allowlist.yaml (default ~/.browden) — skipped if a config is
+     <config-dir>/allowlist.yaml (default ~/.safe-agent-browser) — skipped if a config is
      already there.
   3. Fetches the Tranco top-sites snapshot to <config-dir> — skipped if it is
      already there. The snapshot is not committed; refresh it later with
@@ -20,7 +20,7 @@ What it does, in order:
      systemd (Linux), launchd (macOS), or Task Scheduler (Windows).
   5. Prints the JSON block to add to your agent's settings by hand, then two
      hardening notes: the permission rules that keep the agent from editing any
-     browden file, and how to make those files root-owned/read-only so a shell
+     safe-agent-browser file, and how to make those files root-owned/read-only so a shell
      or script can't rewrite what the rules only ask about.
 
 Run it again anytime: the venv/install and config copy are idempotent and the
@@ -45,8 +45,8 @@ from installers import (  # noqa: F401 — installers/_pythonw_for re-exported f
 REPO_ROOT = Path(__file__).resolve().parents[1]
 SAMPLE_ALLOWLIST = REPO_ROOT / "configs" / "samples" / "read_only_on_popular_websites.yaml"
 DEFAULT_PORT = 22001  # usually unused; well clear of dev servers on 8000/3000
-DEFAULT_CONFIG_DIR = "~/.browden"
-DEFAULT_SERVICE_NAME = "browden"
+DEFAULT_CONFIG_DIR = "~/.safe-agent-browser"
+DEFAULT_SERVICE_NAME = "safe-agent-browser"
 DEFAULT_VENV = REPO_ROOT / ".venv"
 
 def _venv_python(venv_dir: Path) -> Path:
@@ -60,7 +60,7 @@ def _venv_python(venv_dir: Path) -> Path:
 
 
 def ensure_venv(venv_dir: Path) -> Path:
-    """Create ``venv_dir`` (if absent) and install browden into it editable.
+    """Create ``venv_dir`` (if absent) and install safe-agent-browser into it editable.
 
     Prefers ``uv sync --frozen``, which creates the venv itself and installs the
     exact dependency set pinned in the committed ``uv.lock`` — so every install
@@ -83,7 +83,7 @@ def ensure_venv(venv_dir: Path) -> Path:
         if not python.exists():
             _run([sys.executable, "-m", "venv", str(venv_dir)])
         _run([str(python), "-m", "pip", "install", "-e", str(REPO_ROOT)])
-    print(f"[ok]   browden installed in {venv_dir}")
+    print(f"[ok]   safe-agent-browser installed in {venv_dir}")
     return python
 
 
@@ -154,7 +154,7 @@ def stdio_config(service_name: str, python: str, allowlist: Path,
                  display: str | None) -> str:
     entry: dict = {
         "command": python,
-        "args": ["-m", "browden.mcp.server", "--allowlist", str(allowlist)],
+        "args": ["-m", "safe_agent_browser.mcp.server", "--allowlist", str(allowlist)],
     }
     if display:  # X11 only; irrelevant (and omitted) on macOS/Windows
         entry["env"] = {"DISPLAY": display}
@@ -248,11 +248,11 @@ def _rule_path(path: Path) -> str:
 
 
 def guard_files_note(config_dir: Path, allowlist: Path, repo_root: Path) -> str:
-    """Advisory text nudging the user to gate agent edits to *every* browden file.
+    """Advisory text nudging the user to gate agent edits to *every* safe-agent-browser file.
 
     The allowlist is the security boundary, but it is not the only file that
     decides what the agent may do: the Tranco and PSL snapshots feed the read
-    gate, and browden's own source is what enforces all of it. An agent that can
+    gate, and safe-agent-browser's own source is what enforces all of it. An agent that can
     silently rewrite any of them can widen its own read/click permissions. So
     the agent's settings should refuse those edits outright ("deny"), or at the
     very least require approval ("ask") before every one — never auto-approve.
@@ -264,7 +264,7 @@ def guard_files_note(config_dir: Path, allowlist: Path, repo_root: Path) -> str:
     rules.append(f'"Edit({_rule_path(repo_root)}/**)"')  # the code enforcing the policy
     body = ",\n          ".join(rules)
     return (
-        f"\nSecurity tip (recommended): every browden file is part of the "
+        f"\nSecurity tip (recommended): every safe-agent-browser file is part of the "
         f"perimeter — {allowlist} decides what the agent may visit and click, "
         f"the Tranco/PSL snapshots in {config_dir} feed the read gate, and the "
         f"code in {repo_root} enforces both. Stop the agent from quietly "
@@ -290,7 +290,7 @@ def lockdown_note(config_dir: Path, repo_root: Path) -> str:
     editor, or any subprocess can rewrite the same files, and command rules are
     matched on text that is trivially rephrased (``sed -i``, ``sh -c``, ``tee``,
     a here-doc). The only enforcement that holds regardless of how the write is
-    spelled is filesystem permissions — make browden's files root-owned and
+    spelled is filesystem permissions — make safe-agent-browser's files root-owned and
     read-only to everyone else, so no unprivileged process can touch them.
     """
     posix = (
@@ -310,15 +310,15 @@ def lockdown_note(config_dir: Path, repo_root: Path) -> str:
         "command-matching rules are easy to sidestep by rephrasing the command. "
         "Treat the rules as a speed bump.\n"
         "\nFor an enforced boundary, hand the files to root and leave everyone "
-        "else read-only — browden only ever reads them:\n\n"
+        "else read-only — safe-agent-browser only ever reads them:\n\n"
         f"{cmds}"
         "\n  Directories keep their execute bit (755): on a directory that is "
         "the traverse permission, and dropping it would hide the files from "
-        "browden too. The data files need no execute bit at all (444). Root "
+        "safe-agent-browser too. The data files need no execute bit at all (444). Root "
         "ownership of the directory is what matters — it is what stops a "
         "non-root process from replacing a file it cannot write.\n"
         f"\n  Do the same for the install tree ({repo_root}) if you never edit "
-        "browden's code — but not while developing it, and note that a venv "
+        "safe-agent-browser's code — but not while developing it, and note that a venv "
         "owned by root can no longer be updated without sudo.\n"
         "\n  After locking down, refreshing the snapshots needs sudo:\n\n"
         f"    sudo python3 setup/fetch_tranco.py --config-dir {config_dir}\n"

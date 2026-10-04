@@ -7,7 +7,7 @@
   <array>
     <string>{python}</string>
     <string>-m</string>
-    <string>browden.mcp.server</string>
+    <string>safe_agent_browser.mcp.server</string>
     <string>--allowlist</string>
     <string>{allowlist}</string>
   </array>

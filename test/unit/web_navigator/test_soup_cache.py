@@ -1,4 +1,4 @@
-from browden.web_navigator.soup_cache import TTL_SECONDS, SoupCache
+from safe_agent_browser.web_navigator.soup_cache import TTL_SECONDS, SoupCache
 
 A = "https://shop.example/a"
 B = "https://shop.example/b"

@@ -4,11 +4,11 @@ A profile *is* its directory: the session layer keys one Chrome process (and
 everything that process holds — cookies, extensions, logged-in state) by the
 resolved path the caller asked for. Anything else that has to name the same
 profile — a config file scoping rules to it, a log line, a test — has to reduce
-its spelling to exactly the same path, or ``~/.cache/browden/x`` and
-``/home/me/.cache/browden/x`` silently describe two different profiles.
+its spelling to exactly the same path, or ``~/.cache/safe-agent-browser/x`` and
+``/home/me/.cache/safe-agent-browser/x`` silently describe two different profiles.
 
 So the reduction lives here, in one function both sides import, the way
-:func:`~browden.mcp.validator.tranco.canonical_host` is the one host
+:func:`~safe_agent_browser.mcp.validator.tranco.canonical_host` is the one host
 canonicalizer every gate compares hosts with.
 """
 from pathlib import Path

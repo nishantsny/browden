@@ -15,9 +15,9 @@ from unittest.mock import patch
 
 import pytest
 
-from browden.configs.loader import RuntimeConfigurationRefresher
-from browden.mcp.session_management.browser_session_manager import BrowserSessionManager
-from browden.mcp.validator import BrowdenRuntimeConfiguration, ValidationError
+from safe_agent_browser.configs.loader import RuntimeConfigurationRefresher
+from safe_agent_browser.mcp.session_management.browser_session_manager import BrowserSessionManager
+from safe_agent_browser.mcp.validator import SafeAgentBrowserRuntimeConfiguration, ValidationError
 from gates import OPEN_READ_GATE
 
 HTML = """<html><body>
@@ -59,7 +59,7 @@ def _page_clicks_add(backend):
 async def test_invalidate_makes_the_next_read_see_a_page_side_dom_change(session, backend):
     page = await _page_with_primed_cache(session)
 
-    # The page mutates itself; browden's cached parse predates the change.
+    # The page mutates itself; safe-agent-browser's cached parse predates the change.
     _page_clicks_add(backend)
 
     stale = await session.query_selector("#late", id=page["id"], gate=OPEN_READ_GATE)
@@ -141,7 +141,7 @@ async def test_invalidate_is_not_read_gated_but_reads_still_are(session, tmp_pat
     regex matches nothing on disk — so the refusal lands on the allowlist, which is
     the gate under test, rather than on the scheme check ahead of it.
     """
-    import browden.mcp.server as server
+    import safe_agent_browser.mcp.server as server
     importlib.reload(server)
 
     page_file = tmp_path / "page.html"
@@ -151,7 +151,7 @@ async def test_invalidate_is_not_read_gated_but_reads_still_are(session, tmp_pat
     primed = await session.query_selector("#marker", id=page["id"], gate=OPEN_READ_GATE)
     assert primed["found"] is True  # readable while the policy still admits it
 
-    refuses_this_page = BrowdenRuntimeConfiguration({
+    refuses_this_page = SafeAgentBrowserRuntimeConfiguration({
         "read": {"enabled": True, "tranco": {"enabled": False},
                  "website_overrides": {"": ["^/definitely-not-this-path/.*"]}},
     })

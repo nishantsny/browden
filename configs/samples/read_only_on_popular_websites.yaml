@@ -1,6 +1,6 @@
-# browden access policy.
+# safe-agent-browser access policy.
 #
-# LIVE RELOAD: browden re-reads this file about every 10s while it runs, so
+# LIVE RELOAD: safe-agent-browser re-reads this file about every 10s while it runs, so
 # edits take effect without a restart. A save that doesn't parse (mid-edit, bad
 # YAML) is ignored and the last valid version stays in force.
 #
@@ -64,7 +64,7 @@ infra:
   # to reclaim tabs sooner, raise it to leave a long-running window alone.
   reap_interval_seconds: 7200
 
-# >>> browden provenance — auto-written by setup; do not edit by hand >>>
+# >>> safe-agent-browser provenance — auto-written by setup; do not edit by hand >>>
 # Fingerprints the exact data snapshots that define this read perimeter, so
 # a given install is auditable and reproducible. tranco_id is the Tranco
 # daily list id — pin it with: fetch_tranco.py --url .../download/<id>/<n>.
@@ -73,4 +73,4 @@ infra:
 #   tranco_id:
 #   tranco_checksum_sha256:
 #   pal_checksum_sha256:
-# <<< browden provenance <<<
+# <<< safe-agent-browser provenance <<<

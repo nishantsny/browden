@@ -14,7 +14,7 @@ read gate. Popularity is a proxy for *established*, never a guarantee of *safe*
 This module holds only the data: :class:`TrancoList` (exact membership over
 registrable domains) and the shared :func:`canonical_host`. Reducing an arbitrary
 host to its registrable domain via the Public Suffix List and testing it there is
-:class:`~browden.mcp.validator.popularity.PopularityAllowlist`'s job.
+:class:`~safe_agent_browser.mcp.validator.popularity.PopularityAllowlist`'s job.
 
 The check is fully local: no network at request time.
 """
@@ -28,8 +28,8 @@ TRANCO_FILENAME = "tranco-top-400k.txt.gz"
 DEFAULT_TOP_N = 1_000_000
 # The snapshot lives next to the allowlist config; the loader passes that sibling
 # path in. This is only the fallback for constructions that don't know a config
-# dir (e.g. a bare BrowdenAccessRuleSet(dict)) — the standard ~/.browden.
-DEFAULT_TRANCO_PATH = (Path("~/.browden") / TRANCO_FILENAME).expanduser()
+# dir (e.g. a bare SafeAgentBrowserAccessRuleSet(dict)) — the standard ~/.safe-agent-browser.
+DEFAULT_TRANCO_PATH = (Path("~/.safe-agent-browser") / TRANCO_FILENAME).expanduser()
 
 
 def canonical_host(host: str) -> str:
@@ -80,7 +80,7 @@ class TrancoList:
     Pure data: it loads the snapshot and answers *exact* set membership over
     registrable domains (``google.com``, ``bbc.co.uk``). It deliberately does NOT
     reduce a host to its registrable domain — that PSL-aware step lives in
-    :class:`~browden.mcp.validator.popularity.PopularityAllowlist`, which owns a
+    :class:`~safe_agent_browser.mcp.validator.popularity.PopularityAllowlist`, which owns a
     ``TrancoList`` and does the reduction before consulting it.
     """
 

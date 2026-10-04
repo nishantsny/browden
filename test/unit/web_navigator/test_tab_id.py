@@ -1,7 +1,7 @@
 """Unit tests for the page-id wire-format helpers (format/split pair)."""
 import pytest
 
-from browden.web_navigator.tab_id import (
+from safe_agent_browser.web_navigator.tab_id import (
     SEPARATOR,
     format_tab_id,
     split_tab_id,

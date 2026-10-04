@@ -12,7 +12,7 @@ change to a cap goes red here instead of quietly making the docs wrong.
 import re
 from pathlib import Path
 
-from browden.dom import query, serialize
+from safe_agent_browser.dom import query, serialize
 
 READ_TOOLS = ("get_element_by_id", "get_elements_by_class_name",
               "query_selector", "query_selector_all")
@@ -23,7 +23,7 @@ README = Path(__file__).resolve().parents[3] / "README.md"
 
 
 async def _schemas():
-    import browden.mcp.server as server
+    import safe_agent_browser.mcp.server as server
     return {t.name: t.inputSchema for t in await server.mcp.list_tools()}
 
 
@@ -53,7 +53,7 @@ async def test_list_tools_say_pagination_is_over_elements():
 
 
 async def test_every_read_tool_docstring_states_the_text_cap():
-    import browden.mcp.server as server
+    import safe_agent_browser.mcp.server as server
     for name in READ_TOOLS:
         doc = getattr(server, name).__doc__ or ""
         assert str(serialize.TEXT_CAP) in doc

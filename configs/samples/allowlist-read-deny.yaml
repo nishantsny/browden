@@ -1,13 +1,13 @@
 # =============================================================================
-# browden read / deny system — an annotated walkthrough.
+# safe-agent-browser read / deny system — an annotated walkthrough.
 #
-# LIVE RELOAD: browden re-reads this file about every 10s while it runs, so
+# LIVE RELOAD: safe-agent-browser re-reads this file about every 10s while it runs, so
 # edits take effect without a restart. A save that doesn't parse (mid-edit, bad
 # YAML) is ignored and the last valid version stays in force.
 #
 # This is a *documentation* sample: it explains every knob of the read gate and
-# the denylist. To actually use it, copy it to ~/.browden/allowlist.yaml
-# (or point --allowlist / $BROWDEN_ALLOWLIST at it) and edit to taste.
+# the denylist. To actually use it, copy it to ~/.safe-agent-browser/allowlist.yaml
+# (or point --allowlist / $SAFE_AGENT_BROWSER_ALLOWLIST at it) and edit to taste.
 #
 # WHY THIS EXISTS
 # ---------------

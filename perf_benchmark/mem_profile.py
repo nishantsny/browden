@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Profile the resource usage of the browden MCP *Python server process only*.
+"""Profile the resource usage of the safe-agent-browser MCP *Python server process only*.
 
 Chrome and chromedriver spawn as separate child PIDs and are deliberately NOT
-measured — this samples exactly the `python -m browden.mcp.server` process, so
+measured — this samples exactly the `python -m safe_agent_browser.mcp.server` process, so
 the numbers are the server's own footprint (selenium client objects, session
 bookkeeping, cached DOM/screenshot payloads, chromedriver sockets, asyncio).
 
@@ -53,7 +53,7 @@ from mcp import ClientSession  # noqa: E402
 from mcp.client.sse import sse_client  # noqa: E402
 from mcp_harness import McpServerHarness  # noqa: E402
 
-# Allow-all read policy. Note: browden accepts only https:// by default; a plain
+# Allow-all read policy. Note: safe-agent-browser accepts only https:// by default; a plain
 # http host must be named EXPLICITLY in website_overrides (a blanket "*" does NOT
 # re-enable http), so 127.0.0.1 is listed on its own to permit the local page.
 # Tranco is off, so no snapshot is needed.
@@ -273,7 +273,7 @@ async def drive(url: str, page_url: str, sampler: Sampler, args) -> None:
             await _hold(sampler, "idle", args.hold)
 
             # 2) one session per distinct profile_dir -> per-session cost
-            sessions = [str(Path(tempfile.gettempdir()) / f"browden-bench-p{i}")
+            sessions = [str(Path(tempfile.gettempdir()) / f"safe-agent-browser-bench-p{i}")
                         for i in range(args.sessions)]
             ids: list[str] = []
             sampler.phase = "sessions"
@@ -330,7 +330,7 @@ async def drive(url: str, page_url: str, sampler: Sampler, args) -> None:
             #    FD/USS drift across session lifecycles
             if args.churn:
                 sampler.phase = "churn"
-                prof = str(Path(tempfile.gettempdir()) / "browden-bench-churn")
+                prof = str(Path(tempfile.gettempdir()) / "safe-agent-browser-bench-churn")
                 for _ in range(args.churn):
                     tid = _tab_id(await s.call_tool("new_blank_tab", {"profile_dir": prof}))
                     await s.call_tool("navigate", {"url": page_url, "id": tid})
@@ -350,7 +350,7 @@ def write_results_md(path: Path, mach: dict, args, workload: dict, summary: dict
     """Render a committed, human-readable results file for one run/machine."""
     freq = f"{mach['cpu_max_mhz']} MHz" if mach["cpu_max_mhz"] else "n/a"
     L = [
-        "# browden MCP server — resource benchmark results",
+        "# safe-agent-browser MCP server — resource benchmark results",
         "",
         "Python-server process only; Chrome/chromedriver excluded. "
         "Regenerate with `perf_benchmark/mem_profile.py` (see the README).",
@@ -424,7 +424,7 @@ def main() -> None:
     threading.Thread(target=httpd.serve_forever, daemon=True).start()
     page_url = f"http://127.0.0.1:{httpd.server_address[1]}/"
 
-    tmp = Path(tempfile.mkdtemp(prefix="browden-bench-"))
+    tmp = Path(tempfile.mkdtemp(prefix="safe-agent-browser-bench-"))
     allowlist = tmp / "allowlist.yaml"
     allowlist.write_text(BENCH_ALLOWLIST.format(
         max_sessions=max(args.sessions + 2, 10),
@@ -432,7 +432,7 @@ def main() -> None:
 
     harness = McpServerHarness(tmp, allowlist_path=allowlist)
     # Silence the refresher's poll so idle CPU reflects only the server at rest.
-    os.environ["BROWDEN_RELOAD_INTERVAL"] = "3600"
+    os.environ["SAFE_AGENT_BROWSER_RELOAD_INTERVAL"] = "3600"
     harness.start()
     pid = harness._proc.pid
     print(f"server pid={pid}  url={harness.url}  page={page_url}")

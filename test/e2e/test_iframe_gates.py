@@ -30,7 +30,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import pytest
 
-from browden.web_navigator.utils.network_utils import get_free_port
+from safe_agent_browser.web_navigator.utils.network_utils import get_free_port
 
 _INNER = (
     "<div id='in-frame'>INSIDE</div>"

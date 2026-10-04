@@ -9,9 +9,9 @@ fetches it on first run, and you re-run this script to refresh it.
 
 Usage (from the repo root, any Python):
 
-    python3 setup/fetch_tranco.py                        # top 1m -> ~/.browden
+    python3 setup/fetch_tranco.py                        # top 1m -> ~/.safe-agent-browser
     python3 setup/fetch_tranco.py --top-n 500000         # a smaller cutoff
-    python3 setup/fetch_tranco.py --config-dir /etc/browden
+    python3 setup/fetch_tranco.py --config-dir /etc/safe-agent-browser
 
 Tranco (https://tranco-list.eu) publishes a daily,
 manipulation-resistant ranking behind a stable per-list id. We resolve the
@@ -42,7 +42,7 @@ from pathlib import Path
 from checkpoints import ALLOWLIST_FILENAME, sha256_hex, update_checkpoints
 
 # stdlib-only on purpose: this runs with any Python, before the venv exists.
-# These must match browden.mcp.validator.tranco (the read gate that consumes
+# These must match safe_agent_browser.mcp.validator.tranco (the read gate that consumes
 # the file) — keep them in sync if either changes.
 TRANCO_FILENAME = "tranco-top-400k.txt.gz"
 DEFAULT_TOP_N = 1_000_000
@@ -59,7 +59,7 @@ TRANCO_DOWNLOAD_TEMPLATE = "https://tranco-list.eu/download/{list_id}/{count}"
 _MAX_READ_BYTES = 50 * 1024 * 1024
 _MIN_READ_BYTES = 1 * 1024 * 1024
 
-DEFAULT_CONFIG_DIR = Path("~/.browden")
+DEFAULT_CONFIG_DIR = Path("~/.safe-agent-browser")
 
 
 def snapshot_path(config_dir: Path) -> Path:

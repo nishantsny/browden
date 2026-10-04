@@ -1,6 +1,6 @@
-# browden access policy — PAGE-scoped read + write rules.
+# safe-agent-browser access policy — PAGE-scoped read + write rules.
 #
-# LIVE RELOAD: browden re-reads this file about every 10s while it runs, so
+# LIVE RELOAD: safe-agent-browser re-reads this file about every 10s while it runs, so
 # edits take effect without a restart. A save that doesn't parse is ignored and
 # the last valid version stays in force.
 #

@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from .popularity import PopularityAllowlist
 from .tranco import canonical_host
 
-# The write actions browden gates, by config section name: `click` (the click
+# The write actions safe-agent-browser gates, by config section name: `click` (the click
 # tool), `write-text` (insert_text), `press-key` (press_key) and `upload-file`
 # (upload_file). The schema refuses any other top-level section, so a new write
 # tool is added here before a config can authorize it.
@@ -287,7 +287,7 @@ class ReadPolicy:
     4. **Tranco** — for hosts with no override, allowed if the host is in the
        fetched top-sites snapshot (kept next to the allowlist config). With no
        Tranco snapshot configured, an ``allow_all`` set (see
-       :class:`~.access_rule_set.BrowdenAccessRuleSet`) admits the host here and
+       :class:`~.access_rule_set.SafeAgentBrowserAccessRuleSet`) admits the host here and
        any other set denies it.
 
     Otherwise it is denied (default-deny).

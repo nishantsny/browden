@@ -2,7 +2,7 @@
 
 Drives ``BrowserSessionManager`` directly (the same path the MCP tools take, minus
 the server-layer allowlist gates — those run end to end in
-``test_iframe_gates.py``, and as units in ``test_read_gates.py``). Proves the core mechanic: browden's
+``test_iframe_gates.py``, and as units in ``test_read_gates.py``). Proves the core mechanic: safe-agent-browser's
 DOM-read tools see only the *focused* document, and ``enter_frame`` /
 ``switch_to_default_content`` move that focus so the existing read tools can inspect
 an iframe's contents — and that the focus survives the window-refocus every op
@@ -16,8 +16,8 @@ import urllib.parse
 import pytest
 from gates import OPEN_FRAME_GATE, OPEN_READ_GATE
 
-from browden.mcp.session_management.browser_session_manager import BrowserSessionManager
-from browden.mcp.validator import FrameGate
+from safe_agent_browser.mcp.session_management.browser_session_manager import BrowserSessionManager
+from safe_agent_browser.mcp.validator import FrameGate
 
 # An iframe (id="child") whose OWN document holds #in-frame; the top document holds
 # #top-only. Neither id appears in the other document — that disjointness is what

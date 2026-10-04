@@ -7,11 +7,11 @@ still cover the same gates end-to-end; this file pins the composition unit.
 """
 import pytest
 
-from browden.mcp.validator import (
+from safe_agent_browser.mcp.validator import (
     MAX_UPLOAD_BYTES,
     upload_file_gate,
-    BrowdenAccessRuleSet,
-    BrowdenRuntimeConfiguration,
+    SafeAgentBrowserAccessRuleSet,
+    SafeAgentBrowserRuntimeConfiguration,
     ValidationError,
     check_action_host,
     validate_click_target,
@@ -22,7 +22,7 @@ from browden.mcp.validator import (
 )
 
 # amazon.com readable + click/write-text enabled; nothing else is.
-_RULES = BrowdenAccessRuleSet({
+_RULES = SafeAgentBrowserAccessRuleSet({
     "read": {"enabled": True, "tranco": {"enabled": False},
              "website_overrides": {"amazon.com": [".*"], "wholefoodsmarket.com": [".*"]}},
     "click": {"amazon.com": {"paths": [".*"], "label": r"(?i)\badd to cart\b"}},
@@ -30,7 +30,7 @@ _RULES = BrowdenAccessRuleSet({
                                   "field_ids": ["tip-amount"]}},
 })
 
-_DENIED = BrowdenAccessRuleSet({
+_DENIED = SafeAgentBrowserAccessRuleSet({
     "denylist": {"amazon.com": [".*"]},
     "click": {"amazon.com": {"paths": [".*"], "label": ".*"}},
 })
@@ -110,7 +110,7 @@ def test_click_anchor_cross_domain_allowlisted_passes():
     node = _anchor("https://www.wholefoodsmarket.com/cart")
     # cross-domain but the target is read-allowed, and click label is '(?i)add to
     # cart' — anchor text won't match, so use the allow-any host for this one.
-    allow_any = BrowdenAccessRuleSet({
+    allow_any = SafeAgentBrowserAccessRuleSet({
         "read": {"enabled": True, "tranco": {"enabled": False},
                  "website_overrides": {"amazon.com": [".*"], "wholefoodsmarket.com": [".*"]}},
         "click": {"amazon.com": {"paths": [".*"], "label": ".*"}},
@@ -149,7 +149,7 @@ def test_write_text_label_mismatch_rejected():
 # -- validate_press_key_target (Gates 2, 2b, 3) ------------------------------
 
 # cronometer.com press-key enabled: Enter + up/down arrows on the app path '/'.
-_PK = BrowdenAccessRuleSet({
+_PK = SafeAgentBrowserAccessRuleSet({
     "read": {"enabled": True, "tranco": {"enabled": False},
              "website_overrides": {"cronometer.com": [".*"]}},
     "press-key": {"cronometer.com": [
@@ -157,7 +157,7 @@ _PK = BrowdenAccessRuleSet({
     ]},
 })
 # same, but the rule only admits rows whose text starts with "Fried".
-_PK_LABELLED = BrowdenAccessRuleSet({
+_PK_LABELLED = SafeAgentBrowserAccessRuleSet({
     "read": {"enabled": True, "tranco": {"enabled": False},
              "website_overrides": {"cronometer.com": [".*"]}},
     "press-key": {"cronometer.com": [
@@ -227,7 +227,7 @@ def test_press_key_ambiguous_rejected():
 
 # -- allow_all: the write gates, through a scratch profile's rule set (#139) ---
 
-_SCRATCH = BrowdenRuntimeConfiguration({"profiles": {"/profiles/scratch": {
+_SCRATCH = SafeAgentBrowserRuntimeConfiguration({"profiles": {"/profiles/scratch": {
     "allow_all": True, "read": {"tranco": {"enabled": False}}}}}).access_rules_for("/profiles/scratch")
 
 
@@ -256,7 +256,7 @@ def test_allow_all_authorizes_a_control_key_but_never_a_character_key():
 
 
 def test_allow_all_does_not_authorize_a_click_on_a_denied_host():
-    denied = BrowdenRuntimeConfiguration({
+    denied = SafeAgentBrowserRuntimeConfiguration({
         "denylist": {"blocked.test": [".*"]},
         "profiles": {"/profiles/scratch": {"allow_all": True}},
     }).access_rules_for("/profiles/scratch")
@@ -267,7 +267,7 @@ def test_allow_all_does_not_authorize_a_click_on_a_denied_host():
 def test_allow_all_still_gates_where_an_anchor_would_navigate():
     # The anchor check runs against the same read policy, so a link off to an
     # unranked host is refused even in an allow_all profile with Tranco on.
-    scratch = BrowdenRuntimeConfiguration({"profiles": {"/profiles/s": {"allow_all": True}}}).access_rules_for("/profiles/s")
+    scratch = SafeAgentBrowserRuntimeConfiguration({"profiles": {"/profiles/s": {"allow_all": True}}}).access_rules_for("/profiles/s")
     anchor = {"tag": "a", "id": None, "classes": [],
               "attributes": {"href": "https://unranked.test/x"}, "text": "Go"}
     with pytest.raises(ValidationError, match="not on the read allowlist"):
@@ -278,7 +278,7 @@ def test_allow_all_still_gates_where_an_anchor_would_navigate():
 
 SPLITWISE = "https://secure.splitwise.com/"
 
-_UPLOAD_RULES = BrowdenAccessRuleSet({
+_UPLOAD_RULES = SafeAgentBrowserAccessRuleSet({
     "read": {"enabled": True, "tranco": {"enabled": False},
              "website_overrides": {"secure.splitwise.com": [".*"]}},
     "upload-file": {"secure.splitwise.com": [
@@ -341,7 +341,7 @@ def test_upload_ambiguous_selector_rejected():
 
 def test_upload_host_not_listed_for_upload_rejected():
     """Trusted to type is not trusted to upload: the sections are independent."""
-    typing_only = BrowdenAccessRuleSet({
+    typing_only = SafeAgentBrowserAccessRuleSet({
         "write-text": {"secure.splitwise.com": {"paths": [".*"], "label": ".*"}}})
     with pytest.raises(ValidationError, match="no upload-file rule authorizes"):
         check_action_host(typing_only, "upload-file", SPLITWISE)
@@ -425,7 +425,7 @@ def test_an_oversize_file_is_refused(allowed, tmp_path):
 
 def test_allow_all_does_not_grant_the_filesystem():
     """A scratch profile may act on any page, and still upload nothing."""
-    scratch = BrowdenRuntimeConfiguration({
+    scratch = SafeAgentBrowserRuntimeConfiguration({
         "profiles": {"/profiles/scratch": {"allow_all": True}}}).access_rules_for("/profiles/scratch")
     check_action_host(scratch, "upload-file", "https://unlisted.test/form")  # page authority: yes
     assert scratch.allowed_upload_locations == ()
@@ -438,7 +438,7 @@ def test_a_path_with_a_newline_is_refused(allowed, tmp_path):
 
     The driver hands the path to the browser as keystrokes; a `multiple` input
     given "a\nb" ends up holding BOTH, and only the first was ever judged. A
-    control character has no place in a path browden was asked to upload.
+    control character has no place in a path safe-agent-browser was asked to upload.
     """
     secret = tmp_path / "id_rsa"
     secret.write_bytes(b"PRIVATE KEY")
@@ -455,7 +455,7 @@ def test_other_control_characters_are_refused_too(allowed):
 
 def test_the_gate_carries_the_path_it_admitted(allowed):
     """The action reads the file off the gate; nothing downstream re-resolves it."""
-    rules = BrowdenAccessRuleSet({
+    rules = SafeAgentBrowserAccessRuleSet({
         "upload-file": {"*": {"paths": [".*"], "label": ".*"}},
         "allowed_upload_locations": [str(allowed[0])],
     })
@@ -465,7 +465,7 @@ def test_the_gate_carries_the_path_it_admitted(allowed):
 
 
 def test_a_gate_that_refused_carries_no_path(allowed, tmp_path):
-    rules = BrowdenAccessRuleSet({
+    rules = SafeAgentBrowserAccessRuleSet({
         "upload-file": {"*": {"paths": [".*"], "label": ".*"}},
         "allowed_upload_locations": [str(allowed[0])],
     })

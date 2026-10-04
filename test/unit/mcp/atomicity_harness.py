@@ -11,12 +11,12 @@ import threading
 import time
 from unittest.mock import patch
 
-from browden.common.tab import TabInfo
-from browden.configs.loader import RuntimeConfigurationRefresher
-from browden.dom import query
-from browden.mcp.session_management.browser_session_manager import BrowserSessionManager
-from browden.web_navigator.interface import PageSnapshot, TargetSnapshot
-from browden.web_navigator.soup_cache import SoupCache
+from safe_agent_browser.common.tab import TabInfo
+from safe_agent_browser.configs.loader import RuntimeConfigurationRefresher
+from safe_agent_browser.dom import query
+from safe_agent_browser.mcp.session_management.browser_session_manager import BrowserSessionManager
+from safe_agent_browser.web_navigator.interface import PageSnapshot, TargetSnapshot
+from safe_agent_browser.web_navigator.soup_cache import SoupCache
 
 TAB = "ns-h1"
 PROFILE = "/fake/profile"

@@ -2,14 +2,14 @@ from pathlib import Path
 
 import pytest
 
-from browden.configs import loader as loader_pkg
-from browden.configs.loader import (
+from safe_agent_browser.configs import loader as loader_pkg
+from safe_agent_browser.configs.loader import (
     ConfigError,
     SAMPLE_ALLOWLIST,
     load_runtime_configuration,
     resolve_allowlist_path,
 )
-from browden.mcp.validator.allowlist import WRITE_ACTIONS
+from safe_agent_browser.mcp.validator.allowlist import WRITE_ACTIONS
 
 
 # -- load_runtime_configuration -----------------------------------------------------------
@@ -333,7 +333,7 @@ def test_a_profile_adds_allowed_upload_locations_over_the_global_ones(tmp_path):
 
 
 def test_load_profile_scoped_rules(tmp_path):
-    # The full path a live server takes: YAML -> schema -> BrowdenRuntimeConfiguration ->
+    # The full path a live server takes: YAML -> schema -> SafeAgentBrowserRuntimeConfiguration ->
     # a decision scoped to the profile the request runs in.
     shopper = tmp_path / "shopper"
     reader = tmp_path / "reader"
@@ -374,14 +374,14 @@ def test_profile_key_with_a_tilde_resolves_to_the_home_path(tmp_path):
     f = tmp_path / "allowlist.yaml"
     f.write_text(
         "profiles:\n"
-        "  ~/.cache/browden/scratch:\n"
+        "  ~/.cache/safe-agent-browser/scratch:\n"
         "    read:\n"
         "      website_overrides:\n"
         "        ok.test: ['.*']\n"
     )
     rc = load_runtime_configuration(f)
     from pathlib import Path as _Path
-    resolved = str((_Path.home() / ".cache/browden/scratch").resolve())
+    resolved = str((_Path.home() / ".cache/safe-agent-browser/scratch").resolve())
     assert rc.profile_dirs() == [resolved]
     assert rc.access_rules_for(resolved).read_policy.is_allowed("ok.test", "/")
 
@@ -428,17 +428,17 @@ def test_load_allow_all_profile(tmp_path):
 # -- path resolution ----------------------------------------------------------
 
 def test_resolve_explicit_beats_everything(monkeypatch, tmp_path):
-    monkeypatch.setenv("BROWDEN_ALLOWLIST", str(tmp_path / "env.yaml"))
+    monkeypatch.setenv("SAFE_AGENT_BROWSER_ALLOWLIST", str(tmp_path / "env.yaml"))
     assert resolve_allowlist_path(str(tmp_path / "cli.yaml")) == tmp_path / "cli.yaml"
 
 
 def test_resolve_env_beats_user_config(monkeypatch, tmp_path):
-    monkeypatch.setenv("BROWDEN_ALLOWLIST", str(tmp_path / "env.yaml"))
+    monkeypatch.setenv("SAFE_AGENT_BROWSER_ALLOWLIST", str(tmp_path / "env.yaml"))
     assert resolve_allowlist_path() == tmp_path / "env.yaml"
 
 
 def test_resolve_user_config_beats_sample(monkeypatch, tmp_path):
-    monkeypatch.delenv("BROWDEN_ALLOWLIST", raising=False)
+    monkeypatch.delenv("SAFE_AGENT_BROWSER_ALLOWLIST", raising=False)
     monkeypatch.setattr(loader_pkg.loader, "USER_CONFIG_DIR", tmp_path)
     user = tmp_path / "allowlist.yaml"
     user.write_text("read:\n  enabled: false\n")
@@ -446,6 +446,6 @@ def test_resolve_user_config_beats_sample(monkeypatch, tmp_path):
 
 
 def test_resolve_falls_back_to_sample(monkeypatch, tmp_path):
-    monkeypatch.delenv("BROWDEN_ALLOWLIST", raising=False)
+    monkeypatch.delenv("SAFE_AGENT_BROWSER_ALLOWLIST", raising=False)
     monkeypatch.setattr(loader_pkg.loader, "USER_CONFIG_DIR", tmp_path / "absent")
     assert resolve_allowlist_path() == SAMPLE_ALLOWLIST

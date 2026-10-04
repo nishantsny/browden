@@ -40,8 +40,8 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import pytest
 
-from browden.configs.loader.refresher import DEFAULT_RELOAD_INTERVAL_SECONDS
-from browden.web_navigator.utils.network_utils import get_free_port
+from safe_agent_browser.configs.loader.refresher import DEFAULT_RELOAD_INTERVAL_SECONDS
+from safe_agent_browser.web_navigator.utils.network_utils import get_free_port
 
 _PAGE = b"<html><body><button id='atc'>Add to cart</button></body></html>"
 # A /dp/* page (readable by every profile) that 302s to a page only the reader

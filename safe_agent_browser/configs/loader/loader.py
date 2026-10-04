@@ -1,7 +1,7 @@
 """Load and resolve allowlist config files.
 
 ``load_runtime_configuration`` is the one path from a YAML file to the internal
-``BrowdenRuntimeConfiguration``: read, parse, schema-validate, convert. The MCP
+``SafeAgentBrowserRuntimeConfiguration``: read, parse, schema-validate, convert. The MCP
 server's ``main()`` calls it with the resolved path and hands the result to
 the tool layer.
 """
@@ -10,17 +10,17 @@ from pathlib import Path
 
 import yaml
 
-from ...mcp.validator.runtime_configuration import BrowdenRuntimeConfiguration
+from ...mcp.validator.runtime_configuration import SafeAgentBrowserRuntimeConfiguration
 from ...mcp.validator.tranco import TRANCO_FILENAME
 from .schema import ConfigError, validate_allowlist_data
 
-# loader/ -> configs/ -> browden/ -> repo root
+# loader/ -> configs/ -> safe_agent_browser/ -> repo root
 _REPO_ROOT = Path(__file__).resolve().parents[3]
 SAMPLE_ALLOWLIST = _REPO_ROOT / "configs" / "samples" / "read_only_on_popular_websites.yaml"
-USER_CONFIG_DIR = Path("~/.browden")
+USER_CONFIG_DIR = Path("~/.safe-agent-browser")
 
 
-def load_runtime_configuration(path: Path | str) -> BrowdenRuntimeConfiguration:
+def load_runtime_configuration(path: Path | str) -> SafeAgentBrowserRuntimeConfiguration:
     """Read ``path``, verify it against the schema, and build the allowlist."""
     path = Path(path).expanduser()
     try:
@@ -32,20 +32,20 @@ def load_runtime_configuration(path: Path | str) -> BrowdenRuntimeConfiguration:
     except yaml.YAMLError as e:
         raise ConfigError(f"{path} is not valid YAML: {e}") from None
     # The Tranco snapshot lives next to the allowlist file (setup fetches it there).
-    return BrowdenRuntimeConfiguration(validate_allowlist_data(data, source=str(path)),
+    return SafeAgentBrowserRuntimeConfiguration(validate_allowlist_data(data, source=str(path)),
                            tranco_path=path.parent / TRANCO_FILENAME)
 
 
 def resolve_allowlist_path(explicit: str | None = None) -> Path | None:
     """Pick the allowlist file to load, most specific first.
 
-    Explicit CLI argument > ``BROWDEN_ALLOWLIST`` env var >
-    ``~/.browden/allowlist.yaml`` (installed by setup/onetime_setup.py) >
+    Explicit CLI argument > ``SAFE_AGENT_BROWSER_ALLOWLIST`` env var >
+    ``~/.safe-agent-browser/allowlist.yaml`` (installed by setup/onetime_setup.py) >
     the repo sample. None if nothing is found.
     """
     if explicit:
         return Path(explicit).expanduser()
-    env = os.environ.get("BROWDEN_ALLOWLIST")
+    env = os.environ.get("SAFE_AGENT_BROWSER_ALLOWLIST")
     if env:
         return Path(env).expanduser()
     user = (USER_CONFIG_DIR / "allowlist.yaml").expanduser()

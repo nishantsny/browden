@@ -1,5 +1,5 @@
-from browden.dependencies.bs4 import BeautifulSoup
-from browden.dom.serialize import ATTR_CAP, TEXT_CAP, element_to_node
+from safe_agent_browser.dependencies.bs4 import BeautifulSoup
+from safe_agent_browser.dom.serialize import ATTR_CAP, TEXT_CAP, element_to_node
 
 
 def _tag(html):

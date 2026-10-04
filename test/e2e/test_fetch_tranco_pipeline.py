@@ -12,7 +12,7 @@ from pathlib import Path
 
 import pytest
 
-from browden.mcp.validator.tranco import TrancoList
+from safe_agent_browser.mcp.validator.tranco import TrancoList
 
 SETUP_DIR = Path(__file__).resolve().parents[2] / "setup"
 sys.path.insert(0, str(SETUP_DIR))

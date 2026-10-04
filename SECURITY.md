@@ -1,20 +1,20 @@
 # Security Policy
 
-browden's entire purpose is to be a **safety perimeter** around a browser-driving
+safe-agent-browser's entire purpose is to be a **safety perimeter** around a browser-driving
 agent, so its security posture is part of the product, not an afterthought. This
 document explains how to report a vulnerability and — just as important — what
-browden does and does **not** defend against.
+safe-agent-browser does and does **not** defend against.
 
 ## Reporting a vulnerability
 
 **Please report security issues privately — do not open a public issue for them.**
 
-- Preferred: [**GitHub private vulnerability reporting**](https://github.com/nishantsny/browden/security/advisories/new)
+- Preferred: [**GitHub private vulnerability reporting**](https://github.com/nishantsny/safe-agent-browser/security/advisories/new)
   (the "Report a vulnerability" button on the Security tab).
-- Alternatively, email **nishantsny@gmail.com** with `[browden security]` in the
+- Alternatively, email **nishantsny@gmail.com** with `[safe-agent-browser security]` in the
   subject.
 
-Please include enough to reproduce: the browden version / commit, your OS, the
+Please include enough to reproduce: the safe-agent-browser version / commit, your OS, the
 allowlist config in play, and the sequence of tool calls (or a page) that
 triggers the issue. A proof-of-concept page or minimal repro helps enormously.
 
@@ -32,7 +32,7 @@ Please give a reasonable window to ship a fix before disclosing publicly.
 
 ## Supported versions
 
-browden is pre-1.0 and ships from `main`. Security fixes land on `main` and in
+safe-agent-browser is pre-1.0 and ships from `main`. Security fixes land on `main` and in
 the latest tagged release; there is no backporting to older tags. Always run the
 latest release or `main`.
 
@@ -43,7 +43,7 @@ latest release or `main`.
 
 ## Scope — what is (and isn't) a vulnerability
 
-browden's security model is: **the agent can only reach the tool surface, every
+safe-agent-browser's security model is: **the agent can only reach the tool surface, every
 navigation is checked against the read allowlist, and write actions (`click`,
 `insert_text`) are default-deny and gated per host + per visible label.** Bugs
 that let an agent *escape* that model are in scope. Examples of **in-scope**
@@ -63,7 +63,7 @@ issues:
 
 **Out of scope** — these are known, by-design limitations, not vulnerabilities:
 
-- **Prompt injection from an allowlisted page.** browden *shrinks* the read
+- **Prompt injection from an allowlisted page.** safe-agent-browser *shrinks* the read
   surface to established sites; it does **not** make page content trustworthy.
   Reputable, allowlisted sites host untrusted content, and an allowlisted page
   can still try to manipulate the agent. Allowlisting is attack-surface
@@ -74,26 +74,26 @@ issues:
   with `"*": [".*"]`, or add a host/label to the `click` / `write-text`
   allowlists, the resulting access is intended behavior. Loosen the config and
   you own the consequences.
-- **Config the agent's own host tools can rewrite.** browden enforces the policy
+- **Config the agent's own host tools can rewrite.** safe-agent-browser enforces the policy
   it loads; it cannot stop a process on the same host from editing that policy
-  first. If the agent can write to `~/.browden/allowlist.yaml`, the Tranco/PSL
-  snapshots, or browden's source — via its edit tools, a shell, or any script —
+  first. If the agent can write to `~/.safe-agent-browser/allowlist.yaml`, the Tranco/PSL
+  snapshots, or safe-agent-browser's source — via its edit tools, a shell, or any script —
   it can widen its own access, and agent permission rules are a speed bump, not
   a boundary. Making those files root-owned and read-only (see
-  [Protecting browden's own files](README.md#protecting-browdens-own-files)) is
-  the deployment's job, not browden's.
+  [Protecting safe-agent-browser's own files](README.md#protecting-safe-agent-browsers-own-files)) is
+  the deployment's job, not safe-agent-browser's.
 - **You point it at your real Chrome profile.** Reusing your logged-in profile
   means the agent can read your logged-in pages — that's the documented
   trade-off, not a leak.
-- **The SSE transport has no authentication.** browden's HTTP/SSE server binds
+- **The SSE transport has no authentication.** safe-agent-browser's HTTP/SSE server binds
   to loopback (`127.0.0.1`) and carries no auth token, so it relies on the host
   being trusted: *any* local process can drive it. On a single-user desktop —
   the intended deployment — that is by design. On a **shared or multi-user
   host** (or if you deliberately bind it to a non-loopback interface) that
   becomes a real exposure: put it behind your own authenticating reverse proxy
   or network controls. Running it there without such controls is a deployment
-  choice, not a browden vulnerability.
-- **Anti-bot / ToS enforcement.** browden drives a real, undetected Chrome. Using
+  choice, not a safe-agent-browser vulnerability.
+- **Anti-bot / ToS enforcement.** safe-agent-browser drives a real, undetected Chrome. Using
   it against sites whose Terms of Service forbid automated access is on the
   operator (see the README disclaimer).
 - Vulnerabilities in third-party dependencies (Chrome, Selenium, `mcp`) — report
