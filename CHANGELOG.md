@@ -7,6 +7,15 @@ All notable changes to browden are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+- **`list_profiles`: the agent can discover which profile to use.** A
+  `profiles:` entry in the allowlist now takes an optional `description`, and
+  the new `list_profiles` tool returns every configured profile's `profile_dir`
+  with that text verbatim, plus which one is the default. The server
+  instructions tell the agent to call it before `new_blank_tab`, so it picks the
+  credentialed profile or a scratch one by what each is for instead of guessing
+  paths. The tool only reads the live allowlist; it never launches a browser.
+
 ### Changed
 - **README: the intro now leads with the sandbox thesis rather than "read-only".**
   The opening pitched the project as a read-only shell that happens to be

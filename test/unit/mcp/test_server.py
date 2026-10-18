@@ -13,6 +13,7 @@ def test_server_instructions_state_concurrency_contract():
     ins = (server.mcp.instructions or "").lower()
     assert "concurrent requests" in ins  # the serialize-within-a-session contract
     assert "verbatim" in ins  # spells out the tab-id pass-back contract
+    assert "list_profiles" in ins  # how the agent learns which profile to use
 
 
 def test_tab_entry_point_docs_state_the_concurrency_contract():
@@ -231,6 +232,37 @@ async def test_list_pages_skips_dead_sessions_without_driving_them():
     assert [p["id"] for p in result] == ["aa-h1"]
     # The dead session is skipped entirely — never driven (no Chrome relaunch).
     dead.list_tabs.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_list_profiles_returns_configured_profiles_and_the_default(monkeypatch, tmp_path):
+    import browden.mcp.server as server
+    from browden.configs.loader import RuntimeConfigurationRefresher
+    from browden.mcp.validator import BrowdenRuntimeConfiguration
+    importlib.reload(server)
+    monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / "cache"))
+    default = str(server._default_profile_dir())
+
+    monkeypatch.setattr(server, "_refresher", RuntimeConfigurationRefresher.static(
+        BrowdenRuntimeConfiguration({"profiles": {
+            "/profiles/scratch": {"description": "Scratch, no logins.", "allow_all": True},
+            "/profiles/bare": {},
+        }})))
+    with patch.object(server._store, "get_or_create_session") as get_session:
+        result = await server.list_profiles()
+    get_session.assert_not_called()  # reads the allowlist only; no Chrome
+    assert result == [
+        {"profile_dir": "/profiles/bare", "description": None, "default": False},
+        {"profile_dir": "/profiles/scratch", "description": "Scratch, no logins.", "default": False},
+        # Not in the config, but always usable: listed so the agent knows it exists.
+        {"profile_dir": default, "description": None, "default": True},
+    ]
+
+    # When the config describes the default profile, it is listed once, flagged.
+    monkeypatch.setattr(server, "_refresher", RuntimeConfigurationRefresher.static(
+        BrowdenRuntimeConfiguration({"profiles": {default: {"description": "Real logins."}}})))
+    assert await server.list_profiles() == [
+        {"profile_dir": default, "description": "Real logins.", "default": True}]
 
 
 @pytest.mark.asyncio

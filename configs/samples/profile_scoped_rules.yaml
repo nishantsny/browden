@@ -35,6 +35,11 @@ profiles:
   # it can read what any profile can read, and click exactly one control.
   # -------------------------------------------------------------------------
   ~/.cache/browden/chrome-profile:
+    # Returned verbatim by the list_profiles tool, so an agent can pick a profile
+    # by what it is for. Optional; write it for the agent.
+    description: >-
+      Holds real logins (Splitwise). Use for reading logged-in pages and saving
+      Splitwise expenses; nothing else may be clicked here.
     click:
       secure.splitwise.com:
         - path: ['^/expenses.*']
@@ -52,6 +57,9 @@ profiles:
   # or a named override. Nothing here touches any other profile.
   # -------------------------------------------------------------------------
   ~/.cache/browden/chrome-research:
+    description: >-
+      Scratch profile with no logins. Use for open-ended research and searching;
+      any action is allowed on popular sites.
     allow_all: true
     read:
       website_overrides:
@@ -68,6 +76,7 @@ profiles:
   # and only this profile can reach it.
   # -------------------------------------------------------------------------
   ~/.cache/browden/chrome-dev:
+    description: Use for the local dev server on http://localhost.
     read:
       website_overrides:
         localhost: ['.*']
