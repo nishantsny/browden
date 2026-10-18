@@ -248,21 +248,37 @@ async def test_list_profiles_returns_configured_profiles_and_the_default(monkeyp
             "/profiles/scratch": {"description": "Scratch, no logins.", "allow_all": True},
             "/profiles/bare": {},
         }})))
+    # Two sessions opened at runtime: one on a configured profile (the allowlist
+    # entry wins), one on a path the allowlist never names.
+    server._store._sessions.update({
+        "aa": _profiled_session("/profiles/scratch"),
+        "bb": _profiled_session("/adhoc/one"),
+    })
     with patch.object(server._store, "get_or_create_session") as get_session:
         result = await server.list_profiles()
-    get_session.assert_not_called()  # reads the allowlist only; no Chrome
+    get_session.assert_not_called()  # reads config and the session list only; no Chrome
+    runtime = server.RUNTIME_PROFILE_DESCRIPTION
     assert result == [
-        {"profile_dir": "/profiles/bare", "description": None, "default": False},
-        {"profile_dir": "/profiles/scratch", "description": "Scratch, no logins.", "default": False},
-        # Not in the config, but always usable: listed so the agent knows it exists.
-        {"profile_dir": default, "description": None, "default": True},
+        {"profile_dir": "/profiles/bare", "source": "allowlist", "description": None,
+         "default": False},
+        {"profile_dir": "/profiles/scratch", "source": "allowlist",
+         "description": "Scratch, no logins.", "default": False},
+        *sorted([
+            {"profile_dir": "/adhoc/one", "source": "runtime", "description": runtime,
+             "default": False},
+            # Not in the config and never opened, but always usable.
+            {"profile_dir": default, "source": "runtime", "description": runtime,
+             "default": True},
+        ], key=lambda p: p["profile_dir"]),
     ]
 
-    # When the config describes the default profile, it is listed once, flagged.
+    # When the config describes the default profile, it is listed once, from there.
+    server._store._sessions.clear()
     monkeypatch.setattr(server, "_refresher", RuntimeConfigurationRefresher.static(
         BrowdenRuntimeConfiguration({"profiles": {default: {"description": "Real logins."}}})))
     assert await server.list_profiles() == [
-        {"profile_dir": default, "description": "Real logins.", "default": True}]
+        {"profile_dir": default, "source": "allowlist", "description": "Real logins.",
+         "default": True}]
 
 
 @pytest.mark.asyncio

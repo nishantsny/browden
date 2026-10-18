@@ -164,7 +164,7 @@ verbatim; it is globally unique and routes itself to the right profile (multiple
 
 | Tool | What it does |
 | --- | --- |
-| `list_profiles` | List the profiles the allowlist configures: each one's `profile_dir`, its `description` from the allowlist, and which is the default. Call it to pick a profile before `new_blank_tab` |
+| `list_profiles` | List the profiles: each one's `profile_dir`, its `source` (`allowlist`, or `runtime` for a profile only named by a `new_blank_tab` call since the server started), its `description` (verbatim from the allowlist; `none, created at runtime` for runtime ones), and which is the default. Call it to pick a profile before `new_blank_tab` |
 | `list_tabs` | List every open tab across all profiles |
 | `new_blank_tab` | Open a new tab (optionally in a chosen `profile_dir`) |
 | `select_tab` | Focus a tab by `id` |

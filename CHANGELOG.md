@@ -11,7 +11,10 @@ All notable changes to browden are documented here. The format follows
 - **`list_profiles`: the agent can discover which profile to use.** A
   `profiles:` entry in the allowlist now takes an optional `description`, and
   the new `list_profiles` tool returns every configured profile's `profile_dir`
-  with that text verbatim, plus which one is the default. The server
+  with that text verbatim, plus which one is the default. Each entry's `source`
+  is `allowlist` or `runtime`: a profile the allowlist doesn't name but a
+  `new_blank_tab` call opened since the server started (or the default) is
+  listed too, described as `none, created at runtime`. The server
   instructions tell the agent to call it before `new_blank_tab`, so it picks the
   credentialed profile or a scratch one by what each is for instead of guessing
   paths. The tool only reads the live allowlist; it never launches a browser.
