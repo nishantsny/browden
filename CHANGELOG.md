@@ -7,6 +7,8 @@ All notable changes to browden are documented here. The format follows
 
 ## [Unreleased]
 
+## [1.6.0] — 2026-10-18
+
 ### Added
 - **`list_profiles`: the agent can discover which profile to use.** A
   `profiles:` entry in the allowlist now takes an optional `description`, and
@@ -543,7 +545,8 @@ Initial public release.
   service manager (systemd / launchd / Task Scheduler).
 - Apache-2.0.
 
-[Unreleased]: https://github.com/nishantsny/browden/compare/v1.5.0...HEAD
+[Unreleased]: https://github.com/nishantsny/browden/compare/v1.6.0...HEAD
+[1.6.0]: https://github.com/nishantsny/browden/compare/v1.5.0...v1.6.0
 [1.5.0]: https://github.com/nishantsny/browden/compare/v1.4.0...v1.5.0
 [1.4.0]: https://github.com/nishantsny/browden/compare/v1.3.1...v1.4.0
 [1.3.1]: https://github.com/nishantsny/browden/compare/v1.3.0...v1.3.1
