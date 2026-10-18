@@ -39,9 +39,11 @@ from .validator import (
 
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 8000
+# What list_profiles reports for a profile the allowlist doesn't configure.
+RUNTIME_PROFILE_DESCRIPTION = "none, created at runtime"
 
 _INSTRUCTIONS = (
-    "browden drives a real Chrome session. Within a single profile-dir there is ONE browser session. You can open multiple tabs within that one session, and you may fire concurrent requests at them: selenium (the underlying automation library) is not thread-safe, so a session serves its requests one at a time behind a lock, each re-selecting its own tab when its turn comes. A request that waits more than 10s for its turn comes back with a 'browser session busy' error; retry it. A new profile-dir can be chosen while creating a new tab. If you choose a previously used profile-dir, then the previous session will be reused. Creating a new tab will return a tab-id which is unique across all sessions, pass it back verbatim on other tools. A tab must be selected before any operation acts on it: passing a tool the tab's id selects that tab, and only one tab per session can be selected at a time."
+    "browden drives a real Chrome session. Within a single profile-dir there is ONE browser session. You can open multiple tabs within that one session, and you may fire concurrent requests at them: selenium (the underlying automation library) is not thread-safe, so a session serves its requests one at a time behind a lock, each re-selecting its own tab when its turn comes. A request that waits more than 10s for its turn comes back with a 'browser session busy' error; retry it. A new profile-dir can be chosen while creating a new tab. If you choose a previously used profile-dir, then the previous session will be reused. Creating a new tab will return a tab-id which is unique across all sessions, pass it back verbatim on other tools. A tab must be selected before any operation acts on it: passing a tool the tab's id selects that tab, and only one tab per session can be selected at a time. Before opening a tab, call list_profiles to see which profiles the operator has configured and what each one is for (which logins it holds, what it may do), and pass the profile_dir of the one that fits the task to new_blank_tab."
 )
 
 
@@ -202,11 +204,48 @@ async def list_tabs() -> list[dict]:
 
 
 @mcp.tool()
+async def list_profiles() -> list[dict]:
+    """List the browser profiles, where each comes from, and what each is for.
+
+    Call this before new_blank_tab to pick a profile_dir for the task; pass the
+    entry's ``profile_dir`` to new_blank_tab as-is. ``source`` says where the
+    profile is defined:
+
+    * ``"allowlist"`` — configured by the operator. ``description`` is the
+      operator's note from the allowlist, returned verbatim (null when the
+      profile has none).
+    * ``"runtime"`` — not in the allowlist: a profile_dir some new_blank_tab
+      call named since the server started (or the default profile, before the
+      allowlist names it). Its description is always
+      ``"none, created at runtime"``, and it runs under the global rules only.
+
+    The entry with ``"default": true`` is the profile used when profile_dir is
+    omitted. Reads the live allowlist and the server's session list only; it
+    never launches or drives a browser.
+    """
+    logger.info("Tool called: list_profiles")
+    default = str(_default_profile_dir())
+    descriptions = _refresher.runtime_configuration.profile_descriptions()
+    profiles = [{"profile_dir": profile_dir, "source": "allowlist",
+                 "description": description, "default": profile_dir == default}
+                for profile_dir, description in descriptions.items()]
+    # The default profile is always usable, so it is listed even before any
+    # call has opened it; an allowlist entry for a path wins over its session.
+    runtime = sorted({default, *(s.profile_dir for s in _store.sessions())} - descriptions.keys())
+    profiles += [{"profile_dir": profile_dir, "source": "runtime",
+                  "description": RUNTIME_PROFILE_DESCRIPTION, "default": profile_dir == default}
+                 for profile_dir in runtime]
+    logger.info("Tool finished: list_profiles")
+    return profiles
+
+
+@mcp.tool()
 async def new_blank_tab(profile_dir: str | None = None) -> dict:
     """Open a new blank tab and return it (navigate it afterwards).
 
     Optional profile_dir runs the request in an independent Chrome profile; the
-    returned id is only valid for that same profile.
+    returned id is only valid for that same profile. Call list_profiles to see
+    which profiles are configured and what each is for.
 
     Only one tab can be driven at a time within a profile: concurrent requests
     to a profile's tabs are safe but are served one after another (each

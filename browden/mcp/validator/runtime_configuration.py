@@ -90,6 +90,12 @@ class BrowdenRuntimeConfiguration:
             str(canonical_profile_dir(key)): BrowdenAccessRuleSet(
                 body if isinstance(body, dict) else {}, tranco_path, base=self._access_rules)
             for key, body in (profiles or {}).items()}
+        # The operator's own note on what each profile is for, keyed the same way.
+        # Carried verbatim for list_profiles; no gate reads it.
+        self._descriptions: dict[str, str | None] = {
+            str(canonical_profile_dir(key)):
+                body.get("description") if isinstance(body, dict) else None
+            for key, body in (profiles or {}).items()}
 
     @classmethod
     def from_file(cls, path: Path) -> "BrowdenRuntimeConfiguration":
@@ -136,3 +142,7 @@ class BrowdenRuntimeConfiguration:
     def profile_dirs(self) -> list[str]:
         """The canonical profile paths this config scopes rules to (for logging)."""
         return sorted(self._profiles)
+
+    def profile_descriptions(self) -> dict[str, str | None]:
+        """Canonical profile path -> its ``description`` (None if it has none)."""
+        return dict(sorted(self._descriptions.items()))

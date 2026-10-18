@@ -24,6 +24,7 @@ The expected shape (see configs/samples/read_only_on_popular_websites.yaml):
 
     profiles:                     # per-browser-profile rule sets (additive over
       <profile dir>:              #   the global ones above)
+        description: <string>     # what this profile is for; list_profiles returns it verbatim
         allow_all: <bool>         # every action in THIS profile; Tranco stays on
         <any of the sections above except infra/profiles>
 
@@ -319,6 +320,11 @@ def _check_profiles(rules, source: str) -> None:
                 raise ConfigError(
                     f"{where}: {key!r} is not allowed inside a profile — it is "
                     f"process-wide; move it to the top level")
+            if key == "description":
+                if not isinstance(section, str) or not section.strip():
+                    raise ConfigError(
+                        f"{where}.description: must be a non-empty string, got {section!r}")
+                continue
             if key == "allow_all":
                 if not isinstance(section, bool):
                     raise ConfigError(

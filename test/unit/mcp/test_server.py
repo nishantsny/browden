@@ -13,6 +13,7 @@ def test_server_instructions_state_concurrency_contract():
     ins = (server.mcp.instructions or "").lower()
     assert "concurrent requests" in ins  # the serialize-within-a-session contract
     assert "verbatim" in ins  # spells out the tab-id pass-back contract
+    assert "list_profiles" in ins  # how the agent learns which profile to use
 
 
 def test_tab_entry_point_docs_state_the_concurrency_contract():
@@ -231,6 +232,58 @@ async def test_list_pages_skips_dead_sessions_without_driving_them():
     assert [p["id"] for p in result] == ["aa-h1"]
     # The dead session is skipped entirely — never driven (no Chrome relaunch).
     dead.list_tabs.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_list_profiles_returns_configured_profiles_and_the_default(monkeypatch, tmp_path):
+    import browden.mcp.server as server
+    from browden.configs.loader import RuntimeConfigurationRefresher
+    from browden.common.profile import canonical_profile_dir
+    from browden.mcp.validator import BrowdenRuntimeConfiguration
+    importlib.reload(server)
+    monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / "cache"))
+    default = str(server._default_profile_dir())
+    # Canonical paths, spelled the way the allowlist and the session layer key
+    # them — a literal "/profiles/x" gains a drive letter on Windows.
+    bare, scratch, adhoc = (str(canonical_profile_dir(tmp_path / name))
+                            for name in ("bare", "scratch", "adhoc"))
+
+    monkeypatch.setattr(server, "_refresher", RuntimeConfigurationRefresher.static(
+        BrowdenRuntimeConfiguration({"profiles": {
+            scratch: {"description": "Scratch, no logins.", "allow_all": True},
+            bare: {},
+        }})))
+    # Two sessions opened at runtime: one on a configured profile (the allowlist
+    # entry wins), one on a path the allowlist never names.
+    server._store._sessions.update({
+        "aa": _profiled_session(scratch),
+        "bb": _profiled_session(adhoc),
+    })
+    with patch.object(server._store, "get_or_create_session") as get_session:
+        result = await server.list_profiles()
+    get_session.assert_not_called()  # reads config and the session list only; no Chrome
+    runtime = server.RUNTIME_PROFILE_DESCRIPTION
+    assert result == [
+        {"profile_dir": bare, "source": "allowlist", "description": None,
+         "default": False},
+        {"profile_dir": scratch, "source": "allowlist",
+         "description": "Scratch, no logins.", "default": False},
+        *sorted([
+            {"profile_dir": adhoc, "source": "runtime", "description": runtime,
+             "default": False},
+            # Not in the config and never opened, but always usable.
+            {"profile_dir": default, "source": "runtime", "description": runtime,
+             "default": True},
+        ], key=lambda p: p["profile_dir"]),
+    ]
+
+    # When the config describes the default profile, it is listed once, from there.
+    server._store._sessions.clear()
+    monkeypatch.setattr(server, "_refresher", RuntimeConfigurationRefresher.static(
+        BrowdenRuntimeConfiguration({"profiles": {default: {"description": "Real logins."}}})))
+    assert await server.list_profiles() == [
+        {"profile_dir": default, "source": "allowlist", "description": "Real logins.",
+         "default": True}]
 
 
 @pytest.mark.asyncio

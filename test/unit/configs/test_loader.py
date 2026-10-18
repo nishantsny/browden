@@ -271,6 +271,10 @@ def test_load_page_scoped_rules(tmp_path):
     # allow_all is a profile-scoped flag, not a global one
     ("allow_all: true\n", "only allowed inside a profiles entry"),
     ("profiles:\n  ~/p:\n    allow_all: sure\n", "allow_all: must be a boolean"),
+    # description is free text for list_profiles, but it has to be text
+    ("profiles:\n  ~/p:\n    description: 5\n", "description: must be a non-empty string"),
+    ("profiles:\n  ~/p:\n    description: '  '\n", "description: must be a non-empty string"),
+    ("description: hi\n", "unknown section 'description'"),
     # allowed_upload_locations: the filesystem bound on upload-file
     ("allowed_upload_locations: '~/receipts'\n", "must be a list of directory paths"),
     ("allowed_upload_locations: [5]\n", "must be a list of directory paths"),
@@ -384,6 +388,30 @@ def test_profile_key_with_a_tilde_resolves_to_the_home_path(tmp_path):
     resolved = str((_Path.home() / ".cache/browden/scratch").resolve())
     assert rc.profile_dirs() == [resolved]
     assert rc.access_rules_for(resolved).read_policy.is_allowed("ok.test", "/")
+
+
+def test_profile_descriptions_are_kept_verbatim_and_gate_nothing(tmp_path):
+    described = tmp_path / "described"
+    bare = tmp_path / "bare"
+    f = tmp_path / "allowlist.yaml"
+    f.write_text(
+        "profiles:\n"
+        f"  {described}:\n"
+        "    description: >-\n"
+        "      Holds real logins.\n"
+        "      Use for Splitwise only.\n"
+        "    read:\n"
+        "      website_overrides:\n"
+        "        ok.test: ['.*']\n"
+        f"  {bare}: {{}}\n"
+    )
+    rc = load_runtime_configuration(f)
+    assert rc.profile_descriptions() == {
+        str(bare): None,
+        str(described): "Holds real logins. Use for Splitwise only.",
+    }
+    # The description sits beside the rules without becoming one.
+    assert rc.access_rules_for(str(described)).read_policy.is_allowed("ok.test", "/")
 
 
 def test_a_profile_that_does_not_exist_yet_loads(tmp_path):

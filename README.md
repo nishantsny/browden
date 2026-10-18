@@ -164,6 +164,7 @@ verbatim; it is globally unique and routes itself to the right profile (multiple
 
 | Tool | What it does |
 | --- | --- |
+| `list_profiles` | List the profiles: each one's `profile_dir`, its `source` (`allowlist`, or `runtime` for a profile only named by a `new_blank_tab` call since the server started), its `description` (verbatim from the allowlist; `none, created at runtime` for runtime ones), and which is the default. Call it to pick a profile before `new_blank_tab` |
 | `list_tabs` | List every open tab across all profiles |
 | `new_blank_tab` | Open a new tab (optionally in a chosen `profile_dir`) |
 | `select_tab` | Focus a tab by `id` |
@@ -341,14 +342,22 @@ read:
 
 profiles:
   ~/.cache/browden/chrome-profile:          # the credentialed profile: narrow
+    description: Holds real logins. Use for Splitwise; read-mostly.
     click:
       secure.splitwise.com:
         - path: ['^/expenses.*']
           label: 'Save'
 
   ~/.cache/browden/chrome-research:         # a scratch profile: everything, here
+    description: Scratch profile, no logins. Use for open-ended research.
     allow_all: true
 ```
+
+- **`description` tells the agent what a profile is for.** The `list_profiles`
+  tool returns each profile's `profile_dir` with its `description` copied
+  verbatim, and the server instructions tell the agent to call it before
+  opening a tab. It is optional and gates nothing; when present it must be a
+  non-empty string.
 
 - **A profile's rules are additive over the global ones.** A profile with no
   entry gets exactly the global rules — so a config written before this existed
