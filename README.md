@@ -139,6 +139,45 @@ clone-and-run on every OS; the notes below only cover what differs per platform.
 - Headed Chrome needs an X11 `DISPLAY` (the `env` block in the stdio config); on
   a machine with no display, set `BROWDEN_HEADLESS=1`.
 - `--mode service` installs a **systemd user** unit.
+- **If the first navigation after each browser launch takes ~25 s**, the host's
+  `xdg-desktop-portal` cannot be activated: Chrome's password-store code path
+  asks D-Bus to start the secret portal and waits out D-Bus's 25 s reply timeout.
+  `setup/onetime_setup.py` checks for this and browden logs a warning, or confirm
+  it directly — this returns in milliseconds on a healthy host and times out on a
+  broken one:
+
+  ```bash
+  systemctl --user status xdg-desktop-portal.service      # "failed" is the tell
+  time dbus-send --session --print-reply --reply-timeout=25000 \
+      --dest=org.freedesktop.DBus / org.freedesktop.DBus.StartServiceByName \
+      string:org.freedesktop.portal.Desktop uint32:0
+  ```
+
+  The usual cause is a portal configured to prefer a backend it cannot run (a
+  GNOME backend on a session that is not really GNOME). Name a usable one in
+  `~/.config/xdg-desktop-portal/portals.conf`:
+
+  ```ini
+  [preferred]
+  default=gtk;
+  org.freedesktop.impl.portal.Secret=gnome-keyring;
+  # Interfaces GTK does not implement must be named too, or they fall back to
+  # the unusable backend via the deprecated UseIn key and time out again.
+  org.freedesktop.impl.portal.Background=none;
+  org.freedesktop.impl.portal.Clipboard=none;
+  org.freedesktop.impl.portal.InputCapture=none;
+  org.freedesktop.impl.portal.RemoteDesktop=none;
+  org.freedesktop.impl.portal.ScreenCast=none;
+  org.freedesktop.impl.portal.Screenshot=none;
+  org.freedesktop.impl.portal.Wallpaper=none;
+  ```
+
+  Note that `systemctl --user mask xdg-desktop-portal.service` does **not** fix
+  it: D-Bus falls back to the `Exec=` line in the service file and spawns the
+  portal directly, which hangs the same way. `BROWDEN_PASSWORD_STORE=basic` does
+  avoid the wait, but it re-keys the profile's cookie encryption and Chrome
+  **permanently drops every cookie already stored**, logging that profile out of
+  every site — so fix the portal instead.
 
 ### macOS
 

@@ -15,11 +15,14 @@ the PSL default at publicsuffix2's *bundled* snapshot — it covers every real T
 exercise a *fresh* PSL place their own ``public_suffix_list.dat`` next to a
 snapshot and construct against that path.
 """
+import shutil
 from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 
+import browden.common.secret_portal as secret_portal
+import browden.web_navigator.selenium_chrome.backend as selenium_backend
 from browden.mcp.session_management import browser_session_store
 from browden.mcp.validator import popularity, tranco
 
@@ -55,3 +58,27 @@ def _no_store_atexit(monkeypatch):
     monkeypatch.setattr(
         browser_session_store, "atexit",
         SimpleNamespace(register=lambda *a, **k: None))
+
+
+@pytest.fixture(autouse=True)
+def _no_host_dbus_probe(monkeypatch):
+    """Keep Chrome's argv from being decided by the developer's own desktop.
+
+    ``_chrome_args`` asks the host, over D-Bus, whether Chrome's password-store
+    detection would hang on secret-portal activation, and names the store when it
+    would (issue #182). The probe's one external dependency is the ``dbus-send``
+    binary, so hiding that resolves the question to "cannot tell, change
+    nothing" — deterministic everywhere, and it keeps the probe clear of the
+    Chrome-launch fakes, which stub ``subprocess.Popen`` (what ``subprocess.run``
+    is built on). The decision table itself is covered with an explicitly faked
+    bus in ``test_password_store.py``.
+    """
+    real_which = shutil.which
+    monkeypatch.setattr(
+        secret_portal.shutil, "which",
+        lambda cmd, *a, **k: None if cmd == "dbus-send" else real_which(cmd, *a, **k))
+    # Host state, cached per process: clear it either side so no test inherits
+    # another's answer.
+    monkeypatch.setattr(selenium_backend, "_PASSWORD_STORE_CACHE", None)
+    yield
+    monkeypatch.setattr(selenium_backend, "_PASSWORD_STORE_CACHE", None)
