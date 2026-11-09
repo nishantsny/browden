@@ -7,6 +7,23 @@ All notable changes to browden are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+- **A plain `SIGTERM` no longer orphans every Chrome the server launched**
+  ([#183]). Browser teardown hangs off an `atexit` hook, and atexit does not run
+  when a process dies from a signal's default disposition — so `kill <pid>` left
+  each Chrome running and holding its profile's `SingletonLock`, blocking the
+  next server that wanted that profile, while Ctrl-C cleaned up fine because
+  `KeyboardInterrupt` unwinds. `main` now installs a SIGTERM handler that raises
+  `SystemExit`, giving the signal the same ordinary unwind; the handler stays
+  trivial because it runs on the main thread holding whatever locks that thread
+  held, and the existing shutdown does the work on the way out. SIGKILL is
+  deliberately not covered: `PR_SET_PDEATHSIG` fires when the *creating thread*
+  exits, and Chrome is launched from an `asyncio.to_thread` worker, so the
+  browser would die when that worker was recycled. The deployed unit's
+  `KillMode=control-group` remains the backstop there.
+
+[#183]: https://github.com/nishantsny/browden/issues/183
+
 ## [1.6.0] — 2026-10-18
 
 ### Added
