@@ -21,7 +21,6 @@ dependency is installed.
 import os
 import shutil
 import subprocess
-from pathlib import Path
 
 PORTAL_BUS_NAME = "org.freedesktop.portal.Desktop"
 SECRETS_BUS_NAME = "org.freedesktop.secrets"
@@ -51,11 +50,13 @@ def session_bus_address() -> str | None:
     addr = os.environ.get("DBUS_SESSION_BUS_ADDRESS", "").strip()
     if addr:
         return addr
-    try:
-        sock = Path(f"/run/user/{os.getuid()}/bus")
-    except AttributeError:          # no getuid on this platform
-        return None
-    return f"unix:path={sock}" if sock.exists() else None
+    getuid = getattr(os, "getuid", None)
+    if getuid is None:
+        return None             # no POSIX uid (Windows): no per-uid socket either
+    # Spelled as a plain string, not a Path: this is a bus address, and a
+    # PureWindowsPath would render it with backslashes.
+    sock = f"/run/user/{getuid()}/bus"
+    return f"unix:path={sock}" if os.path.exists(sock) else None
 
 
 def bus_name_has_owner(name: str, timeout: float = PROBE_TIMEOUT_SECONDS) -> bool | None:

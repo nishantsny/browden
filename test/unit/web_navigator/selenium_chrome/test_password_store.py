@@ -200,10 +200,20 @@ def test_portal_probe_is_bounded_by_our_own_timeout(monkeypatch):
 
 
 def test_session_bus_falls_back_to_the_per_uid_socket(monkeypatch):
+    # A user service often has no DBUS_SESSION_BUS_ADDRESS in its environment,
+    # so the well-known socket is the fallback. Asserted as a literal string: a
+    # path object would render this with backslashes on Windows.
     monkeypatch.delenv("DBUS_SESSION_BUS_ADDRESS", raising=False)
     monkeypatch.setattr(secret_portal.os, "getuid", lambda: 4242, raising=False)
-    monkeypatch.setattr(secret_portal.Path, "exists", lambda self: True)
+    monkeypatch.setattr(secret_portal.os.path, "exists", lambda p: True)
     assert secret_portal.session_bus_address() == "unix:path=/run/user/4242/bus"
+
+
+def test_session_bus_is_absent_without_a_posix_uid(monkeypatch):
+    # Windows has no /run/user/<uid>/bus; probing for one must not crash.
+    monkeypatch.delenv("DBUS_SESSION_BUS_ADDRESS", raising=False)
+    monkeypatch.delattr(secret_portal.os, "getuid", raising=False)
+    assert secret_portal.session_bus_address() is None
 
 
 # --- the install-time diagnosis -------------------------------------------
