@@ -3,6 +3,7 @@ import asyncio
 import contextlib
 import functools
 import os
+import signal
 import sys
 from collections.abc import AsyncIterator, Awaitable, Callable
 from pathlib import Path
@@ -726,6 +727,43 @@ async def force_reload_tab(id: str) -> dict:
     return result
 
 
+def _install_sigterm_handler() -> None:
+    """Make a SIGTERM unwind the interpreter, so the shutdown hooks actually run.
+
+    The browser teardown that closes every profile's Chrome is an ``atexit``
+    hook (``BrowserSessionStore._shutdown``), and atexit does not run when a
+    process dies from a signal's default disposition. So ``kill <pid>`` left
+    every Chrome the server had launched running, each still holding its
+    profile's ``SingletonLock`` and so blocking the next server that wanted that
+    profile -- while Ctrl-C cleaned up perfectly, because KeyboardInterrupt
+    unwinds and atexit runs on the way out. Measured: SIGTERM killed the server
+    in 0.21s (exit -15) with both Chromes surviving; SIGINT exited in 0.57s and
+    reaped them. This gives SIGTERM the same ordinary unwind. See issue #183.
+
+    The handler stays deliberately trivial. It runs on the main thread between
+    bytecodes, holding whatever locks that thread already held, so it must not
+    tear anything down itself -- it raises, and the shutdown the store already
+    registered does the work on the way out.
+
+    ``PR_SET_PDEATHSIG`` would also cover SIGKILL but is the wrong tool here:
+    Chrome is launched from inside an ``asyncio.to_thread`` worker, and PDEATHSIG
+    fires when the *creating thread* exits, so the browser would die as soon as
+    that worker was recycled. SIGKILL therefore remains uncovered by design; in
+    the deployed unit systemd's ``KillMode=control-group`` is the backstop, since
+    every Chrome is a child inside the service cgroup.
+    """
+    def _exit_on_sigterm(signum, _frame):
+        logger.info(f"Received signal {signum}; shutting down")
+        raise SystemExit(128 + signum)
+
+    try:
+        signal.signal(signal.SIGTERM, _exit_on_sigterm)
+    except ValueError:
+        # Not the main thread (an embedded/managed host): leave signals alone.
+        logger.warning("Could not install a SIGTERM handler; browsers may be "
+                       "orphaned if this process is terminated by signal")
+
+
 def main(argv: list[str] | None = None) -> None:
     """CLI entry point: resolve + load the allowlist, then serve.
 
@@ -756,6 +794,8 @@ def main(argv: list[str] | None = None) -> None:
     except ConfigError as e:
         parser.error(str(e))
     logger.info(f"Loaded allowlist config from {path}")
+
+    _install_sigterm_handler()
 
     transport = os.environ.get("MCP_TRANSPORT", "stdio")
     logger.info(f"MCP Server starting (transport={transport})")

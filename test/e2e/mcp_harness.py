@@ -70,6 +70,17 @@ class McpServerHarness:
                 
         raise RuntimeError(f"MCP server failed to bind to {self.port} within 30s.")
         
+    @property
+    def pid(self) -> int | None:
+        """The server process's pid, for a test that wants to signal it directly.
+
+        ``stop`` signals the whole process group, which reaps Chrome whatever the
+        server does about signals — the same way systemd's KillMode=control-group
+        does in production. A test of the server's OWN signal handling has to
+        address this pid alone (issue #183).
+        """
+        return self._proc.pid if self._proc else None
+
     def stop(self):
         if not self._proc:
             return
