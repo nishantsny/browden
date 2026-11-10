@@ -7,6 +7,8 @@ All notable changes to browden are documented here. The format follows
 
 ## [Unreleased]
 
+## [1.7.0] — 2026-11-10
+
 ### Added
 - **Latency budgets in the e2e suite.** `test/e2e/test_navigate_latency_budget.py`
   times `new_blank_tab`, `navigate` (cold and warm) and `query_selector_all`
@@ -610,7 +612,8 @@ Initial public release.
   service manager (systemd / launchd / Task Scheduler).
 - Apache-2.0.
 
-[Unreleased]: https://github.com/nishantsny/browden/compare/v1.6.0...HEAD
+[Unreleased]: https://github.com/nishantsny/browden/compare/v1.7.0...HEAD
+[1.7.0]: https://github.com/nishantsny/browden/compare/v1.6.0...v1.7.0
 [1.6.0]: https://github.com/nishantsny/browden/compare/v1.5.0...v1.6.0
 [1.5.0]: https://github.com/nishantsny/browden/compare/v1.4.0...v1.5.0
 [1.4.0]: https://github.com/nishantsny/browden/compare/v1.3.1...v1.4.0
