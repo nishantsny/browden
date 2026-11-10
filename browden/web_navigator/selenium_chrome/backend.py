@@ -7,6 +7,7 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
+from ...common import secret_portal
 from ...common.logger import logger
 from ...common.origin import url_origin
 from ...common.tab import TabInfo
@@ -120,6 +121,14 @@ def _no_sandbox_enabled() -> bool:
     return os.environ.get("BROWDEN_NO_SANDBOX", "").strip().lower() in ("1", "true", "yes", "on")
 
 
+# Chrome's password-store code path asks D-Bus to activate the freedesktop
+# secret portal, and where that activation never completes Chrome waits out
+# D-Bus's 25s default reply timeout -- on the FIRST navigation of every browser
+# launch. ``browden.common.secret_portal`` holds the bounded probe and the
+# reasoning; ``_password_store_args`` below is the policy that acts on it.
+# Host state, not per-launch state: probed once per process.
+_PASSWORD_STORE_CACHE: list[str] | None = None
+
 SINGLETON_FILES = ("SingletonLock", "SingletonCookie", "SingletonSocket")
 TITLE_WAIT_SECONDS = 3
 # How often to re-check for the title inside that wait (see _wait_for_title).
@@ -195,6 +204,72 @@ def _free_port() -> int:
     return get_free_port()
 
 
+def _password_store_args() -> list[str]:
+    """Decide whether to name Chrome's password store explicitly (cached).
+
+    The probe costs a round trip, and on a host with a broken portal it costs
+    ``PORTAL_PROBE_TIMEOUT_SECONDS`` — so it is answered once per process rather
+    than once per browser launch, and the warning below is logged once.
+
+    Setting ``--password-store=basic`` makes the first navigation of a launch
+    fast on a host with a broken portal, but it is **not** a free win: the store
+    holds the key that encrypts the profile's cookies, so switching it makes
+    every cookie already in the profile undecryptable, and Chrome drops those
+    rows for good. Measured on a throwaway profile: a cookie written under the
+    keyring key was gone after one launch with ``basic`` and did not come back
+    when the flag was removed again. On a logged-in profile that is a permanent
+    logout from every site. So the flag is only applied where there is nothing
+    to lose, and the remaining case is reported rather than decided here.
+
+    ``BROWDEN_PASSWORD_STORE`` overrides all of it (``basic``, ``gnome-libsecret``,
+    ``kwallet5``, …, or ``detect`` to force Chrome's own default) for an operator
+    who has weighed that trade for their deployment.
+    """
+    override = os.environ.get("BROWDEN_PASSWORD_STORE", "").strip()
+    if override:
+        if override.lower() == "detect":
+            return []
+        return [f"--password-store={override}"]
+
+    global _PASSWORD_STORE_CACHE
+    if _PASSWORD_STORE_CACHE is None:
+        _PASSWORD_STORE_CACHE = _probe_password_store()
+    return list(_PASSWORD_STORE_CACHE)
+
+
+def _probe_password_store() -> list[str]:
+    """The uncached host probe behind ``_password_store_args``."""
+    if secret_portal.session_bus_address() is None:
+        # No session bus: no portal and no keyring are reachable, so Chrome ends
+        # up on the basic store regardless. Naming it changes nothing except
+        # that Chrome stops looking — the ordinary case in a container or on CI.
+        return ["--password-store=basic"]
+
+    if secret_portal.portal_is_reachable() is not False:
+        return []            # portal is up, started in time, or we cannot tell
+
+    if secret_portal.bus_name_has_owner(secret_portal.SECRETS_BUS_NAME) is True:
+        # The portal is broken but the keyring works, so Chrome will stall and
+        # then successfully use the keyring. Switching to the basic store would
+        # cure the stall and destroy the profile's existing cookies with it —
+        # not a trade to make silently.
+        logger.warning(
+            f"The D-Bus secret portal ({secret_portal.PORTAL_BUS_NAME}) cannot be activated, "
+            f"so Chrome will stall ~25s on the first navigation of every browser launch "
+            f"(issue #182). A secret service IS available, so browden is leaving the password "
+            f"store alone: forcing it would make the profile's existing cookies undecryptable "
+            f"and log the profile out of every site. {secret_portal.REMEDY} Or set "
+            f"BROWDEN_PASSWORD_STORE=basic to accept that trade.")
+        return []
+
+    # Neither portal nor keyring: Chrome would stall and then fall back to the
+    # basic store anyway, so name it and skip the stall. Nothing is lost.
+    logger.info(
+        f"No secret service and no activatable {secret_portal.PORTAL_BUS_NAME} on the session "
+        f"bus; using --password-store=basic to skip Chrome's ~25s portal activation timeout.")
+    return ["--password-store=basic"]
+
+
 def _chrome_args(profile_dir: Path, port: int) -> list[str]:
     """Build the command line for a human-looking Chrome.
 
@@ -237,6 +312,9 @@ def _chrome_args(profile_dir: Path, port: int) -> list[str]:
         # keeps using hardware GL and only reaches for SwiftShader as a fallback.
         "--enable-unsafe-swiftshader",
     ]
+    # Empty unless the host's secret portal is unreachable *and* nothing would be
+    # lost by naming the store — see _password_store_args and issue #182.
+    args += _password_store_args()
     if _headless_enabled():
         # New headless mode + the flags a headless container commonly needs.
         logger.info("Launching Chrome headless")

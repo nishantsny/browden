@@ -13,6 +13,7 @@
 #      so a config the new schema rejects fails fast instead of crash-looping)
 #   4. restart the service + health-check (active AND listening on the port)
 #   5. run the e2e suite from the deployed tree (post-deploy verification)
+#   5b. check the latency budgets on THIS host (CI cannot: the faults are host state)
 #
 # Idempotent: safe to re-run even when already at the deploy branch (it redeploys).
 #
@@ -30,6 +31,7 @@
 #   BROWDEN_SERVICE      systemd --user unit name           (browden.service)
 #   BROWDEN_PORT         port to health-check              (derived from the unit's MCP_PORT)
 #   BROWDEN_E2E_VENV     persistent venv to run e2e from     (default: a fresh one per run)
+#   BROWDEN_SKIP_LATENCY=1  skip the stage-5b latency gate (host problem already known)
 #
 # Usage:
 #   ~/scripts/deploy.sh                          # deploy + run the whole e2e suite
@@ -205,6 +207,33 @@ log "Running e2e (headless) from $RELEASE_DIR: ${E2E_ARGS[*]}"
 cd "$RELEASE_DIR"
 TMPDIR="$E2E_TMP" BROWDEN_HEADLESS=1 "$E2E_VENV/bin/python" -m pytest "${E2E_ARGS[@]}" -q \
     || die "e2e FAILED — the new code is LIVE but did not pass e2e. Investigate or roll back to $before. Run artifacts kept in $E2E_TMP."
+
+# ---- 5b. latency budgets, on THIS machine --------------------------------
+# The budget test is part of test/e2e, so stage 5 already ran it — but with -q,
+# so its numbers are printed only on failure. Run it once more with -s to put
+# the per-call timings in the deploy log of every deploy, green or not: that is
+# the record that shows a slow regression arriving before it crosses a budget.
+#
+# It also catches what CI structurally cannot. The known latency faults are
+# properties of the HOST, not of the code: Chrome's secret-portal activation
+# timeout (#182) needs a session bus with a portal that will not start, and a
+# GitHub runner has no session bus at all, so the test is green there whether the
+# fault is present or not. Running it here, on the machine actually being
+# deployed to, is the only place that check means anything.
+#
+# BROWDEN_SKIP_LATENCY=1 skips the gate: a deploy must never be unblockable
+# because of a host problem the operator already knows about.
+LATENCY_TEST="test/e2e/test_navigate_latency_budget.py"
+if [ "${BROWDEN_SKIP_LATENCY:-0}" = 1 ]; then
+    log "Latency budgets SKIPPED (BROWDEN_SKIP_LATENCY=1)"
+elif [ -f "$RELEASE_DIR/$LATENCY_TEST" ]; then
+    log "Checking latency budgets on this host"
+    TMPDIR="$E2E_TMP" BROWDEN_HEADLESS=1 "$E2E_VENV/bin/python" -m pytest "$LATENCY_TEST" -q -s \
+        || die "latency budgets FAILED — the new code is LIVE but a call is far slower than budget on THIS host. The failure names the likely cause; see issue #182 for the portal case. Roll back to $before, or re-run with BROWDEN_SKIP_LATENCY=1 once you have accepted it. Artifacts kept in $E2E_TMP."
+else
+    log "Latency budgets skipped ($LATENCY_TEST not in this tree)"
+fi
+
 rm -rf "$E2E_TMP"
 
 log "DEPLOY OK — $SERVICE live at $after, e2e green."

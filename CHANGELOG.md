@@ -7,6 +7,23 @@ All notable changes to browden are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+- **Latency budgets in the e2e suite.** `test/e2e/test_navigate_latency_budget.py`
+  times `new_blank_tab`, `navigate` (cold and warm) and `query_selector_all`
+  through the real SSE transport against a page served on `127.0.0.1`, and fails
+  if a call crosses a budget set ~5x above the observed median. It is a tripwire
+  for order-of-magnitude regressions, not a benchmark: a shared runner is far too
+  noisy for tighter assertions. A cold-navigate failure prints the likely cause
+  and both remedies. The deploy script runs it as its own post-deploy stage (5b)
+  with timings printed into the deploy log, because the known latency faults are
+  host state that CI structurally cannot see: a runner has no D-Bus session bus,
+  so the portal stall below cannot occur there whether the fault is present or
+  not. `BROWDEN_SKIP_LATENCY=1` skips that gate.
+- **An install-time portal check.** `setup/onetime_setup.py` now reports whether
+  the host's D-Bus secret portal is reachable, so a new deployment hears about
+  the ~25 s first-navigation stall on the machine it is being installed on
+  instead of rediscovering it as "browden is slow". Best-effort and non-fatal.
+
 ### Fixed
 - **A plain `SIGTERM` no longer orphans every Chrome the server launched**
   ([#183]). Browser teardown hangs off an `atexit` hook, and atexit does not run
@@ -35,6 +52,25 @@ All notable changes to browden are documented here. The format follows
   still bounded by `TITLE_WAIT_SECONDS`.
 
 [#181]: https://github.com/nishantsny/browden/issues/181
+
+- **Chrome's password-store detection no longer has to stall the first
+  navigation of every browser launch** ([#182]). Chrome asks D-Bus to activate
+  the freedesktop secret portal; where that activation never completes — a failed
+  or backend-less `xdg-desktop-portal`, the normal state of a non-GNOME or server
+  session — Chrome waits out D-Bus's 25 s default reply timeout, and the first
+  navigation waits with it (measured: 25.1 s to load a `127.0.0.1` page whose
+  TTFB was 4 ms). Chrome's own timeout is not ours to shorten, so browden now
+  answers the same question first, with a 1 s bound, and names the password store
+  when nothing would be lost by it: with no session bus at all (a container, CI)
+  Chrome lands on the basic store anyway, so it is named and the search skipped.
+  Where the portal is broken but a secret service does work, browden logs a
+  warning naming the remedy and changes **nothing** — switching stores there would cure the stall
+  by re-keying the profile, making every cookie already stored undecryptable;
+  Chrome drops those rows for good, which on a logged-in profile is a permanent
+  logout. `BROWDEN_PASSWORD_STORE` (`basic`, `gnome-libsecret`, `kwallet5`, …, or
+  `detect`) overrides the decision for an operator who has weighed that trade.
+
+[#182]: https://github.com/nishantsny/browden/issues/182
 
 ## [1.6.0] — 2026-10-18
 

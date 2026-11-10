@@ -161,6 +161,30 @@ def stdio_config(service_name: str, python: str, allowlist: Path,
     return json.dumps({"mcpServers": {service_name: entry}}, indent=2)
 
 
+def check_secret_portal() -> None:
+    """Warn at install time if this host will stall on Chrome's first navigation.
+
+    Chrome asks D-Bus to activate the freedesktop secret portal when it picks its
+    password store. Where that activation never completes — a portal configured
+    for a backend it cannot run — Chrome waits out D-Bus's 25s reply timeout on
+    the FIRST navigation of every browser launch (issue #182). That looks exactly
+    like "browden is slow", so say it here, on the machine being installed,
+    rather than leaving each new deployment to rediscover it.
+
+    Best-effort and non-fatal: a host that cannot be probed is not warned about.
+    """
+    try:
+        from browden.common.secret_portal import diagnose
+        problem = diagnose()
+    except Exception as e:                               # never block setup
+        print(f"[warn] could not check the D-Bus secret portal ({e})")
+        return
+    if problem:
+        print(f"[warn] {problem}")
+    else:
+        print("[ok]   D-Bus secret portal reachable (no first-navigation stall)")
+
+
 def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -193,6 +217,7 @@ def main(argv: list[str] | None = None) -> None:
     allowlist = copy_config(config_dir)
     ensure_tranco(config_dir, args.tranco_top_n, allowlist)
     ensure_psl(config_dir, allowlist)
+    check_secret_portal()
 
     if args.python:
         service_python = args.python
