@@ -24,6 +24,18 @@ All notable changes to browden are documented here. The format follows
 
 [#183]: https://github.com/nishantsny/browden/issues/183
 
+- **The post-navigation title wait no longer pays selenium's 500 ms poll
+  granularity** ([#181]). `WebDriverWait` checks its condition, then sleeps a
+  fixed `poll_frequency` — 0.5 s by default — so a title that appeared just after
+  the navigation returned still cost a full tick; py-spy attributed ~0.25 s of
+  every navigate to that rounding. The condition is one cheap W3C round trip, so
+  it now polls at 50 ms and pays the real wait instead. Measured on flipkart.com
+  with a warm connection, the wait is genuinely 0.31 s there, which the old poll
+  rounded up to 0.5 s. Behaviour is unchanged: the wait is still best-effort and
+  still bounded by `TITLE_WAIT_SECONDS`.
+
+[#181]: https://github.com/nishantsny/browden/issues/181
+
 ## [1.6.0] — 2026-10-18
 
 ### Added

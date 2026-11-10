@@ -122,6 +122,8 @@ def _no_sandbox_enabled() -> bool:
 
 SINGLETON_FILES = ("SingletonLock", "SingletonCookie", "SingletonSocket")
 TITLE_WAIT_SECONDS = 3
+# How often to re-check for the title inside that wait (see _wait_for_title).
+TITLE_POLL_SECONDS = 0.05
 # Cold Chrome starts can take several seconds; under concurrent launches (many
 # profiles at once) plus a loaded host, give the DevTools endpoint generous
 # margin before declaring the launch failed.
@@ -317,7 +319,13 @@ def _wait_for_title(drv, timeout: float = TITLE_WAIT_SECONDS) -> None:
     title never appears.
     """
     try:
-        WebDriverWait(drv, timeout).until(lambda d: bool(d.title))
+        # Selenium polls every 500ms by default, so a title that appears 10ms
+        # after the navigation returns still costs a full tick -- ~0.25s of every
+        # navigate, measured with py-spy. The condition is one cheap W3C round
+        # trip, so poll it at 50ms and pay the real wait instead of the
+        # rounding. See issue #181.
+        WebDriverWait(drv, timeout, poll_frequency=TITLE_POLL_SECONDS).until(
+            lambda d: bool(d.title))
     except Exception:
         pass
 
