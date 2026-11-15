@@ -205,7 +205,7 @@ verbatim; it is globally unique and routes itself to the right profile (multiple
 | --- | --- |
 | `list_profiles` | List the profiles: each one's `profile_dir`, its `source` (`allowlist`, or `runtime` for a profile only named by a `new_blank_tab` call since the server started), its `description` (verbatim from the allowlist; `none, created at runtime` for runtime ones), and which is the default. Call it to pick a profile before `new_blank_tab` |
 | `list_tabs` | List every open tab across all profiles |
-| `new_blank_tab` | Open a new tab (optionally in a chosen `profile_dir`; `incognito: true` for a tab that starts signed out, with its own cookie jar discarded when the last incognito tab closes — same profile, so the same rules apply) |
+| `new_blank_tab` | Open a new tab (optionally in a chosen `profile_dir`; `incognito: true` for a tab that starts signed out, with its own cookie jar discarded when the last incognito tab closes — same profile, so the same rules apply; `software_webgl: 1` for a profile whose Chrome rasterises WebGL in software on a GPU-less host, which relaunches that Chrome and so closes its other tabs) |
 | `select_tab` | Focus a tab by `id` |
 | `navigate` | Point a tab at a URL (gated by the read allowlist) |
 | `close_tab` | Close a tab by `id` |

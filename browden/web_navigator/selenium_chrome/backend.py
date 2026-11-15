@@ -271,7 +271,7 @@ def _probe_password_store() -> list[str]:
     return ["--password-store=basic"]
 
 
-def _chrome_args(profile_dir: Path, port: int) -> list[str]:
+def _chrome_args(profile_dir: Path, port: int, software_webgl: bool = False) -> list[str]:
     """Build the command line for a human-looking Chrome.
 
     Deliberately omits every automation switch chromedriver would otherwise
@@ -301,18 +301,26 @@ def _chrome_args(profile_dir: Path, port: int) -> list[str]:
         f"--remote-allow-origins=http://127.0.0.1:{port}",
         "--no-first-run",
         "--no-default-browser-check",
-        # Guarantee a WebGL context even on GPU-less hosts (VMs, containers, our
-        # Hyper-V deployment box: hyperv_drm exposes no DRM render node, so
-        # Chrome's ANGLE/EGL backend can't initialise hardware GL). Chrome >= 121
-        # no longer falls back to its bundled SwiftShader for WebGL by default,
-        # so getContext('webgl') returns null — a browser advertising *zero*
-        # WebGL support is a decisive bot signal for Akamai & friends, which
-        # then 403 the site's order-data XHRs (see issue #29). Re-enabling the
-        # software fallback yields a real context (ANGLE/SwiftShader renderer)
-        # and clears that flag. On a host with a real GPU this is inert — Chrome
-        # keeps using hardware GL and only reaches for SwiftShader as a fallback.
-        "--enable-unsafe-swiftshader",
     ]
+    if software_webgl:
+        # Opt-in per session (new_blank_tab's software_webgl=1), off by default.
+        #
+        # On a GPU-less host — VMs and containers, this Hyper-V box among them:
+        # hyperv_drm exposes no DRM render node, so ANGLE/EGL cannot initialise
+        # hardware GL — Chrome >= 121 no longer falls back to its bundled
+        # SwiftShader for WebGL, and getContext('webgl') returns null. A browser
+        # advertising *zero* WebGL support is a decisive bot signal for Akamai &
+        # friends, which then 403 the site's order-data XHRs (see issue #29);
+        # this flag restores a real context (ANGLE/SwiftShader renderer) and
+        # clears that signal. Measured headful on the deployment host: with the
+        # flag, WebGL 1 and 2 both initialise and rasterise correctly; without
+        # it, both getContext calls return null.
+        #
+        # Off by default because it hands page scripts a software shader JIT —
+        # Chrome's own reason for gating it — so it is worth paying only where a
+        # site actually demands WebGL. Inert on a host with a real GPU: Chrome
+        # keeps using hardware GL and only reaches for SwiftShader as a fallback.
+        args.append("--enable-unsafe-swiftshader")
     # Empty unless the host's secret portal is unreachable *and* nothing would be
     # lost by naming the store — see _password_store_args and issue #182.
     args += _password_store_args()
@@ -372,14 +380,17 @@ def _terminate(proc: subprocess.Popen | None) -> None:
         logger.warning(f"Failed to terminate Chrome process: {e}")
 
 
-def _launch_chrome(profile_dir: Path) -> tuple[subprocess.Popen, int]:
+def _launch_chrome(profile_dir: Path,
+                   software_webgl: bool = False) -> tuple[subprocess.Popen, int]:
     """Launch Chrome directly (no chromedriver) with remote debugging on.
 
     Returns the running process and the DevTools port to attach Selenium to.
+    ``software_webgl`` is a launch-time choice (see ``_chrome_args``): changing
+    it means starting a new browser, which is what ``set_software_webgl`` does.
     """
     _clear_stale_singletons(profile_dir)
     port = _free_port()
-    args = _chrome_args(profile_dir, port)
+    args = _chrome_args(profile_dir, port, software_webgl)
     logger.info(f"Launching Chrome directly: {' '.join(args)}")
     proc = subprocess.Popen(args, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     try:
@@ -454,6 +465,13 @@ class SeleniumChromeBackend(WebNavigatorBackend):
         # browser-level CDP socket (incognito tabs, see cdp.py) needs it, and
         # only the launch knows it. Cleared by _teardown with the process.
         self._devtools_port: int | None = None
+        # Whether this profile's Chrome runs with software WebGL enabled (see
+        # _chrome_args). A launch-time choice, so this is both the mode the
+        # running browser was started with and the mode the next launch will
+        # use; set_software_webgl changes it. Survives _teardown deliberately:
+        # a session that asked for software WebGL keeps it when a dead browser
+        # is healed by relaunch.
+        self._software_webgl = False
         # The session's one incognito browser context, created on first use and
         # disposed when its last tab closes — which is where Chrome itself ends
         # an incognito session. One context, not one per tab, so that two
@@ -481,6 +499,34 @@ class SeleniumChromeBackend(WebNavigatorBackend):
 
     def get_profile_dir(self) -> Path:
         return self._profile_dir
+
+    def software_webgl_enabled(self) -> bool:
+        """Whether this profile's Chrome is running (or will start) with software WebGL."""
+        return self._software_webgl
+
+    def set_software_webgl(self, enabled: bool) -> bool:
+        """Choose the software-WebGL mode for this profile. Returns True if it relaunched.
+
+        The flag can only be given to Chrome on its command line, so switching
+        mode means a new browser: a running one is stopped here and the next
+        ``_drv()`` starts it in the requested mode. Every tab of this session
+        dies with it — the caller owns telling anyone who holds those ids.
+
+        Asking for the mode the browser already has does nothing at all, which
+        is what makes it safe for a caller to pass the mode it wants on every
+        tab it opens: only the first one, or a real change of mind, costs a
+        relaunch. With no browser running there is nothing to relaunch either —
+        the mode is simply remembered for the next launch.
+        """
+        if enabled == self._software_webgl:
+            return False
+        self._software_webgl = enabled
+        logger.info(f"Switching to software_webgl={int(enabled)} "
+                    f"(profile={self._profile_dir}); the running Chrome, if any, is relaunched")
+        if not self.is_running():
+            return False
+        self._teardown()
+        return True
 
     def shutdown(self) -> None:
         """Public teardown for orderly shutdown (see ``WebNavigatorBackend.shutdown``).
@@ -550,8 +596,9 @@ class SeleniumChromeBackend(WebNavigatorBackend):
         # a failed probe has already torn it down, so (re)launch a fresh one.
         if not self._session_alive(True):
             profile = self._profile_dir
-            logger.info(f"Starting new Chrome session (profile={profile})")
-            self._chrome_proc, port = _launch_chrome(profile)
+            logger.info(f"Starting new Chrome session "
+                        f"(profile={profile}, software_webgl={int(self._software_webgl)})")
+            self._chrome_proc, port = _launch_chrome(profile, self._software_webgl)
             self._devtools_port = port
             # Attach to the Chrome we just launched instead of letting
             # chromedriver spawn its own (automation-flagged) instance.

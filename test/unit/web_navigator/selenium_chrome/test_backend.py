@@ -176,17 +176,31 @@ def test_chrome_args_have_no_automation_flags(tmp_path, monkeypatch):
     assert "--test-type" not in joined
     # Headed by default: no headless switch unless asked for.
     assert not any(a.startswith("--headless") for a in args)
-    # Software WebGL fallback is always on: a GPU-less host must still expose a
-    # WebGL context, or anti-bot sensors (Akamai) flag the session — issue #29.
-    assert "--enable-unsafe-swiftshader" in args
+    # The software WebGL fallback is opt-in (new_blank_tab's software_webgl=1),
+    # because it exposes a software shader JIT to page scripts — issue #29.
+    assert "--enable-unsafe-swiftshader" not in args
 
 
-def test_chrome_args_enable_swiftshader_when_headless(tmp_path, monkeypatch):
+def test_chrome_args_add_software_webgl_only_when_asked(tmp_path, monkeypatch):
+    monkeypatch.setenv("BROWDEN_CHROME_BINARY", "/usr/bin/google-chrome")
+    monkeypatch.delenv("BROWDEN_HEADLESS", raising=False)
+
+    assert "--enable-unsafe-swiftshader" in _chrome_args(
+        tmp_path / "profile", 9222, software_webgl=True)
+    assert "--enable-unsafe-swiftshader" not in _chrome_args(
+        tmp_path / "profile", 9222, software_webgl=False)
+
+
+def test_chrome_args_software_webgl_is_independent_of_headless(tmp_path, monkeypatch):
+    # Headless is where it matters least on this host (headless Chrome rasterises
+    # WebGL in software anyway) and it must still be the caller's choice, not
+    # something the headless branch quietly turns on or off.
     monkeypatch.setenv("BROWDEN_CHROME_BINARY", "/usr/bin/google-chrome")
     monkeypatch.setenv("BROWDEN_HEADLESS", "1")
-    args = _chrome_args(tmp_path / "profile", 9222)
-    # The WebGL fallback matters headless too (CI, containers): keep it on.
-    assert "--enable-unsafe-swiftshader" in args
+
+    assert "--enable-unsafe-swiftshader" in _chrome_args(
+        tmp_path / "profile", 9222, software_webgl=True)
+    assert "--enable-unsafe-swiftshader" not in _chrome_args(tmp_path / "profile", 9222)
 
 
 def test_chrome_args_headless_when_enabled(tmp_path, monkeypatch):
