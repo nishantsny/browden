@@ -7,6 +7,8 @@ All notable changes to browden are documented here. The format follows
 
 ## [Unreleased]
 
+## [1.8.0] — 2026-11-14
+
 ### Added
 - **`new_blank_tab(incognito=true)`: a tab that starts signed out.** It gets its
   own cookie jar and storage, cannot see the profile's cookies (so none of its
@@ -632,7 +634,8 @@ Initial public release.
   service manager (systemd / launchd / Task Scheduler).
 - Apache-2.0.
 
-[Unreleased]: https://github.com/nishantsny/browden/compare/v1.7.0...HEAD
+[Unreleased]: https://github.com/nishantsny/browden/compare/v1.8.0...HEAD
+[1.8.0]: https://github.com/nishantsny/browden/compare/v1.7.0...v1.8.0
 [1.7.0]: https://github.com/nishantsny/browden/compare/v1.6.0...v1.7.0
 [1.6.0]: https://github.com/nishantsny/browden/compare/v1.5.0...v1.6.0
 [1.5.0]: https://github.com/nishantsny/browden/compare/v1.4.0...v1.5.0
