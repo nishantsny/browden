@@ -14,6 +14,11 @@ class TabInfo:
     title: str
     selected: bool
     profile_dir: str
+    # Whether the tab lives in the session's incognito browser context: its own
+    # cookie jar and storage, nothing kept on disk, invisible to the profile's
+    # normal tabs and vice versa. Defaulted so the ordinary case constructs
+    # unchanged.
+    incognito: bool = False
 
     def as_dict(self, id: str) -> dict[str, str | bool]:
         """The wire shape for a tab.
@@ -29,4 +34,5 @@ class TabInfo:
             "title": self.title,
             "selected": self.selected,
             "profile_dir": self.profile_dir,
+            "incognito": self.incognito,
         }

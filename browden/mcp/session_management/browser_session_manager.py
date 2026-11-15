@@ -248,8 +248,13 @@ class BrowserSessionManager:
             result.append(t.as_dict(id=self._id(t.handle)))
         return result
 
-    async def new_blank_tab(self, max_tabs: int) -> dict:
+    async def new_blank_tab(self, max_tabs: int, incognito: bool = False) -> dict:
         """Open a blank tab, reclaiming idle ones first if the session is full.
+
+        ``incognito`` opens it in this session's incognito browser context (see
+        ``WebNavigatorBackend.new_blank_tab``); it counts against the same tab
+        cap and is reaped the same way, because it is an ordinary tab of this
+        session in every respect but its storage.
 
         The cap is judged on the live tab count, inside the same driver op that
         opens the tab, so the check can't go stale between deciding and acting.
@@ -265,7 +270,7 @@ class BrowserSessionManager:
         def work():
             if len(self._backend.list_handles()) >= max_tabs:
                 raise _AtTabCap
-            return self._backend.new_blank_tab()
+            return self._backend.new_blank_tab(incognito=incognito)
         try:
             tab = await self._run_driver(work)
         except _AtTabCap:

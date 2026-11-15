@@ -9,6 +9,7 @@ from pathlib import Path
 
 from ...common import secret_portal
 from ...common.logger import logger
+from . import cdp
 from ...common.origin import url_origin
 from ...common.tab import TabInfo
 from ...dependencies.selenium import (
@@ -449,6 +450,18 @@ class SeleniumChromeBackend(WebNavigatorBackend):
         self._driver = None
         self._chrome_proc = None
         self._profile_dir = Path(profile_dir).expanduser()
+        # The DevTools port of the Chrome we launched. Kept because the
+        # browser-level CDP socket (incognito tabs, see cdp.py) needs it, and
+        # only the launch knows it. Cleared by _teardown with the process.
+        self._devtools_port: int | None = None
+        # The session's one incognito browser context, created on first use and
+        # disposed when its last tab closes — which is where Chrome itself ends
+        # an incognito session. One context, not one per tab, so that two
+        # incognito tabs share a cookie jar exactly as two incognito windows do.
+        self._incognito_context: str | None = None
+        # Handles living in that context, so list_tabs can report which tabs are
+        # incognito and close_tab can tell when the last one has gone.
+        self._incognito_handles: set[str] = set()
         # Per-tab iframe focus. handle -> ordered list of iframe CSS selectors
         # (the path from the top document to the currently-focused frame). Empty /
         # absent means the tab is focused on its top document. switch_to.window
@@ -494,6 +507,11 @@ class SeleniumChromeBackend(WebNavigatorBackend):
             self._driver = None
         _terminate(self._chrome_proc)
         self._chrome_proc = None
+        # The incognito context lived inside that Chrome, so it is gone too —
+        # and its id must not be reused against the next launch's port.
+        self._devtools_port = None
+        self._incognito_context = None
+        self._incognito_handles.clear()
 
     def _session_alive(self, check_current: bool) -> bool:
         """Whether the attached driver is live; tears it down (no relaunch) on failure.
@@ -534,6 +552,7 @@ class SeleniumChromeBackend(WebNavigatorBackend):
             profile = self._profile_dir
             logger.info(f"Starting new Chrome session (profile={profile})")
             self._chrome_proc, port = _launch_chrome(profile)
+            self._devtools_port = port
             # Attach to the Chrome we just launched instead of letting
             # chromedriver spawn its own (automation-flagged) instance.
             opts = ChromeOptions()
@@ -552,12 +571,14 @@ class SeleniumChromeBackend(WebNavigatorBackend):
         reload) all read the same fields off the focused window and only differ in
         ``selected`` — so callers switch to the window they mean, then ask here.
         """
+        handle = drv.current_window_handle
         return TabInfo(
-            handle=drv.current_window_handle,
+            handle=handle,
             url=drv.current_url,
             title=drv.title,
             selected=selected,
             profile_dir=str(self._profile_dir),
+            incognito=handle in self._incognito_handles,
         )
 
     @staticmethod
@@ -590,9 +611,33 @@ class SeleniumChromeBackend(WebNavigatorBackend):
     def list_handles(self) -> list[str]:
         return list(self._drv().window_handles)
 
-    def new_blank_tab(self) -> TabInfo:
+    def new_blank_tab(self, incognito: bool = False) -> TabInfo:
         drv = self._drv()
-        drv.switch_to.new_window("tab")
+        if not incognito:
+            drv.switch_to.new_window("tab")
+            return self._tabinfo(drv, selected=True)
+
+        # An incognito tab is a page target in an incognito *browser context*,
+        # which only the browser-level CDP socket can create (see cdp.py).
+        # Everything after that is an ordinary selenium window handle.
+        #
+        # The context stays inside this same Chrome and this same profile
+        # directory, which is the point: the tab is isolated from the profile's
+        # cookies and storage, but it is still this profile's session, so it is
+        # still governed by this profile's allowlist rules. Routing it to some
+        # other profile_dir would have silently moved it out from under them.
+        if self._devtools_port is None:                     # pragma: no cover - _drv guarantees it
+            raise RuntimeError("no DevTools port for the running Chrome")
+        if self._incognito_context is None:
+            self._incognito_context = cdp.create_browser_context(self._devtools_port)
+            logger.info(f"Opened an incognito browser context (profile={self._profile_dir})")
+        handle = cdp.create_target(self._devtools_port, self._incognito_context)
+        self._incognito_handles.add(handle)
+        # chromedriver lists targets from other browser contexts, so the new
+        # handle is switchable like any other; select it so the caller gets the
+        # same "new tab is selected" contract as a normal tab.
+        _switch(drv, handle)
+        self._focused = handle
         return self._tabinfo(drv, selected=True)
 
     def close_tab(self, handle: str) -> None:
@@ -603,6 +648,7 @@ class SeleniumChromeBackend(WebNavigatorBackend):
         drv.close()
         self._forget_frames(handle)  # the closed tab's frame focus
         self._frame_lost.discard(handle)
+        self._drop_incognito(handle)
         # drv.close() leaves the driver focused on the now-dead handle. The next
         # command — or _drv()'s health check, which reads current_window_handle —
         # would then mistake the session for dead and relaunch the whole browser,
@@ -611,6 +657,30 @@ class SeleniumChromeBackend(WebNavigatorBackend):
         remaining = drv.window_handles
         if remaining:
             drv.switch_to.window(remaining[0])
+
+    def _drop_incognito(self, handle: str) -> None:
+        """Forget a closed incognito tab; dispose the context with the last one.
+
+        Chrome ends an incognito session when its last window closes, taking the
+        cookies with it. Mirroring that here means an agent can actually rely on
+        "close the incognito tab and that session is gone", rather than leaving a
+        context alive for the life of the browser for a later incognito tab to
+        inherit.
+        """
+        if handle not in self._incognito_handles:
+            return
+        self._incognito_handles.discard(handle)
+        if self._incognito_handles or self._incognito_context is None:
+            return
+        context, self._incognito_context = self._incognito_context, None
+        if self._devtools_port is None:                     # pragma: no cover - set with the launch
+            return
+        try:
+            cdp.dispose_browser_context(self._devtools_port, context)
+        except cdp.CdpError as e:
+            # Best-effort: the context dies with the browser anyway, so this
+            # costs memory until shutdown, never correctness.
+            logger.warning(f"Could not dispose the incognito browser context: {e}")
 
     def select_tab(self, handle: str) -> None:
         _switch(self._drv(), handle)

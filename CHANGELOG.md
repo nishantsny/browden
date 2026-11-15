@@ -7,6 +7,26 @@ All notable changes to browden are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+- **`new_blank_tab(incognito=true)`: a tab that starts signed out.** It gets its
+  own cookie jar and storage, cannot see the profile's cookies (so none of its
+  logins apply) and is not seen by them, and persists nothing. Useful for reading
+  a site as a logged-out visitor, or signing into a second account without
+  disturbing the profile's own session. Defaults to `false`, and the ordinary tab
+  path is untouched — no CDP call, no new failure mode.
+
+  The tab stays in the **same** profile and session, so the profile's allowlist
+  rules govern it exactly as before; routing it to a different `profile_dir`
+  would have moved it out from under those rules, which is deliberately not what
+  this does. Implemented as an incognito *browser context*, created over Chrome's
+  browser-level DevTools socket (`browden/web_navigator/selenium_chrome/cdp.py`)
+  because chromedriver's own CDP session is page-scoped and answers
+  `Target.createBrowserContext` with `{"code": -32000, "message": "Not allowed"}`.
+  Selenium drives the resulting target like any other tab. A session's incognito
+  tabs share one context, as incognito windows do; closing the last of them
+  disposes it, so a later incognito tab cannot inherit the earlier one's logins.
+  `list_tabs` and the `new_blank_tab` result now carry an `incognito` boolean.
+
 ## [1.7.0] — 2026-11-10
 
 ### Added

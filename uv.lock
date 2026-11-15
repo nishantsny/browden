@@ -72,6 +72,7 @@ dependencies = [
     { name = "pydantic" },
     { name = "pyyaml" },
     { name = "selenium" },
+    { name = "websocket-client" },
 ]
 
 [package.optional-dependencies]
@@ -94,6 +95,7 @@ requires-dist = [
     { name = "pyyaml", specifier = ">=6.0" },
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.8" },
     { name = "selenium", specifier = ">=4.20" },
+    { name = "websocket-client", specifier = ">=1.8" },
 ]
 provides-extras = ["dev"]
 

@@ -70,9 +70,10 @@ class FakeBackend:
             raise RuntimeError("list_handles unavailable")
         return list(self.live)
 
-    def new_blank_tab(self):
-        self.calls.append("new_blank_tab")
-        return TabInfo(handle="h2", url="about:blank", title="t", selected=True, profile_dir=self.profile_dir)
+    def new_blank_tab(self, incognito=False):
+        self.calls.append(("new_blank_tab", incognito) if incognito else "new_blank_tab")
+        return TabInfo(handle="h2", url="about:blank", title="t", selected=True,
+                       profile_dir=self.profile_dir, incognito=incognito)
 
     def close_tab(self, handle):
         self.calls.append(("close_tab", handle))
@@ -749,13 +750,13 @@ class LiveCountBackend(FakeBackend):
         self.live = {"h1"}  # one tab already open
         self._next = 1
 
-    def new_blank_tab(self):
-        self.calls.append("new_blank_tab")
+    def new_blank_tab(self, incognito=False):
+        self.calls.append(("new_blank_tab", incognito) if incognito else "new_blank_tab")
         self._next += 1
         handle = f"h{self._next}"
         self.live.add(handle)
         return TabInfo(handle=handle, url="about:blank", title="t",
-                       selected=True, profile_dir=self.profile_dir)
+                       selected=True, profile_dir=self.profile_dir, incognito=incognito)
 
     def close_tab(self, handle):
         super().close_tab(handle)
