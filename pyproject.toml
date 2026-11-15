@@ -16,6 +16,11 @@ dependencies = [
   # Already in the tree as an mcp dependency; declared here because we import it.
   "pydantic>=2,<3",
   "selenium>=4.20",
+  # Direct import: the browser-level CDP socket that opens an incognito browser
+  # context (see web_navigator/selenium_chrome/cdp.py), which chromedriver's
+  # own page-scoped CDP session refuses to do.
+  # Already in the tree as a selenium dependency; declared here because we import it.
+  "websocket-client>=1.8",
   "beautifulsoup4>=4.12",
   "pyyaml>=6.0",
   "publicsuffix2>=2.2019",

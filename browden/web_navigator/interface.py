@@ -116,10 +116,14 @@ class WebNavigatorBackend(ABC):
         """Return the ids of all open tabs, cheaply (no per-tab metadata / focus changes)."""
 
     @abstractmethod
-    def new_blank_tab(self) -> TabInfo:
+    def new_blank_tab(self, incognito: bool = False) -> TabInfo:
         """Open a new empty tab and return it.
 
-        The new tab is selected.
+        The new tab is selected. With ``incognito``, it is opened in the
+        session's incognito browser context: isolated from the profile's cookies
+        and storage, persisting nothing, and sharing that context with the
+        session's other incognito tabs. It remains a tab of *this* profile, so
+        the profile's access rules still govern it.
         """
 
     @abstractmethod

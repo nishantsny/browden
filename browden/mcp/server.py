@@ -44,7 +44,7 @@ DEFAULT_PORT = 8000
 RUNTIME_PROFILE_DESCRIPTION = "none, created at runtime"
 
 _INSTRUCTIONS = (
-    "browden drives a real Chrome session. Within a single profile-dir there is ONE browser session. You can open multiple tabs within that one session, and you may fire concurrent requests at them: selenium (the underlying automation library) is not thread-safe, so a session serves its requests one at a time behind a lock, each re-selecting its own tab when its turn comes. A request that waits more than 10s for its turn comes back with a 'browser session busy' error; retry it. A new profile-dir can be chosen while creating a new tab. If you choose a previously used profile-dir, then the previous session will be reused. Creating a new tab will return a tab-id which is unique across all sessions, pass it back verbatim on other tools. A tab must be selected before any operation acts on it: passing a tool the tab's id selects that tab, and only one tab per session can be selected at a time. Before opening a tab, call list_profiles to see which profiles the operator has configured and what each one is for (which logins it holds, what it may do), and pass the profile_dir of the one that fits the task to new_blank_tab."
+    "browden drives a real Chrome session. Within a single profile-dir there is ONE browser session. You can open multiple tabs within that one session, and you may fire concurrent requests at them: selenium (the underlying automation library) is not thread-safe, so a session serves its requests one at a time behind a lock, each re-selecting its own tab when its turn comes. A request that waits more than 10s for its turn comes back with a 'browser session busy' error; retry it. A new profile-dir can be chosen while creating a new tab. If you choose a previously used profile-dir, then the previous session will be reused. Creating a new tab will return a tab-id which is unique across all sessions, pass it back verbatim on other tools. A tab must be selected before any operation acts on it: passing a tool the tab's id selects that tab, and only one tab per session can be selected at a time. Before opening a tab, call list_profiles to see which profiles the operator has configured and what each one is for (which logins it holds, what it may do), and pass the profile_dir of the one that fits the task to new_blank_tab. Pass incognito=true to new_blank_tab for a tab that starts signed out, with its own cookie jar that is discarded when the tab closes; it stays in the same profile, so the same allowlist rules apply."
 )
 
 
@@ -241,19 +241,28 @@ async def list_profiles() -> list[dict]:
 
 
 @mcp.tool()
-async def new_blank_tab(profile_dir: str | None = None) -> dict:
+async def new_blank_tab(profile_dir: str | None = None, incognito: bool = False) -> dict:
     """Open a new blank tab and return it (navigate it afterwards).
 
     Optional profile_dir runs the request in an independent Chrome profile; the
     returned id is only valid for that same profile. Call list_profiles to see
     which profiles are configured and what each is for.
 
+    Set incognito=True for a tab that starts signed out: it gets its own cookie
+    jar and storage, cannot see the profile's cookies (so none of the profile's
+    logins apply) and is not seen by them, and keeps nothing once it closes. It
+    is still a tab of the same profile, so that profile's allowlist rules apply
+    unchanged. The session's incognito tabs share one context, as incognito
+    windows do; closing the last of them ends that context and discards its
+    cookies. Use it to see a site as a logged-out visitor, or to log into a
+    second account without disturbing the profile's own session.
+
     Only one tab can be driven at a time within a profile: concurrent requests
     to a profile's tabs are safe but are served one after another (each
     re-selects its own tab), so they do not run in parallel. Use separate
     profile_dirs for genuine parallelism.
     """
-    logger.info(f"Tool called: new_blank_tab (profile_dir={profile_dir!r})")
+    logger.info(f"Tool called: new_blank_tab (profile_dir={profile_dir!r}, incognito={incognito})")
     try:
         session = _store.get_or_create_session(
             _backend_for(profile_dir),
@@ -261,7 +270,8 @@ async def new_blank_tab(profile_dir: str | None = None) -> dict:
             # A getter, not a value: the session's reaper re-reads it every tick,
             # so an infra.reap_interval_seconds edit lands without a restart.
             reap_interval_seconds=lambda: _refresher.runtime_configuration.reap_interval_seconds)
-        result = await session.new_blank_tab(max_tabs=_refresher.runtime_configuration.max_tabs_per_session)  # wire dict with composite id
+        result = await session.new_blank_tab(max_tabs=_refresher.runtime_configuration.max_tabs_per_session,
+                                             incognito=incognito)  # wire dict with composite id
     except RuntimeError as e:
         return {"error": str(e)}
     logger.info("Tool finished: new_blank_tab")
