@@ -1,10 +1,14 @@
 """The ``software_webgl`` parameter from the wire inwards.
 
-Two boundaries meet here. The tool takes ``0``/``1``/absent — a value an agent
-types, so anything else must be refused with a message rather than guessed at —
-and the session manager turns that into one backend mode switch, plus the
-bookkeeping a relaunch forces: the tabs of the browser that was replaced are
-gone, so their ids and cached DOM must go with them.
+Two boundaries meet here. The tool takes a plain boolean defaulting to false, so
+every call states the mode it wants rather than toggling anything — and the
+session manager turns that into one backend mode switch, plus the bookkeeping a
+relaunch forces: the tabs of the browser that was replaced are gone, so their
+ids and cached DOM must go with them.
+
+The sharp edge of a mode with a default is pinned deliberately below: a plain
+``new_blank_tab()`` after an opt-in one asks for software WebGL *off*, and so
+replaces the browser and takes the earlier tabs with it.
 """
 import pytest
 
@@ -25,15 +29,17 @@ def _session(backend):
 
 
 @pytest.mark.asyncio
-async def test_omitting_it_never_touches_the_mode(monkeypatch):
+async def test_the_default_is_off_and_costs_nothing():
     backend = LiveCountBackend()
     session = _session(backend)
 
     result = await session.new_blank_tab(max_tabs=10)
 
-    # Not even a call to ask: the running browser must be left exactly as it is.
-    assert not any(c[0] == "set_software_webgl" for c in backend.calls if isinstance(c, tuple))
-    assert result["software_webgl"] == 0
+    # The mode is asked for on every call, but a browser already in it is left
+    # strictly alone: no relaunch, so the ordinary path pays nothing.
+    assert ("set_software_webgl", False) in backend.calls
+    assert backend.relaunches == []
+    assert result["software_webgl"] is False
     assert result["relaunched"] is False
 
 
@@ -46,7 +52,7 @@ async def test_asking_for_it_switches_the_mode_and_reports_the_relaunch():
 
     assert ("set_software_webgl", True) in backend.calls
     assert backend.relaunches == [True]
-    assert result["software_webgl"] == 1
+    assert result["software_webgl"] is True
     assert result["relaunched"] is True
 
 
@@ -59,11 +65,27 @@ async def test_asking_twice_relaunches_once():
     second = await session.new_blank_tab(max_tabs=10, software_webgl=True)
 
     # The second tab carries the same preference and pays nothing for it, which
-    # is what lets a caller pass the mode it wants on every tab it opens.
+    # is why a caller that needs software WebGL should pass it on every tab.
     assert backend.relaunches == [True]
     assert first["relaunched"] is True
     assert second["relaunched"] is False
-    assert second["software_webgl"] == 1
+    assert second["software_webgl"] is True
+
+
+@pytest.mark.asyncio
+async def test_a_plain_call_afterwards_turns_it_back_off():
+    backend = LiveCountBackend()
+    session = _session(backend)
+
+    await session.new_blank_tab(max_tabs=10, software_webgl=True)
+    plain = await session.new_blank_tab(max_tabs=10)
+
+    # Leaving the parameter out is not "no opinion", it is "off" — so this call
+    # replaces the browser a second time. The result says so rather than letting
+    # the caller discover it through dead tab ids.
+    assert backend.relaunches == [True, False]
+    assert plain["software_webgl"] is False
+    assert plain["relaunched"] is True
 
 
 @pytest.mark.asyncio
@@ -100,7 +122,7 @@ async def test_no_relaunch_keeps_the_other_tabs():
     session = _session(backend)
     session._registry.touch("h1")
 
-    await session.new_blank_tab(max_tabs=10, software_webgl=False)   # already off
+    await session.new_blank_tab(max_tabs=10)          # already off
 
     assert sorted(session._registry.tracked_ids()) == ["h1", "h2"]
 
@@ -118,38 +140,24 @@ async def test_the_new_tabs_id_is_the_one_that_survives():
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("value", [2, 20, 201, -1, 42])
-async def test_the_tool_refuses_anything_but_0_or_1(value):
-    # The parameter has exactly two meanings and no third; a 20 is a mistake,
-    # and reading it as "on" would silently relaunch someone's browser.
-    from browden.mcp import server
-
-    result = await server.new_blank_tab(software_webgl=value)
-
-    assert "error" in result
-    assert "0 or 1" in result["error"]
-    assert str(value) in result["error"]
-
-
-@pytest.mark.asyncio
-async def test_the_tool_passes_a_mode_not_a_number(monkeypatch):
-    """0/1 is the wire's vocabulary; the manager is given a bool."""
+async def test_the_tool_defaults_the_mode_to_off(monkeypatch):
+    """What the tool hands the session when the caller says nothing: false."""
     from browden.mcp import server
 
     seen = {}
 
     class FakeSession:
-        async def new_blank_tab(self, max_tabs, incognito=False, software_webgl=None):
+        async def new_blank_tab(self, max_tabs, incognito=False, software_webgl=False):
             seen["software_webgl"] = software_webgl
             return {"id": "ns-h1"}
 
     monkeypatch.setattr(server._store, "get_or_create_session", lambda *a, **k: FakeSession())
 
-    await server.new_blank_tab(software_webgl=1)
-    assert seen["software_webgl"] is True
-
-    await server.new_blank_tab(software_webgl=0)
+    await server.new_blank_tab()
     assert seen["software_webgl"] is False
 
-    await server.new_blank_tab()
-    assert seen["software_webgl"] is None
+    await server.new_blank_tab(software_webgl=True)
+    assert seen["software_webgl"] is True
+
+    await server.new_blank_tab(software_webgl=False)
+    assert seen["software_webgl"] is False

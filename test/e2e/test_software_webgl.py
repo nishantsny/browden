@@ -109,7 +109,7 @@ async def _open(session, **kwargs):
 async def test_the_default_browser_runs_without_the_flag(session, profile):
     tab = await _open(session)
 
-    assert tab["software_webgl"] == 0
+    assert tab["software_webgl"] is False
     assert tab["relaunched"] is False
     assert not _launched_with_flag(profile)
 
@@ -121,7 +121,7 @@ async def test_asking_for_software_webgl_relaunches_chrome_with_the_flag(session
 
     tab = await _open(session, software_webgl=True)
 
-    assert tab["software_webgl"] == 1
+    assert tab["software_webgl"] is True
     assert tab["relaunched"] is True
     assert _launched_with_flag(profile)
 
@@ -174,21 +174,24 @@ async def test_turning_it_off_again_relaunches_without_the_flag(session, profile
 
     tab = await _open(session, software_webgl=False)
 
-    assert tab["software_webgl"] == 0
+    assert tab["software_webgl"] is False
     assert tab["relaunched"] is True
     assert not _launched_with_flag(profile)
 
 
 @pytest.mark.asyncio
-async def test_omitting_it_leaves_the_browser_alone(session, profile, site):
+async def test_a_plain_call_asks_for_it_off_again(session, profile, site):
     await _open(session, software_webgl=True)
-    keeper = await _open(session, software_webgl=True)
+    doomed = await _open(session, software_webgl=True)
+    assert _launched_with_flag(profile)
 
     plain = await _open(session)
 
-    # No argument means no opinion: same browser, same tabs, mode untouched.
-    assert plain["relaunched"] is False
-    assert plain["software_webgl"] == 1
-    assert _launched_with_flag(profile)
-    result = await session.navigate(f"{site}/page", id=keeper["id"], gate=OPEN_READ_GATE)
-    assert result["id"] == keeper["id"]
+    # The parameter defaults to false, so leaving it out is a request, not
+    # silence: this browser is replaced by one without the flag, and the tabs
+    # of the opted-in session go with it.
+    assert plain["relaunched"] is True
+    assert plain["software_webgl"] is False
+    assert not _launched_with_flag(profile)
+    result = await session.navigate(f"{site}/page", id=doomed["id"], gate=OPEN_READ_GATE)
+    assert "error" in result

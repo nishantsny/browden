@@ -303,7 +303,7 @@ def _chrome_args(profile_dir: Path, port: int, software_webgl: bool = False) -> 
         "--no-default-browser-check",
     ]
     if software_webgl:
-        # Opt-in per session (new_blank_tab's software_webgl=1), off by default.
+        # Opt-in per session (new_blank_tab's software_webgl=true), off by default.
         #
         # On a GPU-less host — VMs and containers, this Hyper-V box among them:
         # hyperv_drm exposes no DRM render node, so ANGLE/EGL cannot initialise
@@ -521,7 +521,7 @@ class SeleniumChromeBackend(WebNavigatorBackend):
         if enabled == self._software_webgl:
             return False
         self._software_webgl = enabled
-        logger.info(f"Switching to software_webgl={int(enabled)} "
+        logger.info(f"Switching to software_webgl={enabled} "
                     f"(profile={self._profile_dir}); the running Chrome, if any, is relaunched")
         if not self.is_running():
             return False
@@ -597,7 +597,7 @@ class SeleniumChromeBackend(WebNavigatorBackend):
         if not self._session_alive(True):
             profile = self._profile_dir
             logger.info(f"Starting new Chrome session "
-                        f"(profile={profile}, software_webgl={int(self._software_webgl)})")
+                        f"(profile={profile}, software_webgl={self._software_webgl})")
             self._chrome_proc, port = _launch_chrome(profile, self._software_webgl)
             self._devtools_port = port
             # Attach to the Chrome we just launched instead of letting

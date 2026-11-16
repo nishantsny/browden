@@ -44,7 +44,7 @@ DEFAULT_PORT = 8000
 RUNTIME_PROFILE_DESCRIPTION = "none, created at runtime"
 
 _INSTRUCTIONS = (
-    "browden drives a real Chrome session. Within a single profile-dir there is ONE browser session. You can open multiple tabs within that one session, and you may fire concurrent requests at them: selenium (the underlying automation library) is not thread-safe, so a session serves its requests one at a time behind a lock, each re-selecting its own tab when its turn comes. A request that waits more than 10s for its turn comes back with a 'browser session busy' error; retry it. A new profile-dir can be chosen while creating a new tab. If you choose a previously used profile-dir, then the previous session will be reused. Creating a new tab will return a tab-id which is unique across all sessions, pass it back verbatim on other tools. A tab must be selected before any operation acts on it: passing a tool the tab's id selects that tab, and only one tab per session can be selected at a time. Before opening a tab, call list_profiles to see which profiles the operator has configured and what each one is for (which logins it holds, what it may do), and pass the profile_dir of the one that fits the task to new_blank_tab. Pass incognito=true to new_blank_tab for a tab that starts signed out, with its own cookie jar that is discarded when the tab closes; it stays in the same profile, so the same allowlist rules apply. If a site needs WebGL and this host has no GPU, pass software_webgl=1 to new_blank_tab, which relaunches that profile's Chrome with software WebGL and therefore closes its other tabs — so ask for it on the first tab of a session, not later."
+    "browden drives a real Chrome session. Within a single profile-dir there is ONE browser session. You can open multiple tabs within that one session, and you may fire concurrent requests at them: selenium (the underlying automation library) is not thread-safe, so a session serves its requests one at a time behind a lock, each re-selecting its own tab when its turn comes. A request that waits more than 10s for its turn comes back with a 'browser session busy' error; retry it. A new profile-dir can be chosen while creating a new tab. If you choose a previously used profile-dir, then the previous session will be reused. Creating a new tab will return a tab-id which is unique across all sessions, pass it back verbatim on other tools. A tab must be selected before any operation acts on it: passing a tool the tab's id selects that tab, and only one tab per session can be selected at a time. Before opening a tab, call list_profiles to see which profiles the operator has configured and what each one is for (which logins it holds, what it may do), and pass the profile_dir of the one that fits the task to new_blank_tab. Pass incognito=true to new_blank_tab for a tab that starts signed out, with its own cookie jar that is discarded when the tab closes; it stays in the same profile, so the same allowlist rules apply. If a site needs WebGL and this host has no GPU, pass software_webgl=true to new_blank_tab, which relaunches that profile's Chrome with software WebGL and therefore closes its other tabs; it defaults to false, so pass it on every tab of that session or the next plain new_blank_tab relaunches the browser without it."
 )
 
 
@@ -242,7 +242,7 @@ async def list_profiles() -> list[dict]:
 
 @mcp.tool()
 async def new_blank_tab(profile_dir: str | None = None, incognito: bool = False,
-                        software_webgl: int | None = None) -> dict:
+                        software_webgl: bool = False) -> dict:
     """Open a new blank tab and return it (navigate it afterwards).
 
     Only one tab can be driven at a time within a profile: concurrent requests
@@ -268,29 +268,26 @@ async def new_blank_tab(profile_dir: str | None = None, incognito: bool = False,
         cookies. Use it to see a site as a logged-out visitor, or to log into a
         second account without disturbing the profile's own session.
 
-    software_webgl (optional, 0 or 1; omit to change nothing)
-        Whether this profile's Chrome offers WebGL rendered in software. Pass 1
-        when a site needs WebGL and this host has no GPU — a browser that
+    software_webgl (optional, default: false)
+        Whether this profile's Chrome offers WebGL rendered in software. Pass
+        true when a site needs WebGL and this host has no GPU — a browser that
         reports no WebGL at all is read as a bot by some sites, which then
-        refuse to serve their data. Pass 0 to go back. Omit it (the default) and
-        the browser is left exactly as it is; a profile whose mode has never
-        been set runs without software WebGL.
+        refuse to serve their data.
+
+        Every call states the mode it wants, and leaving it out means false, so
+        a later plain new_blank_tab on the same profile asks for software WebGL
+        to be *off* again. Pass true on every tab of a session that needs it.
 
         Changing the mode **relaunches this profile's Chrome**, because the
         setting can only be chosen as the browser starts. Every other tab of
-        that profile closes with it and its id stops working, so set the mode on
-        the first tab of a session rather than later. Asking for the mode
-        already in force costs nothing and closes nothing.
+        that profile closes with it and its id stops working. Asking for the
+        mode already in force costs nothing and closes nothing.
 
-        The result reports the mode in force as software_webgl (0 or 1) and says
-        whether this call relaunched the browser as relaunched (true or false).
+        The result reports the mode in force as software_webgl (true or false)
+        and says whether this call relaunched the browser as relaunched.
     """
     logger.info(f"Tool called: new_blank_tab (profile_dir={profile_dir!r}, "
-                f"incognito={incognito}, software_webgl={software_webgl!r})")
-    if software_webgl not in (None, 0, 1):
-        # One value, two meanings, no third: 0 off, 1 on, absent leave alone.
-        return {"error": f"software_webgl must be 0 or 1, or omitted to leave the "
-                         f"browser as it is (got {software_webgl!r})"}
+                f"incognito={incognito}, software_webgl={software_webgl})")
     try:
         session = _store.get_or_create_session(
             _backend_for(profile_dir),
@@ -300,9 +297,7 @@ async def new_blank_tab(profile_dir: str | None = None, incognito: bool = False,
             reap_interval_seconds=lambda: _refresher.runtime_configuration.reap_interval_seconds)
         result = await session.new_blank_tab(max_tabs=_refresher.runtime_configuration.max_tabs_per_session,
                                              incognito=incognito,
-                                             # 0/1 on the wire, a mode inside
-                                             software_webgl=(None if software_webgl is None
-                                                             else bool(software_webgl)),
+                                             software_webgl=software_webgl,
                                              )  # wire dict with composite id
     except RuntimeError as e:
         return {"error": str(e)}

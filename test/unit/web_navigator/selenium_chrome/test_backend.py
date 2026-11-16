@@ -176,7 +176,7 @@ def test_chrome_args_have_no_automation_flags(tmp_path, monkeypatch):
     assert "--test-type" not in joined
     # Headed by default: no headless switch unless asked for.
     assert not any(a.startswith("--headless") for a in args)
-    # The software WebGL fallback is opt-in (new_blank_tab's software_webgl=1),
+    # The software WebGL fallback is opt-in (new_blank_tab's software_webgl=true),
     # because it exposes a software shader JIT to page scripts — issue #29.
     assert "--enable-unsafe-swiftshader" not in args
 
