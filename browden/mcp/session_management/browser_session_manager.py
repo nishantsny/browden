@@ -248,13 +248,25 @@ class BrowserSessionManager:
             result.append(t.as_dict(id=self._id(t.handle)))
         return result
 
-    async def new_blank_tab(self, max_tabs: int, incognito: bool = False) -> dict:
+    async def new_blank_tab(self, max_tabs: int, incognito: bool = False,
+                            software_webgl: bool = False) -> dict:
         """Open a blank tab, reclaiming idle ones first if the session is full.
 
         ``incognito`` opens it in this session's incognito browser context (see
         ``WebNavigatorBackend.new_blank_tab``); it counts against the same tab
         cap and is reaped the same way, because it is an ordinary tab of this
         session in every respect but its storage.
+
+        ``software_webgl`` is the WebGL mode this call asks the session for (see
+        ``WebNavigatorBackend.set_software_webgl``), applied before the tab is
+        opened. It is a mode, not an event: every call states one, and the
+        default is off, so a caller that wants software WebGL must say so on
+        every tab it opens. Only a *change* costs anything, and it costs the
+        whole browser — the new tab is then the only one that survives, the ids
+        of the old browser's tabs are dropped here the same way a reap drops
+        them, and the result says whether that happened. The switch runs inside
+        the driver hold, so no other request can be mid-op in the browser being
+        replaced.
 
         The cap is judged on the live tab count, inside the same driver op that
         opens the tab, so the check can't go stale between deciding and acting.
@@ -267,7 +279,15 @@ class BrowserSessionManager:
         "session limit reached" now means there was nothing idle left to reclaim,
         not merely that the reaper hadn't ticked yet.
         """
+        relaunched = False
+
         def work():
+            nonlocal relaunched
+            # Before the cap check: on a relaunch the browser comes back with
+            # one tab, so the count to judge is the new browser's, not the one
+            # we just replaced. A no-op when the mode is already in force, which
+            # is the ordinary case.
+            relaunched = self._backend.set_software_webgl(software_webgl) or relaunched
             if len(self._backend.list_handles()) >= max_tabs:
                 raise _AtTabCap
             return self._backend.new_blank_tab(incognito=incognito)
@@ -281,9 +301,29 @@ class BrowserSessionManager:
             except _AtTabCap:
                 raise RuntimeError(f"session limit of {max_tabs} tabs reached") from None
         logger.info(f"Created new tab: {tab.handle}")
+        if relaunched:
+            self._forget_tabs_of_replaced_browser(tab.handle)
         self._cache.invalidate(tab.handle)
         self._registry.touch(tab.handle)
-        return tab.as_dict(id=self._id(tab.handle))
+        result = tab.as_dict(id=self._id(tab.handle))
+        # Session facts, not tab facts: what mode the browser is in now, and
+        # whether getting there cost the caller its other tabs.
+        result["software_webgl"] = self._backend.software_webgl_enabled()
+        result["relaunched"] = relaunched
+        return result
+
+    def _forget_tabs_of_replaced_browser(self, surviving: str) -> None:
+        """Drop every tracked tab but ``surviving``: their browser is gone.
+
+        Runs on the loop thread, so it is atomic w.r.t. other coroutines. The
+        handles are not merely stale, they name windows in a process that has
+        exited — keeping them would hand a caller an id whose every use ends in
+        the tab-gone envelope, and keep its parsed DOM cached behind it.
+        """
+        for handle in self._registry.tracked_ids():
+            if handle != surviving:
+                self._cache.invalidate(handle)
+                self._registry.forget(handle)
 
     def _close_in_hold(self, handle: str) -> None:
         """Close ``handle``'s tab. Runs off the loop, inside the caller's driver hold.

@@ -44,6 +44,8 @@ class FakeBackend:
         self.live: set[str] | None = {"h1", "h2"}  # ids list_handles reports; None -> it raises
         self.close_raises = None  # set to an exception instance to simulate failure
         self.running = True  # what is_running reports
+        self.software_webgl = False  # the mode set_software_webgl last left
+        self.relaunches: list[bool] = []  # modes it was asked to switch to
 
     def _check(self, handle):
         if handle in self.missing:
@@ -58,6 +60,17 @@ class FakeBackend:
 
     def shutdown(self):
         self.calls.append("shutdown")
+
+    def software_webgl_enabled(self):
+        return self.software_webgl
+
+    def set_software_webgl(self, enabled):
+        self.calls.append(("set_software_webgl", enabled))
+        if enabled == self.software_webgl:
+            return False            # already in that mode: nothing relaunched
+        self.software_webgl = enabled
+        self.relaunches.append(enabled)
+        return self.running         # a relaunch only happens if a browser was up
 
     def list_tabs(self):
         self.calls.append("list_tabs")

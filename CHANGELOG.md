@@ -7,6 +7,32 @@ All notable changes to browden are documented here. The format follows
 
 ## [Unreleased]
 
+### Changed
+- **`--enable-unsafe-swiftshader` is no longer passed on every launch.** It is
+  now opt-in per session, as `new_blank_tab(software_webgl=true)`. The flag hands
+  page scripts a software shader JIT — the reason Chrome gates it — so it is
+  worth paying only where a site actually demands WebGL, rather than on every
+  tab by default.
+
+  What it bought is unchanged and still available: on a GPU-less host, Chrome
+  offers no WebGL at all (measured headful on the deployment box — with the
+  flag, WebGL 1 and 2 initialise and rasterise correctly; without it both
+  `getContext` calls return `null`), and a browser advertising zero WebGL is a
+  bot signal that gets order-data XHRs refused ([#29]). Sites that need it now
+  need `software_webgl=true`, which is the regression to watch for.
+
+  The parameter is a boolean defaulting to `false`, like `incognito`: every call
+  states the mode it wants, so a caller that needs software WebGL passes `true`
+  on every tab it opens, and a plain `new_blank_tab()` on the same profile asks
+  for it to be off again.
+
+  The flag can only be chosen as Chrome starts, so changing the mode relaunches
+  that profile's Chrome and closes its other tabs; their ids are dropped the way
+  a reap drops them. Asking for the mode already in force does nothing at all —
+  no relaunch, no teardown — which is what keeps the ordinary path free. The
+  `new_blank_tab` result reports the mode in force as `software_webgl` and
+  whether this call relaunched the browser as `relaunched`.
+
 ## [1.8.0] — 2026-11-14
 
 ### Added
@@ -63,6 +89,7 @@ All notable changes to browden are documented here. The format follows
   browser would die when that worker was recycled. The deployed unit's
   `KillMode=control-group` remains the backstop there.
 
+[#29]: https://github.com/nishantsny/browden/issues/29
 [#183]: https://github.com/nishantsny/browden/issues/183
 
 - **The post-navigation title wait no longer pays selenium's 500 ms poll

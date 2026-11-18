@@ -97,6 +97,26 @@ class WebNavigatorBackend(ABC):
         """True if a live browser is currently attached. Must never launch one."""
 
     @abstractmethod
+    def software_webgl_enabled(self) -> bool:
+        """Whether this profile's browser is running (or will start) with software WebGL."""
+
+    @abstractmethod
+    def set_software_webgl(self, enabled: bool) -> bool:
+        """Choose whether this profile's browser offers software-rendered WebGL.
+
+        On a host with no GPU, a browser that cannot reach a hardware renderer
+        offers no WebGL at all unless it is told to rasterise it in software.
+        Some sites read that absence as a bot signal and refuse to serve data,
+        so the mode is selectable per profile rather than fixed.
+
+        It is a launch-time choice, so a change means a new browser: implementations
+        stop the running one and start the next in the requested mode, returning
+        True when they did. Asking for the mode already in force must do nothing
+        and return False, so a caller may pass its preference on every tab it
+        opens. All of the session's tabs die with the old browser.
+        """
+
+    @abstractmethod
     def shutdown(self) -> None:
         """Quit the driver and stop the browser this backend launched.
 
