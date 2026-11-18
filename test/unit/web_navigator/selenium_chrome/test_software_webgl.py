@@ -220,12 +220,18 @@ def test_the_flag_is_the_only_difference_between_the_two_launches(be, chrome):
     assert [a for a in on if a != "--enable-unsafe-swiftshader"] == off
 
 
-def test_chrome_args_puts_the_flag_last_so_the_base_line_is_unchanged(tmp_path, monkeypatch):
+def test_the_flag_is_inserted_without_disturbing_the_rest_of_the_line(tmp_path, monkeypatch):
     monkeypatch.setenv("BROWDEN_CHROME_BINARY", "/usr/bin/google-chrome")
     monkeypatch.delenv("BROWDEN_HEADLESS", raising=False)
 
     base = _chrome_args(tmp_path / "p", 9222)
     with_flag = _chrome_args(tmp_path / "p", 9222, software_webgl=True)
 
-    assert with_flag[:len(base)] == base
-    assert "--enable-unsafe-swiftshader" in with_flag[len(base):]
+    # Not "the flag comes last": what follows it is whatever the host asks for
+    # (--password-store=..., --no-sandbox, the headless block), which differs by
+    # OS and by runner. The invariant is narrower and true everywhere — turning
+    # WebGL on adds that one argument and leaves every other one in place, in
+    # order, so the mode cannot quietly change the profile or the port policy.
+    assert [a for a in with_flag if a != "--enable-unsafe-swiftshader"] == base
+    assert (with_flag.index("--enable-unsafe-swiftshader")
+            > with_flag.index("--no-default-browser-check"))
