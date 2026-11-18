@@ -7,6 +7,8 @@ All notable changes to browden are documented here. The format follows
 
 ## [Unreleased]
 
+## [1.8.1] — 2026-11-18
+
 ### Changed
 - **`--enable-unsafe-swiftshader` is no longer passed on every launch.** It is
   now opt-in per session, as `new_blank_tab(software_webgl=true)`. The flag hands
@@ -661,7 +663,8 @@ Initial public release.
   service manager (systemd / launchd / Task Scheduler).
 - Apache-2.0.
 
-[Unreleased]: https://github.com/nishantsny/browden/compare/v1.8.0...HEAD
+[Unreleased]: https://github.com/nishantsny/browden/compare/v1.8.1...HEAD
+[1.8.1]: https://github.com/nishantsny/browden/compare/v1.8.0...v1.8.1
 [1.8.0]: https://github.com/nishantsny/browden/compare/v1.7.0...v1.8.0
 [1.7.0]: https://github.com/nishantsny/browden/compare/v1.6.0...v1.7.0
 [1.6.0]: https://github.com/nishantsny/browden/compare/v1.5.0...v1.6.0
