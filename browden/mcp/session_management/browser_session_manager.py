@@ -172,9 +172,11 @@ class BrowserSessionManager:
         backend handle, run ``work`` off the event loop (``work`` focuses/uses the
         tab and returns the *finished* result — including any post-processing, since
         it too runs off-loop), and on success touch the tab's registry entry —
-        invalidating its cached soup when ``invalidate`` (i.e. the op mutated the
-        DOM). If the tab has vanished (``TabNotFoundError``), drop it from cache +
-        registry and return the standard tab-gone envelope.
+        invalidating its cached soup when ``invalidate`` (a navigation, or an
+        explicit ``invalidate_dom_cache``; a write's invalidation is ``GatedPage``'s,
+        because it has to happen when the write fails too). If the tab has vanished
+        (``TabNotFoundError``), drop it from cache + registry and return the
+        standard tab-gone envelope.
 
         Every tab op that returns a wire envelope uses this. ``current_url`` is the
         one exception (it returns a bare URL / None, not an envelope) and keeps its
@@ -370,17 +372,18 @@ class BrowserSessionManager:
     async def click(self, css_selector: str, *, id: str, gate: WriteGate) -> dict:
         """Click ``css_selector`` on ``id`` if ``gate`` authorizes it, in one driver hold.
 
-        The soup cache is then invalidated because the DOM has changed.
+        ``GatedPage`` drops the tab's cached soup once the click has been
+        attempted, because the DOM may have changed.
         """
-        return await self._with_page(id, lambda page: page.click(css_selector, gate), invalidate=True)
+        return await self._with_page(id, lambda page: page.click(css_selector, gate))
 
     async def insert_text(self, css_selector: str, value: str, *, id: str, gate: WriteGate) -> dict:
         """Type ``value`` into ``css_selector`` on ``id`` if ``gate`` authorizes it, in one driver hold.
 
-        The soup cache is then invalidated because the DOM has changed.
+        ``GatedPage`` drops the tab's cached soup once the typing has been
+        attempted, because the DOM may have changed.
         """
-        return await self._with_page(id, lambda page: page.insert_text(css_selector, value, gate),
-                                     invalidate=True)
+        return await self._with_page(id, lambda page: page.insert_text(css_selector, value, gate))
 
     async def upload_file(self, css_selector: str, *, id: str, gate: UploadFileGate) -> dict:
         """Attach the file ``gate`` admitted to the input ``css_selector`` on ``id``.
@@ -389,21 +392,21 @@ class BrowserSessionManager:
         :meth:`GatedPage.upload_file`: the path that was judged is the only one
         anything downstream can reach.
 
-        The soup cache is then invalidated: setting a file input is a DOM change,
-        and pages routinely render the chosen filename next to the control.
+        ``GatedPage`` drops the tab's cached soup once the upload has been
+        attempted: setting a file input is a DOM change, and pages routinely
+        render the chosen filename next to the control.
         """
-        return await self._with_page(id, lambda page: page.upload_file(css_selector, gate),
-                                     invalidate=True)
+        return await self._with_page(id, lambda page: page.upload_file(css_selector, gate))
 
     async def press_key(self, css_selector: str, key: str, *, id: str, gate: WriteGate) -> dict:
         """Press ``key`` on ``css_selector`` on ``id`` if ``gate`` authorizes it, in one driver hold.
 
         ``gate`` must be the one built for this same ``key`` (``press_key_gate``).
-        The soup cache is invalidated because the key may have changed the DOM
-        (activated a control, moved a selection).
+        ``GatedPage`` drops the tab's cached soup once the press has been
+        attempted, because the key may have changed the DOM (activated a control,
+        moved a selection).
         """
-        return await self._with_page(id, lambda page: page.press_key(css_selector, key, gate),
-                                     invalidate=True)
+        return await self._with_page(id, lambda page: page.press_key(css_selector, key, gate))
 
     # -- frame navigation ---------------------------------------------------
     #

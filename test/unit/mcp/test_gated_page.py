@@ -52,6 +52,10 @@ class _Clock:
         return self.t
 
 
+class _ActionFailed(Exception):
+    """What the driver raises when an action breaks off partway."""
+
+
 class PageBackend:
     """One tab at ``url``. ``drift`` is where the page's own JS takes it right after
     the next ``document_url`` — i.e. between the URL check and the fetch.
@@ -59,6 +63,9 @@ class PageBackend:
     ``on_snapshot`` runs during ``target_snapshot``, i.e. after a write's gates
     and before its action — the window an attacker with write access inside an
     allowed upload location would use.
+
+    ``fail_after_acting`` makes a write action raise once it has reached the
+    page, the way a driver does when the page re-renders the element mid-action.
     """
 
     def __init__(self, url=SHOP, redirects=None):
@@ -71,6 +78,7 @@ class PageBackend:
         self.live_tag = None    # override the live tag a target snapshot reports
         self.bad_selector = False
         self.on_snapshot = None
+        self.fail_after_acting = False
 
     def _log(self, name):
         self.calls.append((name, self.url))
@@ -122,13 +130,24 @@ class PageBackend:
                               tag=self.live_tag or (page[0].name if page else None),
                               ref=("ref", self.url, css_selector))
 
+    def _act(self, action, result):
+        self.actions.append(action)
+        if self.fail_after_acting:
+            raise _ActionFailed(action[0])
+        return result
+
     def click_target(self, ref):
-        self.actions.append(("click", ref))
-        return {"clicked": True}
+        return self._act(("click", ref), {"clicked": True})
+
+    def insert_text_target(self, ref, value):
+        return self._act(("insert_text", ref, value), {"inserted": True, "value": value})
+
+    def press_key_target(self, ref, key):
+        return self._act(("press_key", ref, key), {"pressed": True, "key": key})
 
     def upload_file_target(self, ref, file_path, *, hidden=False):
-        self.actions.append(("upload", ref, file_path, hidden) if hidden else ("upload", ref, file_path))
-        return {"uploaded": True, "file_path": file_path}
+        action = ("upload", ref, file_path, hidden) if hidden else ("upload", ref, file_path)
+        return self._act(action, {"uploaded": True, "file_path": file_path})
 
     def fetched(self):
         """URLs whose content was snapshotted, in order."""
@@ -400,6 +419,79 @@ def test_an_upload_whose_gate_never_admitted_a_file_is_refused(clock, tmp_path):
     with pytest.raises(ValidationError, match="no file was admitted"):
         _page(backend, cache).upload_file("#up", gate)
     assert backend.actions == []
+
+
+# -- writes and the soup cache ---------------------------------------------------
+#
+# A write changes the page, so the copy the read tools answer from is dropped and
+# the next read fetches the page again. The write does not fetch it: a snapshot
+# taken inside the write would hold the page before it had reacted.
+
+@pytest.fixture(params=["click", "insert_text", "press_key", "upload_file"])
+def write(request, tmp_path):
+    """Each write, as a call on a ``GatedPage`` through a gate that admits it."""
+    if request.param == "upload_file":
+        receipt = tmp_path / "lunch.png"
+        receipt.write_bytes(b"png")
+        gate = upload_file_gate(_upload_rules(tmp_path), str(receipt))
+        return lambda page: page.upload_file("#up", gate)
+    gate = _write_gate(SHOP)
+    return {
+        "click": lambda page: page.click("#go", gate),
+        "insert_text": lambda page: page.insert_text("#go", "2", gate),
+        "press_key": lambda page: page.press_key("#go", "Enter", gate),
+    }[request.param]
+
+
+def _snapshots(backend):
+    return [name for name, _ in backend.calls].count("page_snapshot")
+
+
+def test_a_write_drops_the_cached_page_and_the_next_read_fetches_it_again(clock, write):
+    backend, cache = PageBackend(), SoupCache(clock=clock)
+    _page(backend, cache).soup(READ)
+
+    write(_page(backend, cache))
+    assert cache.get("h1", SHOP) is None  # dropped, and not rebuilt by the write
+    assert _snapshots(backend) == 1
+
+    _, reloaded = _page(backend, cache).soup(READ)
+    assert (_snapshots(backend), reloaded) == (2, False)  # fetched live, with no reload
+
+
+def test_a_write_that_fails_after_acting_still_drops_the_cached_page(clock, write):
+    backend, cache = PageBackend(), SoupCache(clock=clock)
+    backend.fail_after_acting = True
+    _page(backend, cache).soup(READ)
+
+    with pytest.raises(_ActionFailed):
+        write(_page(backend, cache))
+    assert len(backend.actions) == 1  # it reached the page before it raised
+    assert cache.get("h1", SHOP) is None
+
+
+def test_a_write_refused_before_acting_leaves_the_cached_page_alone(clock, write):
+    backend, cache = PageBackend(), SoupCache(clock=clock)
+    backend.live_count = 2
+    _page(backend, cache).soup(READ)
+
+    with pytest.raises(ValueError, match="matched 2 live elements"):
+        write(_page(backend, cache))
+    assert backend.actions == []
+    assert cache.get("h1", SHOP) is not None
+
+
+def test_a_write_its_gate_refuses_leaves_the_cached_page_alone(clock):
+    def refuse(url, css_selector, found):
+        raise ValidationError("label does not match")
+
+    backend, cache = PageBackend(), SoupCache(clock=clock)
+    _page(backend, cache).soup(READ)
+
+    with pytest.raises(ValidationError, match="label does not match"):
+        _page(backend, cache).click("#go", WriteGate(check_page=lambda url: None, check_element=refuse))
+    assert backend.actions == []
+    assert cache.get("h1", SHOP) is not None
 
 
 # -- inside a frame ----------------------------------------------------------------
