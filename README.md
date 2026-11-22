@@ -263,9 +263,12 @@ every field of a returned node.
 
 Reads answer from a per-tab cached snapshot of the page, not the live DOM.
 `navigate`, every write action and every frame switch drop that snapshot, so the
-read after a `click` or `press_key` fetches the live page and sees what the
-action changed. A change the page makes on its own afterwards is not seen until
-`invalidate_dom_cache`. The same page lists
+read after a `click` or `press_key` fetches the live page: it sees what the
+action changed, and whatever else the page did up to that moment. That read's
+snapshot then answers the reads after it. browden does not watch the page, so
+what the page changes on its own *after that read* (a response that renders
+late, a timer) is not seen until `invalidate_dom_cache` or the next write. The
+same page lists
 [everything that drops the snapshot](./docs/dom-reads.md#the-dom-cache-which-page-a-read-sees).
 
 ## Profiles

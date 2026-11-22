@@ -75,7 +75,7 @@ the snapshot is fixed:
 | `invalidate_dom_cache` | Dropped, and nothing else happens: the page is not touched. |
 | `force_reload_tab` | The page is reloaded and the snapshot retaken in the same call. |
 | The page's own JS changes its URL | Stops answering: a snapshot answers only for the URL it was taken from, so a read at the new URL takes a new one. |
-| The page's own JS changes the DOM, same URL | **Kept.** Reads go on answering from the old snapshot. |
+| The page's own JS changes the DOM, same URL | **Kept**, if there is one: browden does not watch the page, so reads go on answering from the snapshot taken before the change. If the snapshot was already dropped (the change came after a write and before the next read), that read fetches the live page and sees it. |
 | The snapshot is 1 hour old | The next read reloads the tab first and reports `reloaded: true`. |
 
 `screenshot` never uses the snapshot. It captures the live pixels.
@@ -89,6 +89,9 @@ gone, so the next read fetches the live page:
 click("#add-to-cart", id=tab)
 query_selector("#cart-count", id=tab)   // fetches the live page, so it sees what the click did
 ```
+
+That read sees the page as it is when the read runs: what the click did, and
+whatever the page has done on its own since.
 
 The write drops the snapshot and leaves rebuilding it to the next read on
 purpose. A snapshot taken inside the write would show the instant after the

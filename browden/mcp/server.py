@@ -379,8 +379,9 @@ async def click(css_selector: str, id: str) -> dict:
     snapshot the read tools answer from. Once the click is attempted the tab's
     snapshot is dropped, so the next read re-fetches the live page and sees what
     the click changed, with no ``invalidate_dom_cache`` or reload. That read
-    rebuilds the snapshot, not this call: if the page goes on changing after it (a
-    request that renders later), call ``invalidate_dom_cache`` and read again. See
+    rebuilds the snapshot, not this call, so it shows the page as it is when the
+    read runs. If the page goes on changing after that read (a request that
+    renders later), call ``invalidate_dom_cache`` and read again. See
     docs/dom-reads.md.
     """
     logger.info(f"Tool called: click (css_selector={css_selector!r}, id={id!r})")
@@ -420,8 +421,9 @@ async def insert_text(css_selector: str, value: str, id: str) -> dict:
     snapshot the read tools answer from. Once the typing is attempted the tab's
     snapshot is dropped, so the next read re-fetches the live page and sees what
     the typing changed, with no ``invalidate_dom_cache`` or reload. That read
-    rebuilds the snapshot, not this call: if the page goes on changing after it (a
-    request that renders later), call ``invalidate_dom_cache`` and read again. See
+    rebuilds the snapshot, not this call, so it shows the page as it is when the
+    read runs. If the page goes on changing after that read (a request that
+    renders later), call ``invalidate_dom_cache`` and read again. See
     docs/dom-reads.md.
     """
     logger.info(f"Tool called: insert_text (css_selector={css_selector!r}, id={id!r})")
@@ -474,8 +476,9 @@ async def upload_file(css_selector: str, file_path: str, id: str) -> dict:
     snapshot the read tools answer from. Once the upload is attempted the tab's
     snapshot is dropped, so the next read re-fetches the live page and sees what
     the upload changed, with no ``invalidate_dom_cache`` or reload. That read
-    rebuilds the snapshot, not this call: if the page goes on changing after it (a
-    request that renders later), call ``invalidate_dom_cache`` and read again. See
+    rebuilds the snapshot, not this call, so it shows the page as it is when the
+    read runs. If the page goes on changing after that read (a request that
+    renders later), call ``invalidate_dom_cache`` and read again. See
     docs/dom-reads.md.
     """
     logger.info(f"Tool called: upload_file (css_selector={css_selector!r}, "
@@ -518,8 +521,9 @@ async def press_key(css_selector: str, key: str, id: str) -> dict:
     snapshot the read tools answer from. Once the key press is attempted the tab's
     snapshot is dropped, so the next read re-fetches the live page and sees what
     the key changed, with no ``invalidate_dom_cache`` or reload. That read
-    rebuilds the snapshot, not this call: if the page goes on changing after it (a
-    request that renders later), call ``invalidate_dom_cache`` and read again. See
+    rebuilds the snapshot, not this call, so it shows the page as it is when the
+    read runs. If the page goes on changing after that read (a request that
+    renders later), call ``invalidate_dom_cache`` and read again. See
     docs/dom-reads.md.
     """
     logger.info(f"Tool called: press_key (css_selector={css_selector!r}, key={key!r}, id={id!r})")
@@ -657,9 +661,10 @@ async def get_element_by_id(element_id: str, id: str,
 
     Answers from the tab's cached DOM snapshot. The first read after a navigate, a
     write (click, insert_text, press_key, upload_file), a frame switch or
-    invalidate_dom_cache takes the snapshot, and later reads reuse it: what the
-    page changes on its own afterwards, without changing its URL, is not seen
-    until invalidate_dom_cache.
+    invalidate_dom_cache takes the snapshot, and later reads reuse it. That first
+    read sees the page as it is when the read runs. browden does not watch the
+    page, so what the page changes on its own after the snapshot is taken,
+    without changing its URL, is not seen until invalidate_dom_cache.
     """
     logger.info(f"Tool called: get_element_by_id (element_id={element_id!r}, id={id!r})")
     session = _store.route(id)
@@ -686,9 +691,10 @@ async def get_elements_by_class_name(class_names: str, id: str,
 
     Answers from the tab's cached DOM snapshot. The first read after a navigate, a
     write (click, insert_text, press_key, upload_file), a frame switch or
-    invalidate_dom_cache takes the snapshot, and later reads reuse it: what the
-    page changes on its own afterwards, without changing its URL, is not seen
-    until invalidate_dom_cache.
+    invalidate_dom_cache takes the snapshot, and later reads reuse it. That first
+    read sees the page as it is when the read runs. browden does not watch the
+    page, so what the page changes on its own after the snapshot is taken,
+    without changing its URL, is not seen until invalidate_dom_cache.
     """
     logger.info(f"Tool called: get_elements_by_class_name (class_names={class_names!r}, id={id!r})")
     session = _store.route(id)
@@ -715,9 +721,10 @@ async def query_selector(css_selector: str, id: str,
 
     Answers from the tab's cached DOM snapshot. The first read after a navigate, a
     write (click, insert_text, press_key, upload_file), a frame switch or
-    invalidate_dom_cache takes the snapshot, and later reads reuse it: what the
-    page changes on its own afterwards, without changing its URL, is not seen
-    until invalidate_dom_cache.
+    invalidate_dom_cache takes the snapshot, and later reads reuse it. That first
+    read sees the page as it is when the read runs. browden does not watch the
+    page, so what the page changes on its own after the snapshot is taken,
+    without changing its URL, is not seen until invalidate_dom_cache.
     """
     logger.info(f"Tool called: query_selector (css_selector={css_selector!r}, id={id!r})")
     session = _store.route(id)
@@ -744,9 +751,10 @@ async def query_selector_all(css_selector: str, id: str,
 
     Answers from the tab's cached DOM snapshot. The first read after a navigate, a
     write (click, insert_text, press_key, upload_file), a frame switch or
-    invalidate_dom_cache takes the snapshot, and later reads reuse it: what the
-    page changes on its own afterwards, without changing its URL, is not seen
-    until invalidate_dom_cache.
+    invalidate_dom_cache takes the snapshot, and later reads reuse it. That first
+    read sees the page as it is when the read runs. browden does not watch the
+    page, so what the page changes on its own after the snapshot is taken,
+    without changing its URL, is not seen until invalidate_dom_cache.
     """
     logger.info(f"Tool called: query_selector_all (css_selector={css_selector!r}, id={id!r})")
     session = _store.route(id)
