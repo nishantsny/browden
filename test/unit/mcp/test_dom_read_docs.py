@@ -24,7 +24,7 @@ README = Path(__file__).resolve().parents[3] / "README.md"
 
 async def _schemas():
     import browden.mcp.server as server
-    return {t.name: t.inputSchema for t in await server.mcp.list_tools()}
+    return {t.name: t.input_schema for t in await server.mcp.list_tools()}
 
 
 async def test_every_read_tool_describes_include_html_and_max_html_bytes():

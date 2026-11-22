@@ -46,7 +46,7 @@ async def test_mcp_endpoint(mcp_server, mcp_client_session):
         # navigate to a data: URL -> MCP tool error (no netloc => validate_url rejects) -> proves validator is live
         try:
             nav_res = await mcp_client.call_tool("navigate", {"url": "data:text/html,<h1>Hello</h1>", "id": handle})
-            assert nav_res.isError is True
+            assert nav_res.is_error is True
         except Exception as e:
             # MCP python SDK might raise an exception if it's a server error
             assert "ValidationError" in str(e) or "not allowed" in str(e) or "error" in str(e).lower()
@@ -60,9 +60,9 @@ async def test_mcp_endpoint(mcp_server, mcp_client_session):
 
         # screenshot returns image content
         screenshot_res = await mcp_client.call_tool("screenshot", {"id": handle})
-        assert not screenshot_res.isError
+        assert not screenshot_res.is_error
         assert any(c.type == "image" for c in screenshot_res.content)
     
         # close_tab works
         close_res = await mcp_client.call_tool("close_tab", {"id": handle})
-        assert not close_res.isError
+        assert not close_res.is_error

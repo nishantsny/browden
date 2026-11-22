@@ -487,7 +487,7 @@ ever sees the tools and their JSON results.
 ```mermaid
 sequenceDiagram
     actor Agent as LLM agent
-    participant MCP as MCP server (FastMCP)
+    participant MCP as MCP server (MCPServer)
     participant Store as SessionStore
     participant Session as Session (per profile)
     participant Backend as Chrome backend

@@ -721,3 +721,87 @@ async def test_list_tabs_judges_each_profiles_tabs_by_its_own_rules(monkeypatch)
     assert [t["id"] for t in listed] == ["ok"]
     assert refused.list_tabs.closed == ["closed"]
     assert allowed.list_tabs.closed == []
+
+
+# -- what an MCP caller is told ------------------------------------------------
+#
+# These go through an MCP client connected to the server in-process, because the
+# subject is what MCPServer does with a tool's exception, which a direct call to
+# the tool function never reaches.
+
+@pytest.mark.asyncio
+async def test_a_refusal_reaches_the_mcp_caller_with_its_reason():
+    # MCPServer passes on the text of a ToolError and withholds any other
+    # exception's, so without the conversion in ``_mcp_tool`` the caller would be
+    # told "Error executing tool navigate" and not which gate turned it down.
+    from mcp import Client
+    import browden.mcp.server as server
+    importlib.reload(server)
+    session = _fake_session(navigate={"id": "pre-h1"})
+    with patch.object(server._store, "route", return_value=session):
+        async with Client(server.mcp) as client:
+            result = await client.call_tool("navigate", {"url": "nonexistent-xyz-9876.test", "id": "pre-h1"})
+
+    assert result.is_error is True
+    assert "not on allowlist: nonexistent-xyz-9876.test" in result.content[0].text
+    session.navigate.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_a_browser_failure_reaches_the_mcp_caller_with_its_message():
+    # Not a refusal of browden's own: the browser failed. The caller still needs
+    # the message to tell a host that does not resolve from a page that timed out.
+    from mcp import Client
+    import browden.mcp.server as server
+    importlib.reload(server)
+    session = _fake_session()
+    session.navigate = AsyncMock(side_effect=RuntimeError("unknown error: net::ERR_NAME_NOT_RESOLVED"))
+    with patch.object(server._store, "route", return_value=session):
+        async with Client(server.mcp) as client:
+            result = await client.call_tool("navigate", {"url": "amazon.com", "id": "pre-h1"})
+
+    assert result.is_error is True
+    assert "net::ERR_NAME_NOT_RESOLVED" in result.content[0].text
+
+
+@pytest.mark.asyncio
+async def test_every_tool_reports_its_failures_to_the_mcp_caller():
+    # The conversion is per registration, so a tool registered with a bare
+    # ``mcp.tool()`` would go back to withholding its messages.
+    from mcp import Client
+    import browden.mcp.server as server
+    importlib.reload(server)
+    failing = MagicMock()
+    failing.route.side_effect = RuntimeError("the reason")
+    failing.sessions.side_effect = RuntimeError("the reason")
+    # Arguments that satisfy any tool's schema; each tool is sent only its own.
+    arguments = {"id": "pre-h1", "url": "amazon.com", "css_selector": "a", "value": "v", "file_path": "/f",
+                 "key": "Enter", "element_id": "e", "class_names": "c", "profile_dir": "/p"}
+    with patch.object(server, "_store", failing), \
+         patch.object(server, "_backend_for", side_effect=RuntimeError("the reason")):
+        async with Client(server.mcp) as client:
+            tools = (await client.list_tools()).tools
+            results = {
+                tool.name: await client.call_tool(
+                    tool.name, {k: v for k, v in arguments.items() if k in tool.input_schema["properties"]})
+                for tool in tools
+            }
+
+    assert len(results) == 20
+    # list_profiles reads the configuration only, so it has nothing here to fail on.
+    silent = [name for name, result in results.items()
+              if name != "list_profiles" and "the reason" not in result.content[0].text]
+    assert silent == []
+
+
+@pytest.mark.asyncio
+async def test_the_handshake_reports_browdens_own_version():
+    import importlib.metadata
+    from mcp import Client
+    import browden.mcp.server as server
+    importlib.reload(server)
+    async with Client(server.mcp) as client:
+        info = client.server_info
+
+    assert info.name == "browden"
+    assert info.version == importlib.metadata.version("browden")
