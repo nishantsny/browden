@@ -15,7 +15,14 @@ from atomicity_harness import PROFILE, TAB, OnePageBackend, serve
 from atomicity_harness import make_session as _session
 
 from browden.configs.loader import RuntimeConfigurationRefresher
-from browden.mcp.validator import BrowdenRuntimeConfiguration, ValidationError, click_gate, read_gate
+from browden.mcp.validator import (
+    BrowdenRuntimeConfiguration,
+    ValidationError,
+    click_gate,
+    press_key_gate,
+    read_gate,
+    write_text_gate,
+)
 
 SHOP = "https://shop.example/item"
 OTHER = "https://other.example/account"
@@ -99,6 +106,26 @@ async def test_the_gate_judges_the_live_page_not_the_cached_snapshot():
     with pytest.raises(ValidationError, match="does not match any click label"):
         await s.click("#go", id=TAB, gate=click_gate(_SHOP_ONLY.access_rules_for(PROFILE)))
     assert backend.actions == []
+
+
+@pytest.mark.parametrize("write", [
+    lambda s, rules: s.click("#go", id=TAB, gate=click_gate(rules)),
+    lambda s, rules: s.insert_text("#f", "2", id=TAB, gate=write_text_gate(rules)),
+    lambda s, rules: s.press_key("#go", "Enter", id=TAB, gate=press_key_gate(rules, "Enter")),
+], ids=["click", "insert_text", "press_key"])
+async def test_a_write_through_the_session_makes_the_next_read_fetch_the_page_again(write):
+    # The session leaves dropping the snapshot to GatedPage (test_gated_page.py).
+    # This is the wiring: a write sent through the session still reaches it.
+    backend = _backend(SHOP)
+    s = _session(backend)
+    rules = _SHOP_ONLY.access_rules_for(PROFILE)
+    await s.query_selector("#go", id=TAB, gate=read_gate(rules))
+    await s.query_selector("#go", id=TAB, gate=read_gate(rules))
+    assert backend.reads.count((SHOP, "html")) == 1  # the second read was the cached one
+
+    await write(s, rules)
+    await s.query_selector("#go", id=TAB, gate=read_gate(rules))
+    assert backend.reads.count((SHOP, "html")) == 2
 
 
 async def test_an_invalid_selector_is_an_error_envelope_and_nothing_is_done():

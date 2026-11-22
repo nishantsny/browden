@@ -70,11 +70,23 @@ async def test_invalidate_dom_cache_says_browdens_own_actions_do_not_need_it():
         assert name in description, name
 
 
-def test_the_reference_page_lists_everything_that_drops_the_snapshot():
-    section = _cache_section()
+async def test_force_reload_tab_says_when_its_snapshot_is_taken():
+    description = (await _descriptions())["force_reload_tab"]
+    assert "The snapshot is retaken in this call, as soon as the page has loaded" in description
+    assert "invalidate_dom_cache" in description
+
+
+def test_the_reference_page_has_a_table_row_for_everything_that_drops_the_snapshot():
+    # The row's first cell, not the section at large: the tool names also appear
+    # in the prose under the table.
+    rows = dict(line.strip("|").split("|", 1) for line in _cache_section().splitlines()
+                if line.startswith("| `"))
+    listed = " ".join(rows)
     for name in ("navigate", *WRITE_TOOLS, *FRAME_TOOLS, "invalidate_dom_cache", "force_reload_tab"):
-        assert f"`{name}`" in section, name
-    assert "fails partway" in section
+        assert f"`{name}`" in listed, name
+    write_row = next(effect for what, effect in rows.items() if "`click`" in what)
+    assert "fails partway" in write_row
+    assert "leaves the snapshot alone" in write_row
 
 
 def test_the_reference_page_quotes_the_real_snapshot_lifetime():

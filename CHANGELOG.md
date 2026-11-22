@@ -35,10 +35,16 @@ All notable changes to browden are documented here. The format follows
   raise after it has already changed the page: `insert_text` clears the field
   before it types, and on a page that re-renders the field on `change`, the
   typing raises on a node that is gone. The reads that followed were then served
-  the page from before the write, until `invalidate_dom_cache` or the one-hour
-  expiry. The snapshot is now dropped once the action has been attempted,
-  whether it finished or raised. A write refused by a gate never touched the
-  page and still leaves the snapshot alone (#193).
+  the page from before the write, until something else dropped the snapshot (a
+  later write, a navigate, `invalidate_dom_cache`, the one-hour expiry). The
+  snapshot is now dropped once the action has been attempted, whether it
+  finished or raised.
+
+  A write stopped before its action starts never touched the page and leaves
+  the snapshot alone: one a gate refuses, as before, and now also one whose
+  selector is invalid, which used to drop it. A write the browser turns down as
+  the action starts (the element is no longer visible or enabled) now drops it,
+  which costs the next read one fetch (#193).
 
 ## [1.8.1] — 2026-11-18
 

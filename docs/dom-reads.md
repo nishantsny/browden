@@ -69,14 +69,14 @@ the snapshot is fixed:
 
 | What happened | The tab's snapshot |
 | --- | --- |
-| `navigate` | Dropped. The next read takes a new one. |
-| `click`, `insert_text`, `press_key`, `upload_file` | Dropped once the action is attempted, including when it then fails partway (the page may already have changed). The next read takes a new one. A write that a gate refuses did nothing to the page and leaves the snapshot alone. |
+| `navigate` | Dropped once the navigation has returned. The next read takes a new one. |
+| `click`, `insert_text`, `press_key`, `upload_file` | Dropped once the action is attempted, including when it then fails partway (the page may already have changed) or the browser turns it down at the last moment (the element is no longer visible or enabled). The next read takes a new one. A write stopped before its action starts (a gate refuses it, or the selector is invalid or does not match exactly one element) did nothing to the page and leaves the snapshot alone. |
 | `switch_to_frame`, `switch_to_parent_frame`, `switch_to_default_content` | Dropped. The next read snapshots the document now in focus. |
 | `invalidate_dom_cache` | Dropped, and nothing else happens: the page is not touched. |
 | `force_reload_tab` | The page is reloaded and the snapshot retaken in the same call. |
-| The page's own JS changes its URL | Stops answering: a snapshot answers only for the URL it was taken from, so a read at the new URL takes a new one. |
+| The page's own JS changes its URL | Stops answering: a snapshot answers only for the URL it was taken from, so a read at the new URL takes a new one. If the page is back at the old URL before any read happens, the old snapshot answers again. |
 | The page's own JS changes the DOM, same URL | **Kept**, if there is one: browden does not watch the page, so reads go on answering from the snapshot taken before the change. If the snapshot was already dropped (the change came after a write and before the next read), that read fetches the live page and sees it. |
-| The snapshot is 1 hour old | The next read reloads the tab first and reports `reloaded: true`. |
+| The snapshot is 1 hour old | The next read reloads the tab first and reports `reloaded: true`. A reload returns the tab to its top document, so a read made inside a frame is refused instead of answered: call `switch_to_frame` again. |
 
 `screenshot` never uses the snapshot. It captures the live pixels.
 

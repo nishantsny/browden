@@ -472,6 +472,7 @@ def test_a_write_its_gate_refuses_leaves_the_cached_page_alone(clock):
 
 
 # -- inside a frame ----------------------------------------------------------------
+
 class FramedBackend(PageBackend):
     """A tab focused inside a frame: ``url`` is the top page, ``frame`` the focused
     document's (effective) URL and ``frame_html`` its content. ``lose()`` makes the

@@ -346,7 +346,7 @@ async def navigate(url: str, id: str) -> dict:
 @mcp.tool()
 @_tool
 async def click(css_selector: str, id: str) -> dict:
-    """Click a control on a tab — the only write action.
+    """Click a control on a tab — the click action.
 
     Three server-side gates, all default-deny, must pass:
       1. The tab's host must be listed under the ``click`` section of the
@@ -664,7 +664,10 @@ async def get_element_by_id(element_id: str, id: str,
     invalidate_dom_cache takes the snapshot, and later reads reuse it. That first
     read sees the page as it is when the read runs. browden does not watch the
     page, so what the page changes on its own after the snapshot is taken,
-    without changing its URL, is not seen until invalidate_dom_cache.
+    without changing its URL, is not seen until one of those drops the snapshot
+    again; invalidate_dom_cache does it without touching the page. Once a
+    snapshot is an hour old, the next read reloads the tab to retake it and
+    reports reloaded=true.
     """
     logger.info(f"Tool called: get_element_by_id (element_id={element_id!r}, id={id!r})")
     session = _store.route(id)
@@ -694,7 +697,10 @@ async def get_elements_by_class_name(class_names: str, id: str,
     invalidate_dom_cache takes the snapshot, and later reads reuse it. That first
     read sees the page as it is when the read runs. browden does not watch the
     page, so what the page changes on its own after the snapshot is taken,
-    without changing its URL, is not seen until invalidate_dom_cache.
+    without changing its URL, is not seen until one of those drops the snapshot
+    again; invalidate_dom_cache does it without touching the page. Once a
+    snapshot is an hour old, the next read reloads the tab to retake it and
+    reports reloaded=true.
     """
     logger.info(f"Tool called: get_elements_by_class_name (class_names={class_names!r}, id={id!r})")
     session = _store.route(id)
@@ -724,7 +730,10 @@ async def query_selector(css_selector: str, id: str,
     invalidate_dom_cache takes the snapshot, and later reads reuse it. That first
     read sees the page as it is when the read runs. browden does not watch the
     page, so what the page changes on its own after the snapshot is taken,
-    without changing its URL, is not seen until invalidate_dom_cache.
+    without changing its URL, is not seen until one of those drops the snapshot
+    again; invalidate_dom_cache does it without touching the page. Once a
+    snapshot is an hour old, the next read reloads the tab to retake it and
+    reports reloaded=true.
     """
     logger.info(f"Tool called: query_selector (css_selector={css_selector!r}, id={id!r})")
     session = _store.route(id)
@@ -754,7 +763,10 @@ async def query_selector_all(css_selector: str, id: str,
     invalidate_dom_cache takes the snapshot, and later reads reuse it. That first
     read sees the page as it is when the read runs. browden does not watch the
     page, so what the page changes on its own after the snapshot is taken,
-    without changing its URL, is not seen until invalidate_dom_cache.
+    without changing its URL, is not seen until one of those drops the snapshot
+    again; invalidate_dom_cache does it without touching the page. Once a
+    snapshot is an hour old, the next read reloads the tab to retake it and
+    reports reloaded=true.
     """
     logger.info(f"Tool called: query_selector_all (css_selector={css_selector!r}, id={id!r})")
     session = _store.route(id)
