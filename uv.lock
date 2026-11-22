@@ -63,7 +63,7 @@ wheels = [
 
 [[package]]
 name = "browden"
-version = "1.8.1"
+version = "1.9.0"
 source = { editable = "." }
 dependencies = [
     { name = "beautifulsoup4" },
