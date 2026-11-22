@@ -8,6 +8,10 @@ DOM *behind the cache's back*. That's staged by calling the **backend** directly
 (``_page_clicks_add``) instead of ``session.click`` — the session-level write
 tools invalidate the cache for you, the page's own JS obviously does not. The page
 is an inline ``data:`` document, so the run is deterministic and offline.
+
+The other half of the contract is here too: a write through the session drops the
+snapshot itself, so the read after it needs no invalidate — also when the write
+raised after it had already changed the page.
 """
 import importlib
 import urllib.parse
@@ -16,15 +20,18 @@ from unittest.mock import patch
 import pytest
 
 from browden.configs.loader import RuntimeConfigurationRefresher
+from browden.dependencies.selenium import StaleElementReferenceException
 from browden.mcp.session_management.browser_session_manager import BrowserSessionManager
 from browden.mcp.validator import BrowdenRuntimeConfiguration, ValidationError
-from gates import OPEN_READ_GATE
+from gates import OPEN_GATE, OPEN_READ_GATE
 
 HTML = """<html><body>
   <button id="add"
           onclick="var d = document.createElement('div');
                    d.id = 'late'; d.textContent = 'arrived';
                    document.body.appendChild(d);">Add</button>
+  <input id="qty" value="5"
+         onchange="document.getElementById('add').click(); this.replaceWith(this.cloneNode());">
   <div id="marker">start</div>
 </body></html>"""
 
@@ -89,6 +96,34 @@ async def test_invalidate_keeps_live_dom_state_that_force_reload_discards(sessio
     assert reloaded["reloaded"] is True
     gone = await session.query_selector("#late", id=page["id"], gate=OPEN_READ_GATE)
     assert gone["found"] is False  # the reload threw the JS-built node away
+
+
+@pytest.mark.asyncio
+async def test_a_write_drops_the_snapshot_so_the_next_read_sees_what_it_changed(session):
+    # The counterpart of the tests above: the same DOM change, made by browden's
+    # own ``click`` this time, needs no invalidate_dom_cache.
+    page = await _page_with_primed_cache(session)
+
+    await session.click("#add", id=page["id"], gate=OPEN_GATE)
+
+    fresh = await session.query_selector("#late", id=page["id"], gate=OPEN_READ_GATE)
+    assert fresh["found"] is True
+    assert fresh["reloaded"] is False  # re-fetched from the live DOM, not reloaded
+
+
+@pytest.mark.asyncio
+async def test_a_write_that_fails_after_acting_still_drops_the_snapshot(session):
+    # ``#qty`` re-renders itself on change, the way a framework re-mounts a field:
+    # clearing it fires the handler, which changes the page and swaps the input
+    # out, so the typing that follows raises on a node that is gone. The page
+    # changed all the same, so the snapshot from before must not answer the next read.
+    page = await _page_with_primed_cache(session)
+
+    with pytest.raises(StaleElementReferenceException):
+        await session.insert_text("#qty", "2", id=page["id"], gate=OPEN_GATE)
+
+    fresh = await session.query_selector("#late", id=page["id"], gate=OPEN_READ_GATE)
+    assert fresh["found"] is True
 
 
 @pytest.mark.asyncio

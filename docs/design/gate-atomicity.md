@@ -194,7 +194,8 @@ is built from a single snapshot.
 - **Writes never use the soup cache.** Every write costs one snapshot round
   trip and one parse, even when a fresh snapshot is cached. That's what makes
   the write gate judge the live page. The fresh parse isn't stored, because a
-  successful write invalidates the tab's cache anyway.
+  write drops the tab's cache anyway once its action has been attempted, whether
+  the action finished or raised partway.
 - **A read checks the URL twice on a fetch**: `document_url` before it, so an
   off-list page is never fetched in the common case, and the snapshot's own
   URL after it, so what was fetched is what was judged. The first costs one

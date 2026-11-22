@@ -261,6 +261,13 @@ cuts UTF-8 bytes and decodes with `errors="ignore"`, so a truncated `html` ends
 silently. **[docs/dom-reads.md](./docs/dom-reads.md)** documents every cap and
 every field of a returned node.
 
+Reads answer from a per-tab cached snapshot of the page, not the live DOM.
+`navigate`, every write action and every frame switch drop that snapshot, so the
+read after a `click` or `press_key` fetches the live page and sees what the
+action changed. A change the page makes on its own afterwards is not seen until
+`invalidate_dom_cache`. The same page lists
+[everything that drops the snapshot](./docs/dom-reads.md#the-dom-cache-which-page-a-read-sees).
+
 ## Profiles
 
 A **profile** is equivalent to Chrome's `--user-data-dir`: one browsing session with its own

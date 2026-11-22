@@ -4,7 +4,8 @@ The four read tools — `get_element_by_id`, `get_elements_by_class_name`,
 `query_selector`, `query_selector_all` — return *serialized nodes*, not raw HTML.
 Every one of them truncates, and the caps are not something you should have to
 infer from a response. This page is the reference for what comes back, what is
-capped, and how to get a whole large node out of a page.
+capped, how to get a whole large node out of a page, and
+[which version of the page a read sees](#the-dom-cache-which-page-a-read-sees).
 
 Why cap at all: a tool response is fed straight into a model's context. One
 Amazon order card is ~355 chars of text but ~167 KB of HTML, and a single
@@ -59,6 +60,72 @@ If the node is genuinely larger than you want in context, read it in one call
 with a large `max_html_bytes` and write it to a file for processing, rather than
 trying to walk it with repeated small reads.
 
+## The DOM cache: which page a read sees
+
+The read tools don't query the live page. Each tab has one cached snapshot, the
+page's HTML parsed at one instant, and a read answers from it. A read that finds
+no snapshot takes one; every read after that reuses it. What drops or replaces
+the snapshot is fixed:
+
+| What happened | The tab's snapshot |
+| --- | --- |
+| `navigate` | Dropped. The next read takes a new one. |
+| `click`, `insert_text`, `press_key`, `upload_file` | Dropped once the action is attempted, including when it then fails partway (the page may already have changed). The next read takes a new one. A write that a gate refuses did nothing to the page and leaves the snapshot alone. |
+| `switch_to_frame`, `switch_to_parent_frame`, `switch_to_default_content` | Dropped. The next read snapshots the document now in focus. |
+| `invalidate_dom_cache` | Dropped, and nothing else happens: the page is not touched. |
+| `force_reload_tab` | The page is reloaded and the snapshot retaken in the same call. |
+| The page's own JS changes its URL | Stops answering: a snapshot answers only for the URL it was taken from, so a read at the new URL takes a new one. |
+| The page's own JS changes the DOM, same URL | **Kept.** Reads go on answering from the old snapshot. |
+| The snapshot is 1 hour old | The next read reloads the tab first and reports `reloaded: true`. |
+
+`screenshot` never uses the snapshot. It captures the live pixels.
+
+### After a write, just read
+
+A write needs no follow-up to make its effect readable. The snapshot is already
+gone, so the next read fetches the live page:
+
+```jsonc
+click("#add-to-cart", id=tab)
+query_selector("#cart-count", id=tab)   // fetches the live page, so it sees what the click did
+```
+
+The write drops the snapshot and leaves rebuilding it to the next read on
+purpose. A snapshot taken inside the write would show the instant after the
+action, before the page has reacted: the request a click sends hasn't come back
+and the modal it opens hasn't rendered. The read that follows comes later, so it
+sees more.
+
+That first read is also the last one to look at the live page until something
+in the table happens again. On a page that reacts asynchronously, a read made
+before the reaction has rendered snapshots the in-between state, and reading
+again returns the same snapshot however long you wait. To poll for a late
+change, drop the snapshot before each read:
+
+```jsonc
+click("#save", id=tab)
+query_selector(".toast", id=tab)        // found: false, not rendered yet. That is now the snapshot.
+query_selector(".toast", id=tab)        // ✗ same snapshot, same answer
+invalidate_dom_cache(id=tab)
+query_selector(".toast", id=tab)        // ✓ fetches the live page again
+```
+
+Use `invalidate_dom_cache` for this, not `force_reload_tab`. A reload discards
+what the page built in the live DOM (the open modal, the half-filled form),
+aborts requests still in flight (the save the click just started), and retakes
+the snapshot as soon as the page has loaded, which on a client-rendered page can
+be before its content is there.
+
+### Writes match the live page
+
+`click`, `insert_text`, `press_key` and `upload_file` never consult the
+snapshot. Their `css_selector` is matched against the live DOM at the moment of
+the write. So a selector taken from a read can fail to match if the page
+re-rendered after that read, since a framework may give the element a new
+generated id each time it renders. When a write reports
+`no element matches selector` for an element a read just returned, call
+`invalidate_dom_cache`, read again, and use the selector from the fresh read.
+
 ## Response shape
 
 Both single-element tools (`get_element_by_id`, `query_selector`) return:
@@ -66,7 +133,7 @@ Both single-element tools (`get_element_by_id`, `query_selector`) return:
 ```jsonc
 {
   "id": "<tab id>",
-  "reloaded": false,     // true if the cached DOM snapshot had expired and the tab was reloaded
+  "reloaded": false,     // true if the cached DOM snapshot had expired (1 hour) and the tab was reloaded
   "found": true,
   "element": { /* node, see below */ }   // null when found=false
 }

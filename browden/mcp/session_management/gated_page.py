@@ -16,7 +16,10 @@ What each method gates (docs/design/gate-atomicity.md):
   fetched, and bounce an off-list landing to ``about:blank``.
 * **Screenshots** gate the URL before the capture and again after it.
 * **Writes** gate the URL, then judge the element on a snapshot taken in one
-  script with the live match and its URL, and act on that same element.
+  script with the live match and its URL, and act on that same element. Once
+  the action has been attempted the tab's cached snapshot is dropped, whether
+  it finished or raised partway, so the next read fetches the page as the
+  write left it.
 * **Frame moves** gate the document descended from, the iframe's declared
   ``src`` and the document landed on, in the hold that moves the focus; a
   refused or failed move never leaves the focus inside an unadmitted frame. Any
@@ -195,6 +198,11 @@ class GatedPage:
         copy can predate what the page shows now. The snapshot's HTML, its URL and
         the live match all come from one script, so the gates judge the very
         element ``act`` then touches.
+
+        The cached copy is dropped as soon as ``act`` has been attempted, and is
+        not rebuilt here: the next read fetches the page, by which time it has had
+        a chance to react to the write. A write refused before ``act`` touched
+        nothing, so it leaves the cache alone.
         """
         url = self._check_live_url(gate)  # gate 1 — before the DOM is even read
         try:
@@ -213,7 +221,13 @@ class GatedPage:
         if snap.tag != found["elements"][0]["tag"]:
             raise ValueError(f"selector {css_selector!r} picked a <{snap.tag}> live but a "
                              f"<{found['elements'][0]['tag']}> in the snapshot — refusing")
-        result = act(snap.ref)
+        try:
+            result = act(snap.ref)
+        finally:
+            # Also when ``act`` raised: it may have got as far as changing the page
+            # (a field cleared but not yet typed into, a click whose result could
+            # not be reported).
+            self._cache.invalidate(self._handle)
         logger.info(done)
         result["id"] = self._id
         return result

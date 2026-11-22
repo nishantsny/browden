@@ -7,6 +7,39 @@ All notable changes to browden are documented here. The format follows
 
 ## [Unreleased]
 
+### Changed
+- **Every read and write tool now says how it stands with the DOM cache.** The
+  read tools answer from a per-tab snapshot, and `click`, `insert_text`,
+  `press_key` and `upload_file` already dropped it, so that the read after a
+  write fetches the live page. No tool description said so, which left a caller
+  unable to tell whether a read after a click was fresh without calling
+  `invalidate_dom_cache` or `force_reload_tab` first (and a reload throws away
+  the state the click has just built). Each write tool's description now states
+  that the snapshot is dropped and that the *next read* rebuilds it, not the
+  write. Each read tool's states that it answers from a snapshot and what
+  retakes it. `invalidate_dom_cache` says it is for changes the page makes on its
+  own, and `force_reload_tab` that its snapshot is taken as soon as the page has
+  loaded.
+
+  The rebuild stays with the next read on purpose. A snapshot taken inside the
+  write would hold the page at the instant after the action, before the request
+  a click sends has come back or the modal it opens has rendered, and every later
+  read would be answered from that. The read that follows comes later and sees
+  more. [docs/dom-reads.md](./docs/dom-reads.md#the-dom-cache-which-page-a-read-sees)
+  has a new section listing everything that drops or keeps the snapshot, and how
+  to poll a page that reacts late (#193).
+
+### Fixed
+- **A write that fails partway no longer leaves the old DOM snapshot answering
+  reads.** The snapshot was dropped only after a write returned. A write can
+  raise after it has already changed the page: `insert_text` clears the field
+  before it types, and on a page that re-renders the field on `change`, the
+  typing raises on a node that is gone. The reads that followed were then served
+  the page from before the write, until `invalidate_dom_cache` or the one-hour
+  expiry. The snapshot is now dropped once the action has been attempted,
+  whether it finished or raised. A write refused by a gate never touched the
+  page and still leaves the snapshot alone (#193).
+
 ## [1.8.1] — 2026-11-18
 
 ### Changed

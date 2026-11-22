@@ -374,6 +374,14 @@ async def click(css_selector: str, id: str) -> dict:
          operator — a host that wants to permit any control states it
          explicitly as ``label: '.*'`` (an omitted label fails config parsing).
     Any gate failing raises a ValidationError and nothing is clicked.
+
+    DOM cache: ``css_selector`` is matched against the live page, not the cached
+    snapshot the read tools answer from. Once the click is attempted the tab's
+    snapshot is dropped, so the next read re-fetches the live page and sees what
+    the click changed, with no ``invalidate_dom_cache`` or reload. That read
+    rebuilds the snapshot, not this call: if the page goes on changing after it (a
+    request that renders later), call ``invalidate_dom_cache`` and read again. See
+    docs/dom-reads.md.
     """
     logger.info(f"Tool called: click (css_selector={css_selector!r}, id={id!r})")
     session = _store.route(id)
@@ -407,6 +415,14 @@ async def insert_text(css_selector: str, value: str, id: str) -> dict:
          box with *no* visible label, the host's ``field_ids`` may instead name it
          by exact ``id``/``name``; the field passes if the label OR an id matches.
     Any gate failing raises a ValidationError and nothing is typed.
+
+    DOM cache: ``css_selector`` is matched against the live page, not the cached
+    snapshot the read tools answer from. Once the typing is attempted the tab's
+    snapshot is dropped, so the next read re-fetches the live page and sees what
+    the typing changed, with no ``invalidate_dom_cache`` or reload. That read
+    rebuilds the snapshot, not this call: if the page goes on changing after it (a
+    request that renders later), call ``invalidate_dom_cache`` and read again. See
+    docs/dom-reads.md.
     """
     logger.info(f"Tool called: insert_text (css_selector={css_selector!r}, id={id!r})")
     session = _store.route(id)
@@ -453,6 +469,14 @@ async def upload_file(css_selector: str, file_path: str, id: str) -> dict:
          configured nothing is uploadable**, including under ``allow_all``: that
          grants authority over pages and says nothing about the filesystem.
     Any gate failing raises a ValidationError and nothing is sent.
+
+    DOM cache: ``css_selector`` is matched against the live page, not the cached
+    snapshot the read tools answer from. Once the upload is attempted the tab's
+    snapshot is dropped, so the next read re-fetches the live page and sees what
+    the upload changed, with no ``invalidate_dom_cache`` or reload. That read
+    rebuilds the snapshot, not this call: if the page goes on changing after it (a
+    request that renders later), call ``invalidate_dom_cache`` and read again. See
+    docs/dom-reads.md.
     """
     logger.info(f"Tool called: upload_file (css_selector={css_selector!r}, "
                 f"file_path={file_path!r}, id={id!r})")
@@ -489,6 +513,14 @@ async def press_key(css_selector: str, key: str, id: str) -> dict:
       4. Some page rule matching this URL must admit the control (its visible text
          matches the rule ``label``) AND list ``key`` in that rule's ``keys``.
     Any gate failing raises a ValidationError and nothing is pressed.
+
+    DOM cache: ``css_selector`` is matched against the live page, not the cached
+    snapshot the read tools answer from. Once the key press is attempted the tab's
+    snapshot is dropped, so the next read re-fetches the live page and sees what
+    the key changed, with no ``invalidate_dom_cache`` or reload. That read
+    rebuilds the snapshot, not this call: if the page goes on changing after it (a
+    request that renders later), call ``invalidate_dom_cache`` and read again. See
+    docs/dom-reads.md.
     """
     logger.info(f"Tool called: press_key (css_selector={css_selector!r}, key={key!r}, id={id!r})")
     session = _store.route(id)
@@ -622,6 +654,12 @@ async def get_element_by_id(element_id: str, id: str,
     the real size) and cannot be paginated; attribute values at 256 chars
     (`attributes_truncated`). For the full content of a node, pass include_html=True
     with a max_html_bytes large enough to hold it. See docs/dom-reads.md.
+
+    Answers from the tab's cached DOM snapshot. The first read after a navigate, a
+    write (click, insert_text, press_key, upload_file), a frame switch or
+    invalidate_dom_cache takes the snapshot, and later reads reuse it: what the
+    page changes on its own afterwards, without changing its URL, is not seen
+    until invalidate_dom_cache.
     """
     logger.info(f"Tool called: get_element_by_id (element_id={element_id!r}, id={id!r})")
     session = _store.route(id)
@@ -645,6 +683,12 @@ async def get_elements_by_class_name(class_names: str, id: str,
     the real size) and cannot be paginated; attribute values at 256 chars
     (`attributes_truncated`). For the full content of a node, pass include_html=True
     with a max_html_bytes large enough to hold it. See docs/dom-reads.md.
+
+    Answers from the tab's cached DOM snapshot. The first read after a navigate, a
+    write (click, insert_text, press_key, upload_file), a frame switch or
+    invalidate_dom_cache takes the snapshot, and later reads reuse it: what the
+    page changes on its own afterwards, without changing its URL, is not seen
+    until invalidate_dom_cache.
     """
     logger.info(f"Tool called: get_elements_by_class_name (class_names={class_names!r}, id={id!r})")
     session = _store.route(id)
@@ -668,6 +712,12 @@ async def query_selector(css_selector: str, id: str,
     the real size) and cannot be paginated; attribute values at 256 chars
     (`attributes_truncated`). For the full content of a node, pass include_html=True
     with a max_html_bytes large enough to hold it. See docs/dom-reads.md.
+
+    Answers from the tab's cached DOM snapshot. The first read after a navigate, a
+    write (click, insert_text, press_key, upload_file), a frame switch or
+    invalidate_dom_cache takes the snapshot, and later reads reuse it: what the
+    page changes on its own afterwards, without changing its URL, is not seen
+    until invalidate_dom_cache.
     """
     logger.info(f"Tool called: query_selector (css_selector={css_selector!r}, id={id!r})")
     session = _store.route(id)
@@ -691,6 +741,12 @@ async def query_selector_all(css_selector: str, id: str,
     the real size) and cannot be paginated; attribute values at 256 chars
     (`attributes_truncated`). For the full content of a node, pass include_html=True
     with a max_html_bytes large enough to hold it. See docs/dom-reads.md.
+
+    Answers from the tab's cached DOM snapshot. The first read after a navigate, a
+    write (click, insert_text, press_key, upload_file), a frame switch or
+    invalidate_dom_cache takes the snapshot, and later reads reuse it: what the
+    page changes on its own afterwards, without changing its URL, is not seen
+    until invalidate_dom_cache.
     """
     logger.info(f"Tool called: query_selector_all (css_selector={css_selector!r}, id={id!r})")
     session = _store.route(id)
@@ -733,6 +789,13 @@ async def invalidate_dom_cache(id: str) -> dict:
     infinite-scroll batch landing, a live region updating) is invisible to them.
     This throws that snapshot away and nothing else.
 
+    Not needed after browden's own actions: ``navigate``, the write tools
+    (``click``, ``insert_text``, ``press_key``, ``upload_file``) and the frame
+    switches drop the snapshot themselves. It is for what the page does on its
+    own. That includes a slow reaction to a write: whatever the page renders
+    after the first read that follows the write is missed, so to poll for it,
+    call this before each read.
+
     The cheap counterpart to ``force_reload_tab``: no page load, so everything the
     page built up in the live DOM survives — a reload would discard it (and re-run
     every request the page makes). Reach for ``force_reload_tab`` only when you
@@ -754,7 +817,13 @@ async def invalidate_dom_cache(id: str) -> dict:
 @mcp.tool()
 @_tool
 async def force_reload_tab(id: str) -> dict:
-    """Reload the named tab and refresh its cached DOM."""
+    """Reload the named tab and refresh its cached DOM.
+
+    The snapshot is retaken in this call, as soon as the page has loaded. On a
+    page that renders its content with JS after loading, that can be too early:
+    call ``invalidate_dom_cache`` once the content has had time to appear, then
+    read.
+    """
     logger.info(f"Tool called: force_reload_tab (id={id!r})")
     session = _store.route(id)
     # H2: the session gates the live URL before the reload and the landing after
