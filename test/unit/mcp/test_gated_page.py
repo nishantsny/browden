@@ -38,7 +38,11 @@ def _html(text):
             f"<input id='up' type='file' aria-label='Receipt'></body></html>")
 
 
-PAGES = {SHOP: _html("shop"), OTHER: _html("other"), SECRET: _html("SECRET")}
+STUDIO = "https://studio.youtube.com/channel/UC123"
+
+PAGES = {SHOP: _html("shop"), OTHER: _html("other"), SECRET: _html("SECRET"),
+         STUDIO: ("<html><body><input type='file' name='Filedata' multiple aria-hidden='true' "
+                  "style='display: none'></body></html>")}
 
 
 class _Clock:
@@ -141,8 +145,9 @@ class PageBackend:
     def press_key_target(self, ref, key):
         return self._act(("press_key", ref, key), {"pressed": True, "key": key})
 
-    def upload_file_target(self, ref, file_path):
-        return self._act(("upload", ref, file_path), {"uploaded": True, "file_path": file_path})
+    def upload_file_target(self, ref, file_path, *, hidden=False):
+        action = ("upload", ref, file_path, hidden) if hidden else ("upload", ref, file_path)
+        return self._act(action, {"uploaded": True, "file_path": file_path})
 
     def fetched(self):
         """URLs whose content was snapshotted, in order."""
@@ -356,6 +361,24 @@ def test_an_upload_hands_the_backend_the_path_the_gate_admitted(clock, tmp_path)
 
     assert result["uploaded"] is True
     assert backend.actions == [("upload", ("ref", SHOP, "#up"), str(receipt))]
+
+
+def test_an_upload_of_a_hidden_input_tells_the_backend_it_was_admitted_hidden(clock, tmp_path):
+    """Only the gate's own verdict waives the backend's live "is displayed" check."""
+    location = tmp_path / "uploads"
+    location.mkdir()
+    video = location / "short.mp4"
+    video.write_bytes(b"mp4")
+    rules = BrowdenAccessRuleSet({
+        "upload-file": {"studio.youtube.com": [
+            {"path": [".*"], "label": "(?!)", "field_ids": ["Filedata"], "hidden_input": True}]},
+        "allowed_upload_locations": [str(location)],
+    })
+
+    backend, cache = PageBackend(url=STUDIO), SoupCache(clock=clock)
+    _page(backend, cache).upload_file("input[name=Filedata]", upload_file_gate(rules, str(video)))
+
+    assert backend.actions == [("upload", ("ref", STUDIO, "input[name=Filedata]"), str(video), True)]
 
 
 def test_an_upload_is_not_re_resolved_after_the_gate_admitted_it(clock, tmp_path):

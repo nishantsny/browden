@@ -184,7 +184,7 @@ class OnePageBackend:
     def press_key_target(self, ref, key):
         return {"pressed": key, **self._act("press_key", ref)}
 
-    def upload_file_target(self, ref, file_path):
+    def upload_file_target(self, ref, file_path, *, hidden=False):
         return {"uploaded": True, "file_path": file_path, **self._act("upload_file", ref)}
 
 

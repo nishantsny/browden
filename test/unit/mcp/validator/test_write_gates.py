@@ -474,3 +474,104 @@ def test_a_gate_that_refused_carries_no_path(allowed, tmp_path):
         gate.check_page("https://anything.test/form")
     with pytest.raises(ValidationError, match="no file was admitted"):
         gate.admitted.path
+
+
+# -- upload-file: a hidden file input, admitted only by an opted-in field_id ---
+
+STUDIO = "https://studio.youtube.com/channel/UC123"
+
+_HIDDEN_UPLOAD_RULES = BrowdenAccessRuleSet({
+    "upload-file": {"studio.youtube.com": [
+        {"path": ["^/channel/.*"], "label": r"(?i)select files", "field_ids": ["Filedata"],
+         "hidden_input": True}]},
+})
+
+
+def _studio_input(**extra):
+    """YouTube Studio's real upload control, as observed 2026-11-22."""
+    return _file_input(name="Filedata", multiple="", tabindex="-1",
+                       style="position: absolute; opacity: 0; display: none;",
+                       **{"aria-hidden": "true", **extra})
+
+
+def test_a_hidden_input_is_admitted_by_an_opted_in_field_id():
+    assert validate_upload_target(_HIDDEN_UPLOAD_RULES, STUDIO, "input[name=Filedata]",
+                                  _found(_studio_input())) is True
+
+
+def test_an_opted_in_input_is_reported_hidden_even_when_its_attributes_look_visible():
+    """A stylesheet class or a hidden ancestor hides it where the snapshot can't see.
+
+    The backend's live visibility check would refuse it, so an opted-in match
+    must waive that check whatever the input's own attributes say.
+    """
+    assert validate_upload_target(_HIDDEN_UPLOAD_RULES, STUDIO, "input[name=Filedata]",
+                                  _found(_file_input(name="Filedata", **{"class": "sr-only"}))) is True
+
+
+def test_an_input_admitted_without_the_opt_in_is_not_reported_hidden():
+    assert validate_upload_target(_UPLOAD_RULES, SPLITWISE, "#bill_file_expense",
+                                  _found(_file_input(node_id="bill_file_expense"))) is False
+
+
+def test_the_opt_in_covers_only_its_own_rules_field_ids():
+    """A field named by a rule WITHOUT hidden_input stays visible-only, even on a
+    page where another rule opts a different field in."""
+    rules = BrowdenAccessRuleSet({"upload-file": {"studio.youtube.com": [
+        {"path": [".*"], "label": "(?!)", "field_ids": ["Filedata"], "hidden_input": True},
+        {"path": [".*"], "label": "(?!)", "field_ids": ["thumbnail"]}]}})
+    assert validate_upload_target(rules, STUDIO, "input",
+                                  _found(_file_input(name="thumbnail"))) is False
+    with pytest.raises(ValidationError, match="not a file input"):
+        validate_upload_target(rules, STUDIO, "input",
+                               _found(_file_input(name="thumbnail", style="display:none")))
+
+
+def test_a_hidden_input_is_refused_without_the_opt_in():
+    rules = BrowdenAccessRuleSet({"upload-file": {"studio.youtube.com": [
+        {"path": [".*"], "label": ".*", "field_ids": ["Filedata"]}]}})
+    with pytest.raises(ValidationError, match="not a file input"):
+        validate_upload_target(rules, STUDIO, "input", _found(_studio_input()))
+
+
+def test_a_hidden_input_is_never_admitted_by_its_label():
+    """The opt-in widens field_ids only: a page-supplied label never vouches for a hidden control."""
+    with pytest.raises(ValidationError, match="not a file input"):
+        validate_upload_target(_HIDDEN_UPLOAD_RULES, STUDIO, "input",
+                               _found(_file_input(name="other", style="display:none",
+                                                  **{"aria-label": "Select files"})))
+
+
+def test_a_hidden_input_with_an_unlisted_name_is_refused():
+    with pytest.raises(ValidationError, match="not a file input"):
+        validate_upload_target(_HIDDEN_UPLOAD_RULES, STUDIO, "input",
+                               _found(_file_input(name="avatar", style="display:none")))
+
+
+def test_the_opt_in_only_covers_the_pages_its_rule_matches():
+    with pytest.raises(ValidationError, match="not a file input"):
+        validate_upload_target(_HIDDEN_UPLOAD_RULES, "https://studio.youtube.com/settings",
+                               "input", _found(_studio_input()))
+
+
+def test_the_opt_in_does_not_admit_a_disabled_or_decoy_hidden_input():
+    for extra in ({"disabled": ""}, {"data-agent-action": "upload"}):
+        with pytest.raises(ValidationError, match="not a file input"):
+            validate_upload_target(_HIDDEN_UPLOAD_RULES, STUDIO, "input",
+                                   _found(_studio_input(**extra)))
+
+
+def test_the_gate_records_a_hidden_admission_for_the_action(tmp_path):
+    location = tmp_path / "uploads"
+    location.mkdir()
+    (location / "short.mp4").write_bytes(b"mp4")
+    rules = BrowdenAccessRuleSet({
+        "upload-file": {"studio.youtube.com": [
+            {"path": [".*"], "label": "(?!)", "field_ids": ["Filedata"], "hidden_input": True}]},
+        "allowed_upload_locations": [str(location)],
+    })
+    gate = upload_file_gate(rules, str(location / "short.mp4"))
+    assert gate.control.hidden is False
+    gate.check_page(STUDIO)
+    gate.check_element(STUDIO, "input", _found(_studio_input()))
+    assert gate.control.hidden is True

@@ -7,6 +7,19 @@ All notable changes to browden are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+- **`upload_file` can reach a hidden file input, per rule.** Most sites hide the
+  real `<input type="file">` and draw their own "Select files" button, which
+  opens the OS file dialog that browden cannot drive. YouTube Studio's upload
+  input, for example, is `display:none` + `aria-hidden`, so every gate refused
+  it. An `upload-file` page rule may now set `hidden_input: true`, and its
+  `field_ids` then also admit such an input despite `display:none`, the `hidden`
+  attribute or `aria-hidden`, and the backend's live "is displayed" check is
+  waived for that input only, so an input hidden by a stylesheet class or a
+  hidden ancestor works too. Decoy markup, `disabled` and `readonly` still refuse, a
+  label regex never admits a hidden input, and the schema rejects
+  `hidden_input` outside `upload-file` or without `field_ids`.
+
 ### Changed
 - **Every read and write tool now says how it stands with the DOM cache.** The
   read tools answer from a per-tab snapshot, and `click`, `insert_text`,
@@ -28,6 +41,12 @@ All notable changes to browden are documented here. The format follows
   more. [docs/dom-reads.md](./docs/dom-reads.md#the-dom-cache-which-page-a-read-sees)
   has a new section listing everything that drops or keeps the snapshot, and how
   to poll a page that reacts late (#193).
+
+- **A `multiple` file input is no longer refused.** It still holds exactly one
+  file: `upload_file` takes one path, refuses any control character in it (the
+  only way one path could name a second file to the driver), and empties the
+  input first, because ChromeDriver appends to a `multiple` input's file list —
+  a retried upload, or a file a human picked earlier, would otherwise go along.
 
 ### Fixed
 - **A write that fails partway no longer leaves the old DOM snapshot answering

@@ -285,6 +285,16 @@ def test_load_page_scoped_rules(tmp_path):
     ('upload-file:\n  x.com:\n    - path: [".*"]\n      label: ".*"\n      keys: [Enter]\n',
      "unknown keys"),
     ('upload-file:\n  x.com:\n    - path: [".*"]\n', "'label' is required"),
+    # hidden_input is upload-file's alone, must be a boolean, and needs field_ids
+    ('write-text:\n  x.com:\n    - path: [".*"]\n      label: ".*"\n      field_ids: [a]\n'
+     '      hidden_input: true\n', "unknown keys"),
+    ('click:\n  x.com:\n    label: ".*"\n    hidden_input: true\n', "unknown keys"),
+    ('upload-file:\n  x.com:\n    - path: [".*"]\n      label: ".*"\n      field_ids: [a]\n'
+     '      hidden_input: "yes"\n', "hidden_input: must be true or false"),
+    ('upload-file:\n  x.com:\n    - path: [".*"]\n      label: ".*"\n      hidden_input: true\n',
+     "hidden_input: needs field_ids"),
+    ('upload-file:\n  x.com:\n    label: ".*"\n    field_ids: []\n    hidden_input: true\n',
+     "hidden_input: needs field_ids"),
     # infra
     ("infra:\n  max_tabs_per_session: -1\n", "must be a positive integer"),
     ("infra:\n  reap_interval_seconds: 0\n", "must be a positive integer"),
@@ -477,3 +487,20 @@ def test_resolve_falls_back_to_sample(monkeypatch, tmp_path):
     monkeypatch.delenv("BROWDEN_ALLOWLIST", raising=False)
     monkeypatch.setattr(loader_pkg.loader, "USER_CONFIG_DIR", tmp_path / "absent")
     assert resolve_allowlist_path() == SAMPLE_ALLOWLIST
+
+
+def test_hidden_input_loads_onto_the_upload_file_page_rule(tmp_path):
+    f = tmp_path / "allowlist.yaml"
+    f.write_text(
+        "upload-file:\n"
+        "  studio.youtube.com:\n"
+        "    - path: ['^/channel/.*']\n"
+        "      label: '(?!)'\n"
+        "      field_ids: [Filedata]\n"
+        "      hidden_input: true\n"
+        "    - path: ['^/video/.*']\n"
+        "      label: '(?!)'\n"
+        "      field_ids: [Filedata]\n")
+    rules = load_runtime_configuration(f).access_rules
+    assert [r.hidden_input for r in rules.rules_for("upload-file", "studio.youtube.com", "/channel/U")] == [True]
+    assert [r.hidden_input for r in rules.rules_for("upload-file", "studio.youtube.com", "/video/v")] == [False]
