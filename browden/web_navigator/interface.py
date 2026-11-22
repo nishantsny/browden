@@ -222,12 +222,13 @@ class WebNavigatorBackend(ABC):
         """
 
     @abstractmethod
-    def upload_file_target(self, ref, file_path: str) -> dict:
+    def upload_file_target(self, ref, file_path: str, *, hidden: bool = False) -> dict:
         """Set the file input ``ref`` (from :meth:`target_snapshot`) to ``file_path``.
 
         Like :meth:`click_target`. ``file_path`` is an absolute path to a regular
         file on this machine; *which* files may be sent anywhere is policy, judged
-        by the caller before this is reached.
+        by the caller before this is reached. ``hidden=True`` waives the "is
+        displayed" check for an input the caller's gate admitted as hidden.
         """
 
     @abstractmethod

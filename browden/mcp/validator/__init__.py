@@ -28,6 +28,7 @@ from .read_gates import (
 )
 from .write_gates import (
     MAX_UPLOAD_BYTES,
+    AdmittedControl,
     AdmittedFile,
     UploadFileGate,
     WriteGate,
@@ -46,6 +47,7 @@ from .write_gates import (
 
 __all__ = [
     "ACTIVATION_KEYS",
+    "AdmittedControl",
     "AdmittedFile",
     "BrowdenAccessRuleSet",
     "BrowdenRuntimeConfiguration",

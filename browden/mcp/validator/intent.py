@@ -323,7 +323,7 @@ def is_fillable_control(node: dict) -> bool:
     return ce is not None and ce.lower() in ("", "true", "plaintext-only")
 
 
-def is_uploadable_control(node: dict) -> bool:
+def is_uploadable_control(node: dict, *, allow_hidden: bool = False) -> bool:
     """True iff ``node`` is a real, visible, non-decoy ``<input type="file">``.
 
     The ``upload-file`` analogue of :func:`is_fillable_control`: integrity +
@@ -333,24 +333,32 @@ def is_uploadable_control(node: dict) -> bool:
     control by the ``upload-file`` allowlist label / ``field_ids``.
 
     A readonly file input is refused for the same reason a readonly text box is:
-    a field the human could not fill is not one the agent may fill either. A
-    ``multiple`` input is refused too: this action uploads one file, and that is
-    the control that could hold a second.
+    a field the human could not fill is not one the agent may fill either.
+
+    A ``multiple`` input is accepted. It still holds exactly one file: the
+    action takes one path, ``validate_upload_path`` refuses any control
+    character in it (the only way one path could name a second file to the
+    driver), and the backend empties the input first, since the driver appends
+    to a ``multiple`` input rather than replacing what it holds.
+
+    ``allow_hidden=True`` drops the *rendering* checks — inline ``display:none``,
+    the ``hidden`` attribute and ``aria-hidden`` — and nothing else. It is how a
+    site's real file input usually looks: the native control is hidden and the
+    page draws its own "Select files" button, which opens the OS dialog that
+    browden cannot drive. Only the write gate passes it, and only for an input the
+    operator named by ``id``/``name`` in a rule that opts in with
+    ``hidden_input: true``. Decoy markup, ``disabled`` and ``readonly`` still refuse.
 
     Default-deny: every check must pass. ``node`` is a serialized element dict.
     """
     if not node:
         return False
     attrs = node.get("attributes", {})
-    if _fails_integrity(attrs):
+    if allow_hidden:
+        attrs = {k: v for k, v in attrs.items() if k not in ("hidden", "aria-hidden")}
+    if _fails_integrity(attrs, require_rendered=not allow_hidden):
         return False
     if "readonly" in attrs or attrs.get("aria-readonly") == "true":
-        return False
-    # One file per upload. A `multiple` input is the only control that can hold
-    # more than one, so refusing it here means a single admitted path is also a
-    # single file at the browser — nothing can arrive alongside it. Lifting this
-    # is a deliberate later step, with its own way to authorize a set of files.
-    if "multiple" in attrs:
         return False
     return node.get("tag") == "input" and attrs.get("type") in _UPLOADABLE_INPUT_TYPES
 

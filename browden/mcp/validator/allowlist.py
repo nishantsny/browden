@@ -101,6 +101,10 @@ class PageRule:
     # `key` values, e.g. {"Enter", "ArrowDown"}). Empty for every other action —
     # and a press-key rule with an empty set authorizes nothing (fail-closed).
     keys: "frozenset[str]" = frozenset()
+    # `upload-file` only: this rule's `field_ids` also admit a file input the page
+    # has hidden (display:none / hidden / aria-hidden) behind its own picker button.
+    # False everywhere else, and it never widens what `label` authorizes.
+    hidden_input: bool = False
 
     def matches_page(self, path: str, query: str = "", fragment: str = "",
                      *, full_match: bool) -> bool:
@@ -149,8 +153,11 @@ def _page_rule_from_mapping(rule: dict, *, want_label: bool, where: str) -> Page
     # it. Parsed generically here (kept as authored strings) — the press-key gate
     # is what enforces "must be a control key" and "must authorize the pressed key".
     keys = frozenset(str(k) for k in (rule.get("keys") or []))
+    # Only `is True`: the schema insists on a boolean, and anything else must not
+    # read as an opt-in to hidden controls.
+    hidden_input = rule.get("hidden_input") is True
     return PageRule(patterns=_as_pattern_tuple(raw), match_on=match_on,
-                    label=label, field_ids=field_ids, keys=keys)
+                    label=label, field_ids=field_ids, keys=keys, hidden_input=hidden_input)
 
 
 def _coerce_page_rules(spec: object, *, want_label: bool, where: str) -> list[PageRule]:
