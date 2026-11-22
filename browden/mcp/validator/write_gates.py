@@ -288,6 +288,11 @@ def validate_upload_target(access_rules: BrowdenAccessRuleSet, url: str,
     gate 2 only through a rule matching this URL that sets ``hidden_input: true``
     *and* names the input's id/name in its own ``field_ids``. That same match is
     its gate 3, so a label regex never admits a hidden control.
+
+    Such a match reports the input as hidden whether or not its own attributes
+    show it: a page can just as well hide it with a stylesheet class, a hidden
+    ancestor or zero size, which the snapshot cannot see but the backend's live
+    visibility check would still refuse.
     """
     node = _single_node(found, css_selector, "refusing to upload")
     p = urlparse(url)
@@ -295,10 +300,10 @@ def validate_upload_target(access_rules: BrowdenAccessRuleSet, url: str,
 
     # Gate 2: the element must be a single, real, visible, non-decoy file input —
     # or, failing visibility alone, one the operator opted in to by id/name.
+    hidden_ok = any(r.hidden_input and field_id_matches(node, r.field_ids) for r in rules)
+    if hidden_ok and is_uploadable_control(node, allow_hidden=True):
+        return True
     if not is_uploadable_control(node):
-        hidden_ok = any(r.hidden_input and field_id_matches(node, r.field_ids) for r in rules)
-        if hidden_ok and is_uploadable_control(node, allow_hidden=True):
-            return True
         raise ValidationError(
             "selected element is not a file input (or is a "
             "hidden/disabled/readonly/decoy element) — refusing to upload")

@@ -1052,9 +1052,18 @@ class SeleniumChromeBackend(WebNavigatorBackend):
         it is not required to be displayed. ChromeDriver accepts ``send_keys`` on
         a hidden file input (W3C ``strictFileInteractability`` is off by default),
         which is what makes such an input reachable at all.
+
+        A ``multiple`` input is emptied first. ChromeDriver *appends* to such an
+        input's file list (W3C), so a second call, or a file a human picked
+        earlier, would otherwise travel with this one; emptying it keeps "one
+        admitted path, one file at the browser". Assigning ``""`` to a file
+        input's ``value`` is the one write the platform allows, it clears the
+        list, and it fires no ``change`` event.
         """
         drv = self._drv()
         el = self._vet(ref, require_displayed=not hidden)
+        if el.get_dom_attribute("multiple") is not None:
+            drv.execute_script("arguments[0].value = '';", el)
         el.send_keys(file_path)
         return {
             "uploaded": True,

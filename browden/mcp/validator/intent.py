@@ -335,10 +335,11 @@ def is_uploadable_control(node: dict, *, allow_hidden: bool = False) -> bool:
     A readonly file input is refused for the same reason a readonly text box is:
     a field the human could not fill is not one the agent may fill either.
 
-    A ``multiple`` input is accepted. It still receives exactly one file: the
-    action takes one path, and ``validate_upload_path`` refuses any control
-    character in it, which is the only way one path could name a second file to
-    the driver.
+    A ``multiple`` input is accepted. It still holds exactly one file: the
+    action takes one path, ``validate_upload_path`` refuses any control
+    character in it (the only way one path could name a second file to the
+    driver), and the backend empties the input first, since the driver appends
+    to a ``multiple`` input rather than replacing what it holds.
 
     ``allow_hidden=True`` drops the *rendering* checks — inline ``display:none``,
     the ``hidden`` attribute and ``aria-hidden`` — and nothing else. It is how a

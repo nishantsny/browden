@@ -53,7 +53,7 @@ allowed_upload_locations:
 #   1. host+page — the host is listed here and some rule's `path` matches the page.
 #   2. file input — the target is a real, visible, non-decoy, non-readonly
 #      <input type="file">. A text box is NOT uploadable, whatever it is named.
-#      A `multiple` input is fine: it receives the one file. A HIDDEN input (the
+#      A `multiple` input is fine: it is emptied, then holds the one file. A HIDDEN input (the
 #      usual pattern: the page hides the native control behind its own button)
 #      passes only when the rule sets `hidden_input: true` and names its exact
 #      id/name in `field_ids` — see the commented example at the end.
@@ -89,7 +89,8 @@ upload-file:
 #   <input type="file" name="Filedata" multiple aria-hidden="true" style="display: none">
 # Clicking the button opens the OS file dialog, which browden cannot drive, so
 # the hidden input is the only way in. `hidden_input: true` lets this rule's
-# `field_ids` admit it despite display:none / hidden / aria-hidden; decoy markup,
+# `field_ids` admit it however the page hid it (display:none, hidden,
+# aria-hidden, a CSS class, a hidden parent); decoy markup,
 # disabled and readonly still refuse, and the label regex never admits a hidden
 # input. Target it by its name, e.g. css_selector: input[type=file][name=Filedata].
 #

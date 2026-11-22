@@ -499,9 +499,32 @@ def test_a_hidden_input_is_admitted_by_an_opted_in_field_id():
                                   _found(_studio_input())) is True
 
 
-def test_a_visible_input_is_not_reported_as_hidden():
+def test_an_opted_in_input_is_reported_hidden_even_when_its_attributes_look_visible():
+    """A stylesheet class or a hidden ancestor hides it where the snapshot can't see.
+
+    The backend's live visibility check would refuse it, so an opted-in match
+    must waive that check whatever the input's own attributes say.
+    """
     assert validate_upload_target(_HIDDEN_UPLOAD_RULES, STUDIO, "input[name=Filedata]",
-                                  _found(_file_input(name="Filedata"))) is False
+                                  _found(_file_input(name="Filedata", **{"class": "sr-only"}))) is True
+
+
+def test_an_input_admitted_without_the_opt_in_is_not_reported_hidden():
+    assert validate_upload_target(_UPLOAD_RULES, SPLITWISE, "#bill_file_expense",
+                                  _found(_file_input(node_id="bill_file_expense"))) is False
+
+
+def test_the_opt_in_covers_only_its_own_rules_field_ids():
+    """A field named by a rule WITHOUT hidden_input stays visible-only, even on a
+    page where another rule opts a different field in."""
+    rules = BrowdenAccessRuleSet({"upload-file": {"studio.youtube.com": [
+        {"path": [".*"], "label": "(?!)", "field_ids": ["Filedata"], "hidden_input": True},
+        {"path": [".*"], "label": "(?!)", "field_ids": ["thumbnail"]}]}})
+    assert validate_upload_target(rules, STUDIO, "input",
+                                  _found(_file_input(name="thumbnail"))) is False
+    with pytest.raises(ValidationError, match="not a file input"):
+        validate_upload_target(rules, STUDIO, "input",
+                               _found(_file_input(name="thumbnail", style="display:none")))
 
 
 def test_a_hidden_input_is_refused_without_the_opt_in():
@@ -515,7 +538,7 @@ def test_a_hidden_input_is_never_admitted_by_its_label():
     """The opt-in widens field_ids only: a page-supplied label never vouches for a hidden control."""
     with pytest.raises(ValidationError, match="not a file input"):
         validate_upload_target(_HIDDEN_UPLOAD_RULES, STUDIO, "input",
-                               _found(_file_input(style="display:none",
+                               _found(_file_input(name="other", style="display:none",
                                                   **{"aria-label": "Select files"})))
 
 

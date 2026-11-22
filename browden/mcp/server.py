@@ -438,7 +438,8 @@ async def upload_file(css_selector: str, file_path: str, id: str) -> dict:
          matches this page.
       2. ``css_selector`` must resolve to exactly one element that is a real,
          visible, non-decoy, non-readonly ``<input type="file">``. Integrity, not
-         intent. A ``multiple`` input is accepted and receives the one file.
+         intent. A ``multiple`` input is accepted: it is emptied first, then
+         holds the one file.
          Most sites hide the real input and draw their own "Select files"
          button: target the hidden ``<input type="file">`` itself, never the
          button (clicking it opens the OS dialog). A hidden input passes only

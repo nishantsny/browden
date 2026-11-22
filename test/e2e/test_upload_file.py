@@ -76,6 +76,16 @@ HIDDEN_HTML = """<html><body>
 
 HIDDEN_DATA_URL = "data:text/html," + urllib.parse.quote(HIDDEN_HTML)
 
+# The same input hidden where the snapshot cannot see it: by a stylesheet class,
+# and by a hidden ancestor. Its own attributes look like a visible control.
+_PLAIN_INPUT = '<input type="file" name="Filedata" multiple{attrs}/>'
+CLASS_HIDDEN_DATA_URL = "data:text/html," + urllib.parse.quote(HIDDEN_HTML.replace(
+    HIDDEN_HTML[HIDDEN_HTML.index("<input"):HIDDEN_HTML.index("/>") + 2],
+    "<style>.sr-only { display: none; }</style>" + _PLAIN_INPUT.format(attrs=' class="sr-only"')))
+ANCESTOR_HIDDEN_DATA_URL = "data:text/html," + urllib.parse.quote(HIDDEN_HTML.replace(
+    HIDDEN_HTML[HIDDEN_HTML.index("<input"):HIDDEN_HTML.index("/>") + 2],
+    '<div style="display: none">' + _PLAIN_INPUT.format(attrs="") + "</div>"))
+
 
 @pytest.fixture
 def session(new_backend, tmp_path):
@@ -209,3 +219,33 @@ async def test_the_backend_still_refuses_a_hidden_input_the_gate_did_not_admit_a
         await session.upload_file("input[type=file][name=Filedata]", id=page["id"],
                                   gate=open_upload_gate(receipt))
     assert await _state(session, page["id"]) == "none"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("url", [CLASS_HIDDEN_DATA_URL, ANCESTOR_HIDDEN_DATA_URL],
+                         ids=["css-class", "hidden-ancestor"])
+async def test_an_opted_in_input_hidden_where_the_snapshot_cannot_see_receives_the_file(
+        session, receipt, url):
+    page = await _page(session, url)
+    gate = _hidden_input_gate(receipt.parent, receipt, hidden_input=True)
+    await session.upload_file("input[type=file][name=Filedata]", id=page["id"], gate=gate)
+    assert gate.control.hidden is True
+    assert await _state(session, page["id"]) == "1:lunch.txt:LUNCH-RECEIPT"
+
+
+@pytest.mark.asyncio
+async def test_a_second_upload_to_a_multiple_input_replaces_the_first(session, receipt):
+    """ChromeDriver appends to a `multiple` input; the backend empties it first,
+    so the input never holds more than the one file this call admitted."""
+    dinner = receipt.parent / "dinner.txt"
+    dinner.write_text("DINNER-RECEIPT")
+    page = await _page(session, HIDDEN_DATA_URL)
+    selector = "input[type=file][name=Filedata]"
+
+    await session.upload_file(selector, id=page["id"],
+                              gate=_hidden_input_gate(receipt.parent, receipt, hidden_input=True))
+    assert await _state(session, page["id"]) == "1:lunch.txt:LUNCH-RECEIPT"
+
+    await session.upload_file(selector, id=page["id"],
+                              gate=_hidden_input_gate(receipt.parent, dinner, hidden_input=True))
+    assert await _state(session, page["id"]) == "1:dinner.txt:DINNER-RECEIPT"
