@@ -43,13 +43,12 @@ async def test_mcp_endpoint(mcp_server, mcp_client_session):
         query_data = json.loads(query_res.content[0].text)
         assert query_data.get("found") is True
     
-        # navigate to a data: URL -> MCP tool error (no netloc => validate_url rejects) -> proves validator is live
-        try:
-            nav_res = await mcp_client.call_tool("navigate", {"url": "data:text/html,<h1>Hello</h1>", "id": handle})
-            assert nav_res.isError is True
-        except Exception as e:
-            # MCP python SDK might raise an exception if it's a server error
-            assert "ValidationError" in str(e) or "not allowed" in str(e) or "error" in str(e).lower()
+        # navigate to a data: URL -> MCP tool error (validate_url reads it as a host named "data", which is on
+        # no allowlist) -> proves the validator is live, and that the refusal's reason reaches the client and
+        # not only the fact of an error.
+        nav_res = await mcp_client.call_tool("navigate", {"url": "data:text/html,<h1>Hello</h1>", "id": handle})
+        assert nav_res.is_error is True
+        assert "not on allowlist" in nav_res.content[0].text
     
         # invalidate_dom_cache drops the snapshot that query built; the next read
         # re-fetches and still answers.
@@ -60,9 +59,9 @@ async def test_mcp_endpoint(mcp_server, mcp_client_session):
 
         # screenshot returns image content
         screenshot_res = await mcp_client.call_tool("screenshot", {"id": handle})
-        assert not screenshot_res.isError
+        assert not screenshot_res.is_error
         assert any(c.type == "image" for c in screenshot_res.content)
     
         # close_tab works
         close_res = await mcp_client.call_tool("close_tab", {"id": handle})
-        assert not close_res.isError
+        assert not close_res.is_error

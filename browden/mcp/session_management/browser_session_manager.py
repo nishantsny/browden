@@ -10,7 +10,7 @@ The store routes an id to the right manager; the manager owns the id from there.
 
 Concurrency model (one lock per session):
 
-* One asyncio event loop (FastMCP's). The pure work — cache lookup/invalidate,
+* One asyncio event loop (MCPServer's). The pure work — cache lookup/invalidate,
   registry touch/forget, query, serialize — runs synchronously on the loop
   thread and is therefore atomic w.r.t. other coroutines.
 * Selenium is synchronous and not thread-safe, and a session's tabs share one

@@ -721,3 +721,101 @@ async def test_list_tabs_judges_each_profiles_tabs_by_its_own_rules(monkeypatch)
     assert [t["id"] for t in listed] == ["ok"]
     assert refused.list_tabs.closed == ["closed"]
     assert allowed.list_tabs.closed == []
+
+
+# -- what an MCP caller is told ------------------------------------------------
+#
+# These go through an MCP client connected to the server in-process, because the
+# subject is what MCPServer does with a tool's exception, which a direct call to
+# the tool function never reaches. MCPServer answers a client along two paths
+# and each test takes both: "legacy" is the ``initialize`` handshake, which is
+# what a client over SSE or stdio does today; "auto" is the per-request path of
+# the 2026-07-28 protocol.
+
+_CLIENT_MODES = pytest.mark.parametrize("mode", ["legacy", "auto"])
+
+
+@_CLIENT_MODES
+@pytest.mark.asyncio
+async def test_a_refusal_reaches_the_mcp_caller_with_its_reason(mode):
+    # MCPServer passes on the text of a ToolError and withholds any other
+    # exception's, so without the conversion in ``_mcp_tool`` the caller would be
+    # told "Error executing tool navigate" and not which gate turned it down.
+    from mcp import Client
+    import browden.mcp.server as server
+    importlib.reload(server)
+    session = _fake_session(navigate={"id": "pre-h1"})
+    with patch.object(server._store, "route", return_value=session):
+        async with Client(server.mcp, mode=mode) as client:
+            result = await client.call_tool("navigate", {"url": "nonexistent-xyz-9876.test", "id": "pre-h1"})
+
+    assert result.is_error is True
+    assert "not on allowlist: nonexistent-xyz-9876.test" in result.content[0].text
+    session.navigate.assert_not_awaited()
+
+
+@_CLIENT_MODES
+@pytest.mark.asyncio
+async def test_a_browser_failure_reaches_the_mcp_caller_with_its_message(mode):
+    # Not a refusal of browden's own: the browser failed. The caller still needs
+    # the message to tell a host that does not resolve from a page that timed out.
+    from mcp import Client
+    import browden.mcp.server as server
+    importlib.reload(server)
+    session = _fake_session()
+    session.navigate = AsyncMock(side_effect=RuntimeError("unknown error: net::ERR_NAME_NOT_RESOLVED"))
+    with patch.object(server._store, "route", return_value=session):
+        async with Client(server.mcp, mode=mode) as client:
+            result = await client.call_tool("navigate", {"url": "amazon.com", "id": "pre-h1"})
+
+    assert result.is_error is True
+    assert "net::ERR_NAME_NOT_RESOLVED" in result.content[0].text
+
+
+@_CLIENT_MODES
+@pytest.mark.asyncio
+async def test_every_tool_reports_its_failures_to_the_mcp_caller(mode):
+    # The conversion is per registration, so a tool registered with a bare
+    # ``mcp.tool()`` would go back to withholding its messages. Every tool
+    # reaches the session store first, so a store that fails makes each one fail.
+    from mcp import Client
+    import browden.mcp.server as server
+    importlib.reload(server)
+
+    class StoreFailure(Exception):
+        """Not a type any tool catches, so it leaves the tool as an exception."""
+
+    failure = StoreFailure("the reason")
+    # Arguments that satisfy any tool's schema; each tool is sent only its own.
+    arguments = {"id": "pre-h1", "url": "amazon.com", "css_selector": "a", "value": "v", "file_path": "/f",
+                 "key": "Enter", "element_id": "e", "class_names": "c"}
+    with patch("browden.mcp.server.SeleniumChromeBackend"), \
+         patch.object(server._store, "route", side_effect=failure), \
+         patch.object(server._store, "sessions", side_effect=failure), \
+         patch.object(server._store, "get_or_create_session", side_effect=failure):
+        async with Client(server.mcp, mode=mode) as client:
+            tools = (await client.list_tools()).tools
+            results = {
+                tool.name: await client.call_tool(
+                    tool.name, {k: v for k, v in arguments.items() if k in tool.input_schema["properties"]})
+                for tool in tools
+            }
+
+    assert results
+    silent = [name for name, result in results.items()
+              if not (result.is_error and "the reason" in result.content[0].text)]
+    assert silent == []
+
+
+@_CLIENT_MODES
+@pytest.mark.asyncio
+async def test_the_server_reports_browdens_own_version(mode):
+    import importlib.metadata
+    from mcp import Client
+    import browden.mcp.server as server
+    importlib.reload(server)
+    async with Client(server.mcp, mode=mode) as client:
+        info = client.server_info
+
+    assert info.name == "browden"
+    assert info.version == importlib.metadata.version("browden")

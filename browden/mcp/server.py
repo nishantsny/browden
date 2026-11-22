@@ -2,6 +2,7 @@ import argparse
 import asyncio
 import contextlib
 import functools
+import importlib.metadata
 import os
 import signal
 import sys
@@ -20,7 +21,7 @@ from ..configs.loader import (
     load_runtime_configuration,
     resolve_allowlist_path,
 )
-from ..dependencies.mcp import FastMCP, Image
+from ..dependencies.mcp import Image, MCPServer, ToolError
 from ..dependencies.pydantic import Field
 from ..web_navigator.selenium_chrome import SeleniumChromeBackend
 from .session_management.browser_session_store import BrowserSessionStore, UnknownTabError
@@ -49,7 +50,7 @@ _INSTRUCTIONS = (
 
 
 @contextlib.asynccontextmanager
-async def _runtime_configuration_lifespan(_server: FastMCP) -> AsyncIterator[None]:
+async def _runtime_configuration_lifespan(_server: MCPServer) -> AsyncIterator[None]:
     """Run the live allowlist's hot-reload poller for the server's lifetime.
 
     Delegates to the refresher (see ``configs/loader/refresher.py``): the poller
@@ -60,11 +61,21 @@ async def _runtime_configuration_lifespan(_server: FastMCP) -> AsyncIterator[Non
         yield
 
 
-mcp = FastMCP(
+def _version() -> str:
+    """browden's installed version, for the handshake's ``serverInfo``.
+
+    Empty when browden runs from a source tree that was never installed.
+    """
+    try:
+        return importlib.metadata.version("browden")
+    except importlib.metadata.PackageNotFoundError:
+        return ""
+
+
+mcp = MCPServer(
     "browden",
     instructions=_INSTRUCTIONS,
-    host=os.environ.get("MCP_HOST", DEFAULT_HOST),
-    port=int(os.environ.get("MCP_PORT", DEFAULT_PORT)),
+    version=_version(),
     lifespan=_runtime_configuration_lifespan,
 )
 
@@ -158,16 +169,41 @@ def _tool(fn: Callable[..., Awaitable[dict]]) -> Callable[..., Awaitable[dict]]:
         except UnknownTabError as e:
             return e.envelope
         except SessionBusyError as e:
-            # FastMCP calls tools with keyword arguments, so the tab's id (if the
+            # MCPServer calls tools with keyword arguments, so the tab's id (if the
             # tool takes one) is in kwargs.
             id = kwargs.get("id")
             return e.envelope if id is None else {**e.envelope, "id": id}
     return wrapper
 
 
+def _mcp_tool(fn: Callable[..., Awaitable]) -> Callable[..., Awaitable]:
+    """Register ``fn`` as an MCP tool whose failures reach the caller with their message.
+
+    MCPServer sends a caller the text of a ``ToolError`` and nothing else: any
+    other exception is a crash to it, reported as a bare ``Error executing tool
+    <name>``. (mcp 1.x sent every exception's message.) The message is how a
+    caller learns what to do next — that the URL is not on the allowlist, that
+    no rule admits the click, that the host did not resolve — so every
+    exception goes out as a ``ToolError`` carrying it.
+
+    Returns ``fn`` itself, not the registered wrapper, so code that calls a tool
+    function directly still gets the exception it raised.
+    """
+    @functools.wraps(fn)
+    async def reporting(*args, **kwargs):
+        try:
+            return await fn(*args, **kwargs)
+        except ToolError:
+            raise
+        except Exception as e:
+            raise ToolError(str(e)) from e
+    mcp.tool()(reporting)
+    return fn
+
+
 # -- navigation tools -------------------------------------------------------
 
-@mcp.tool()
+@_mcp_tool
 async def list_tabs() -> list[dict]:
     """List all open browser tabs across all profiles' sessions.
 
@@ -204,7 +240,7 @@ async def list_tabs() -> list[dict]:
     return [tab for tabs in listings for tab in tabs]
 
 
-@mcp.tool()
+@_mcp_tool
 async def list_profiles() -> list[dict]:
     """List the browser profiles, where each comes from, and what each is for.
 
@@ -240,7 +276,7 @@ async def list_profiles() -> list[dict]:
     return profiles
 
 
-@mcp.tool()
+@_mcp_tool
 async def new_blank_tab(profile_dir: str | None = None, incognito: bool = False,
                         software_webgl: bool = False) -> dict:
     """Open a new blank tab and return it (navigate it afterwards).
@@ -304,7 +340,7 @@ async def new_blank_tab(profile_dir: str | None = None, incognito: bool = False,
     logger.info("Tool finished: new_blank_tab")
     return result
 
-@mcp.tool()
+@_mcp_tool
 @_tool
 async def close_tab(id: str) -> dict:
     """Close a tab by id."""
@@ -315,7 +351,7 @@ async def close_tab(id: str) -> dict:
     return {"closed": id}
 
 
-@mcp.tool()
+@_mcp_tool
 @_tool
 async def select_tab(id: str) -> dict:
     """Switch the active tab."""
@@ -326,7 +362,7 @@ async def select_tab(id: str) -> dict:
     return result
 
 
-@mcp.tool()
+@_mcp_tool
 @_tool
 async def navigate(url: str, id: str) -> dict:
     """Navigate the named tab to url. Url is gated by the per-host allowlist (query strings and fragments pass through)."""
@@ -343,7 +379,7 @@ async def navigate(url: str, id: str) -> dict:
 
 # -- write tools ------------------------------------------------------------
 
-@mcp.tool()
+@_mcp_tool
 @_tool
 async def click(css_selector: str, id: str) -> dict:
     """Click a control on a tab — the click action.
@@ -393,7 +429,7 @@ async def click(css_selector: str, id: str) -> dict:
     return result
 
 
-@mcp.tool()
+@_mcp_tool
 @_tool
 async def insert_text(css_selector: str, value: str, id: str) -> dict:
     """Type text into a field on a tab — the write-text action.
@@ -436,7 +472,7 @@ async def insert_text(css_selector: str, value: str, id: str) -> dict:
     return result
 
 
-@mcp.tool()
+@_mcp_tool
 @_tool
 async def upload_file(css_selector: str, file_path: str, id: str) -> dict:
     """Attach a local file to a file input on a tab — the upload-file action.
@@ -499,7 +535,7 @@ async def upload_file(css_selector: str, file_path: str, id: str) -> dict:
     return result
 
 
-@mcp.tool()
+@_mcp_tool
 @_tool
 async def press_key(css_selector: str, key: str, id: str) -> dict:
     """Focus an element on a tab and press a single control key — the press-key action.
@@ -541,7 +577,7 @@ async def press_key(css_selector: str, key: str, id: str) -> dict:
     return result
 
 
-# Parameter annotations shared by the four DOM-query tools. FastMCP builds each
+# Parameter annotations shared by the four DOM-query tools. MCPServer builds each
 # tool's JSON schema from these annotations, so a `Field(description=...)` here is
 # the only route by which the response caps reach an MCP client: without it the
 # client sees four bare typed params and has to discover the caps by reading
@@ -579,7 +615,7 @@ Offset = Annotated[int, Field(description=(
 # (browden replays it across the window-refocus every op performs) until moved
 # back or reset by a navigate/reload.
 
-@mcp.tool()
+@_mcp_tool
 @_tool
 async def switch_to_frame(css_selector: str, id: str) -> dict:
     """Switch a tab's focus INTO the iframe matched by css_selector (same-origin only).
@@ -606,7 +642,7 @@ async def switch_to_frame(css_selector: str, id: str) -> dict:
     return result
 
 
-@mcp.tool()
+@_mcp_tool
 @_tool
 async def switch_to_parent_frame(id: str) -> dict:
     """Switch a tab's focus up one frame level, toward the top document.
@@ -624,7 +660,7 @@ async def switch_to_parent_frame(id: str) -> dict:
     return result
 
 
-@mcp.tool()
+@_mcp_tool
 @_tool
 async def switch_to_default_content(id: str) -> dict:
     """Switch a tab's focus back to its top-level document, exiting all iframes.
@@ -652,7 +688,7 @@ async def switch_to_default_content(id: str) -> dict:
 # A id that no longer names an open tab comes back as
 # {"error": ..., "id": ...}.
 
-@mcp.tool()
+@_mcp_tool
 @_tool
 async def get_element_by_id(element_id: str, id: str,
                             include_html: IncludeHtml = False,
@@ -684,7 +720,7 @@ async def get_element_by_id(element_id: str, id: str,
     return result
 
 
-@mcp.tool()
+@_mcp_tool
 @_tool
 async def get_elements_by_class_name(class_names: str, id: str,
                                      limit: Limit = 10, offset: Offset = 0,
@@ -718,7 +754,7 @@ async def get_elements_by_class_name(class_names: str, id: str,
     return result
 
 
-@mcp.tool()
+@_mcp_tool
 @_tool
 async def query_selector(css_selector: str, id: str,
                          include_html: IncludeHtml = False,
@@ -750,7 +786,7 @@ async def query_selector(css_selector: str, id: str,
     return result
 
 
-@mcp.tool()
+@_mcp_tool
 @_tool
 async def query_selector_all(css_selector: str, id: str,
                              limit: Limit = 10, offset: Offset = 0,
@@ -784,9 +820,9 @@ async def query_selector_all(css_selector: str, id: str,
     return result
 
 
-@mcp.tool()
+@_mcp_tool
 @_tool
-async def screenshot(id: str):  # -> dict | Image; unannotated: FastMCP can't schema-ify Image
+async def screenshot(id: str):  # -> dict | Image; unannotated: MCPServer can't schema-ify Image
     """Capture a PNG screenshot of a tab's current viewport.
 
     Read-only: it grabs live pixels from the rendered page and never mutates it
@@ -804,7 +840,7 @@ async def screenshot(id: str):  # -> dict | Image; unannotated: FastMCP can't sc
     return Image(data=result, format="png")
 
 
-@mcp.tool()
+@_mcp_tool
 @_tool
 async def invalidate_dom_cache(id: str) -> dict:
     """Drop a tab's cached DOM snapshot — the next read re-fetches the live HTML.
@@ -839,7 +875,7 @@ async def invalidate_dom_cache(id: str) -> dict:
     return result
 
 
-@mcp.tool()
+@_mcp_tool
 @_tool
 async def force_reload_tab(id: str) -> dict:
     """Reload the named tab and refresh its cached DOM.
@@ -931,7 +967,11 @@ def main(argv: list[str] | None = None) -> None:
     transport = os.environ.get("MCP_TRANSPORT", "stdio")
     logger.info(f"MCP Server starting (transport={transport})")
     if transport == "sse":
-        mcp.run(transport="sse")
+        mcp.run(
+            transport="sse",
+            host=os.environ.get("MCP_HOST", DEFAULT_HOST),
+            port=int(os.environ.get("MCP_PORT", DEFAULT_PORT)),
+        )
     else:
         mcp.run(transport="stdio")
 

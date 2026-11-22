@@ -4,6 +4,7 @@ All in-project code imports MCP framework symbols from here, never directly
 from the SDK. This keeps the surface we depend on visible in one file and
 makes it trivial to mock in unit tests.
 """
-from mcp.server.fastmcp import FastMCP, Image
+from mcp.server.mcpserver import Image, MCPServer
+from mcp.server.mcpserver.exceptions import ToolError
 
-__all__ = ["FastMCP", "Image"]
+__all__ = ["MCPServer", "Image", "ToolError"]

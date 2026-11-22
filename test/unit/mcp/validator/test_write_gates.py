@@ -1,7 +1,7 @@
 """Tests for the composed write-action gate sequences.
 
 These exercise the gate functions moved out of ``server.py`` directly — no
-session or FastMCP in the picture, just the allowlist + a serialized element
+session or MCPServer in the picture, just the allowlist + a serialized element
 node. The tool-level tests (``test_server_click`` / ``test_server_insert_text``)
 still cover the same gates end-to-end; this file pins the composition unit.
 """

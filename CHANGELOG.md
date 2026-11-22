@@ -44,6 +44,36 @@ All notable changes to browden are documented here. The format follows
   has a new section listing everything that drops or keeps the snapshot, and how
   to poll a page that reacts late (#193).
 
+- **browden runs on mcp 2.** The `mcp` requirement moves from `>=1.0,<2` to
+  `>=2.3,<3`, and `uv.lock` from mcp 1.28.1 to 2.3.0. mcp 2 renamed `FastMCP`
+  to `MCPServer` and takes the SSE host and port in `run()`; `MCP_HOST`,
+  `MCP_PORT` and `MCP_TRANSPORT` work as before. The tool list a client
+  receives (names, descriptions, schemas) and the results of calls are the same
+  as under 1.28.1. Two things would have changed and are handled:
+  - mcp 2 withholds the message of an exception a tool raises, so a refused
+    call would have come back as a bare `Error executing tool navigate`.
+    browden's tools still send the reason (`URL not on allowlist: …`,
+    `no click rule authorizes …`, the browser's own error), in the same
+    `Error executing tool <name>: <reason>` form.
+  - The handshake's `serverInfo.version` is now browden's version. Under mcp 1
+    it was the SDK's (`1.28.1`), and mcp 2 would have sent an empty string.
+
+  What does differ, all of it mcp 2's own behaviour:
+  - A request the client cancels gets no reply. mcp 1 answered it with a
+    `Request cancelled` error. The tool call is cancelled either way.
+  - A message POSTed to the SSE endpoint may be at most 4 MiB; a larger one
+    is answered `413`. mcp 1 had no limit. Only an `insert_text` value of
+    several megabytes could reach it.
+  - An unknown method is answered `-32601 Method not found`, where mcp 1 said
+    `-32602 Invalid request parameters`.
+  - `capabilities.experimental: {}` is no longer in the handshake, and results
+    carry mcp 2's new fields.
+  - The server log gains one INFO line per failed tool call, with the failure's
+    message. mcp 1 logged nothing for these.
+
+  The lock drops `httpx`, `httpx-sse`, `httpcore` and `pydantic-settings`, and
+  adds what mcp 2 depends on in their place: `httpx2`, `httpcore2`,
+  `mcp-types`, `opentelemetry-api` and `truststore`. (#177)
 - **A `multiple` file input is no longer refused.** It still holds exactly one
   file: `upload_file` takes one path, refuses any control character in it (the
   only way one path could name a second file to the driver), and empties the

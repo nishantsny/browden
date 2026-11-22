@@ -292,7 +292,7 @@ async def drive(url: str, page_url: str, sampler: Sampler, args) -> None:
             nav_errors = 0
             for tid in ids:
                 r = await s.call_tool("navigate", {"url": page_url, "id": tid})
-                nav_errors += bool(getattr(r, "isError", False))
+                nav_errors += bool(r.is_error)
             await _hold(sampler, "navigate", args.hold)
 
             # 5) screenshot every tab (image bytes transit the Python process)
