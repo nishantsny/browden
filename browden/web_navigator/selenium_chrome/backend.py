@@ -629,15 +629,17 @@ class SeleniumChromeBackend(WebNavigatorBackend):
         )
 
     @staticmethod
-    def _vet(el):
+    def _vet(el, *, require_displayed: bool = True):
         """``el`` if it is still in the page, displayed and enabled; else raise.
 
         The element came from :meth:`target_snapshot` in the same driver hold. If
         the page replaced it since, it is stale, and the caller must not act on
-        whatever stands in its place now.
+        whatever stands in its place now. ``require_displayed=False`` is for a
+        file input the upload gate admitted as hidden; stale and disabled still
+        raise.
         """
         try:
-            if not el.is_displayed():
+            if require_displayed and not el.is_displayed():
                 raise ValueError("target element is not visible")
             if not el.is_enabled():
                 raise ValueError("target element is disabled")
@@ -1033,7 +1035,7 @@ class SeleniumChromeBackend(WebNavigatorBackend):
             "title": drv.title,
         }
 
-    def upload_file_target(self, ref, file_path: str) -> dict:
+    def upload_file_target(self, ref, file_path: str, *, hidden: bool = False) -> dict:
         """Hand ``file_path`` to the file input ``ref``.
 
         ``send_keys(path)`` on an ``<input type=file>`` is Selenium's documented
@@ -1045,9 +1047,14 @@ class SeleniumChromeBackend(WebNavigatorBackend):
         file input ``clear()`` is not the "wipe the old value" step it is for a
         text box, and the path through it is untested here. The caller has
         already judged this exact element and this exact path.
+
+        ``hidden=True`` means the gate admitted this input as a hidden control, so
+        it is not required to be displayed. ChromeDriver accepts ``send_keys`` on
+        a hidden file input (W3C ``strictFileInteractability`` is off by default),
+        which is what makes such an input reachable at all.
         """
         drv = self._drv()
-        el = self._vet(ref)
+        el = self._vet(ref, require_displayed=not hidden)
         el.send_keys(file_path)
         return {
             "uploaded": True,

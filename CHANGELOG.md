@@ -7,6 +7,23 @@ All notable changes to browden are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+- **`upload_file` can reach a hidden file input, per rule.** Most sites hide the
+  real `<input type="file">` and draw their own "Select files" button, which
+  opens the OS file dialog that browden cannot drive. YouTube Studio's upload
+  input, for example, is `display:none` + `aria-hidden`, so every gate refused
+  it. An `upload-file` page rule may now set `hidden_input: true`, and its
+  `field_ids` then also admit such an input despite `display:none`, the `hidden`
+  attribute or `aria-hidden`; the backend's live "is displayed" check is waived
+  for that input only. Decoy markup, `disabled` and `readonly` still refuse, a
+  label regex never admits a hidden input, and the schema rejects
+  `hidden_input` outside `upload-file` or without `field_ids`.
+
+### Changed
+- **A `multiple` file input is no longer refused.** It still receives exactly
+  one file: `upload_file` takes one path and already refuses any control
+  character in it, the only way one path could name a second file to the driver.
+
 ## [1.8.1] — 2026-11-18
 
 ### Changed

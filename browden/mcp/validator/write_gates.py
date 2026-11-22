@@ -268,22 +268,37 @@ def validate_upload_path(allowed_upload_locations: "tuple[Path, ...]", file_path
 
 
 def validate_upload_target(access_rules: BrowdenAccessRuleSet, url: str,
-                           css_selector: str, found: dict) -> None:
+                           css_selector: str, found: dict) -> bool:
     """Gates 2 and 3 for ``upload-file`` — file-control integrity, then label/id.
 
     ``url`` is the tab's live URL; ``found`` is the ``query_selector_all(limit=2)``
     result for ``css_selector``. Raises :class:`ValidationError` on the first
-    failing gate; returns ``None`` when the upload is authorized.
+    failing gate. When the upload is authorized, returns whether the input was
+    admitted *as a hidden control* — the action must then skip the backend's live
+    visibility check, which such an input would fail by design.
 
     Gate 3 mirrors ``write-text``'s label-or-id shape because this target needs
     the id half even more often: a file input routinely carries no visible label
     of any kind (Splitwise's receipt picker has a sibling ``<p>``, not a
     ``<label for>``, and no placeholder / aria-label / title), so no ``label``
     regex could ever authorize it.
+
+    A hidden input (YouTube Studio's ``<input name="Filedata">`` is
+    ``display:none`` + ``aria-hidden`` behind a "Select files" button) passes
+    gate 2 only through a rule matching this URL that sets ``hidden_input: true``
+    *and* names the input's id/name in its own ``field_ids``. That same match is
+    its gate 3, so a label regex never admits a hidden control.
     """
-    # Gate 2: the element must be a single, real, visible, non-decoy file input.
     node = _single_node(found, css_selector, "refusing to upload")
+    p = urlparse(url)
+    rules = access_rules.rules_for("upload-file", p.hostname or "", p.path, p.query, p.fragment)
+
+    # Gate 2: the element must be a single, real, visible, non-decoy file input —
+    # or, failing visibility alone, one the operator opted in to by id/name.
     if not is_uploadable_control(node):
+        hidden_ok = any(r.hidden_input and field_id_matches(node, r.field_ids) for r in rules)
+        if hidden_ok and is_uploadable_control(node, allow_hidden=True):
+            return True
         raise ValidationError(
             "selected element is not a file input (or is a "
             "hidden/disabled/readonly/decoy element) — refusing to upload")
@@ -291,14 +306,13 @@ def validate_upload_target(access_rules: BrowdenAccessRuleSet, url: str,
     # Gate 3: authorize the control against the page rules matching THIS URL —
     # by its visible label, or by the exact id/name the operator named in that
     # same rule's field_ids. Fail closed, exactly as write-text does.
-    p = urlparse(url)
-    rules = access_rules.rules_for("upload-file", p.hostname or "", p.path, p.query, p.fragment)
     label_ok = any(r.label is not None and field_label_matches(node, r.label) for r in rules)
     id_ok = any(field_id_matches(node, r.field_ids) for r in rules)
     if not (label_ok or id_ok):
         raise ValidationError(
             f"file input does not match any upload-file rule for "
             f"{p.hostname or ''}{p.path or '/'} — refusing to upload")
+    return False
 
 
 @dataclass(frozen=True)
@@ -348,6 +362,21 @@ class AdmittedFile:
         return self._path
 
 
+class AdmittedControl:
+    """Whether this request's upload gate admitted its file input as a hidden control.
+
+    Written by the gate's element check and read by the action it guards, like
+    :class:`AdmittedFile`: the backend skips its live visibility check only for
+    the input the gate judged and admitted as hidden, never on its own say-so.
+    Per request; never shared or reused.
+    """
+
+    __slots__ = ("hidden",)
+
+    def __init__(self) -> None:
+        self.hidden = False
+
+
 @dataclass(frozen=True)
 class UploadFileGate(WriteGate):
     """A :class:`WriteGate` that also carries the file its page check admitted.
@@ -358,6 +387,7 @@ class UploadFileGate(WriteGate):
     pick up by mistake.
     """
     admitted: AdmittedFile = field(default_factory=AdmittedFile)
+    control: AdmittedControl = field(default_factory=AdmittedControl)
 
 
 def click_gate(access_rules: BrowdenAccessRuleSet) -> WriteGate:
@@ -396,13 +426,14 @@ def upload_file_gate(access_rules: BrowdenAccessRuleSet, file_path: str) -> Uplo
     and is the only one the action can reach.
     """
     admitted = AdmittedFile()
+    control = AdmittedControl()
 
     def check_page(url: str) -> None:
         check_action_host(access_rules, "upload-file", url)
         admitted.admit(validate_upload_path(access_rules.allowed_upload_locations, file_path))
 
-    return UploadFileGate(
-        check_page=check_page,
-        check_element=lambda url, css_selector, found: validate_upload_target(
-            access_rules, url, css_selector, found),
-        admitted=admitted)
+    def check_element(url: str, css_selector: str, found: dict) -> None:
+        control.hidden = validate_upload_target(access_rules, url, css_selector, found)
+
+    return UploadFileGate(check_page=check_page, check_element=check_element,
+                          admitted=admitted, control=control)

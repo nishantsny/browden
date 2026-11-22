@@ -128,10 +128,10 @@ def test_a_file_input_is_uploadable():
     assert is_uploadable_control(node("input", type="file", id="bill_file_expense"))
 
 
-def test_a_multiple_file_input_is_refused_for_now():
-    """One file per upload, so the control that could hold two is out of scope."""
-    assert not is_uploadable_control(node("input", type="file", multiple=""))
-    assert not is_uploadable_control(node("input", type="file", multiple="multiple"))
+def test_a_multiple_file_input_is_uploadable():
+    """It still gets one file: the path gate refuses the newline that could name two."""
+    assert is_uploadable_control(node("input", type="file", multiple=""))
+    assert is_uploadable_control(node("input", type="file", multiple="multiple"))
 
 
 def test_nothing_else_is_uploadable():
@@ -154,6 +154,27 @@ def test_hidden_disabled_readonly_decoy_file_inputs_are_refused():
     assert not is_uploadable_control(node("input", type="file", hidden=""))
     assert not is_uploadable_control(
         node("input", type="file", **{"data-target-audience": "ai-agent"}))
+    assert not is_uploadable_control(node("input", type="file", style="display: none"))
+
+
+def test_allow_hidden_admits_an_input_hidden_only_by_rendering():
+    """YouTube Studio's upload input: display:none + aria-hidden behind its own button."""
+    youtube = node("input", type="file", name="Filedata", multiple="", tabindex="-1",
+                   style="position: absolute; opacity: 0; display: none;",
+                   **{"aria-hidden": "true"})
+    assert not is_uploadable_control(youtube)
+    assert is_uploadable_control(youtube, allow_hidden=True)
+    assert is_uploadable_control(node("input", type="file", hidden=""), allow_hidden=True)
+
+
+def test_allow_hidden_still_refuses_decoy_disabled_readonly_and_non_file():
+    hidden = {"style": "display:none", "aria-hidden": "true"}
+    for extra in ({"disabled": ""}, {"aria-disabled": "true"}, {"readonly": ""},
+                  {"data-target-audience": "ai-agent"}):
+        assert not is_uploadable_control(
+            node("input", type="file", **hidden, **extra), allow_hidden=True), extra
+    assert not is_uploadable_control(node("input", type="hidden"), allow_hidden=True)
+    assert not is_uploadable_control(node("input", type="text", **hidden), allow_hidden=True)
 
 
 def test_a_file_input_is_not_fillable_and_a_text_input_is_not_uploadable():

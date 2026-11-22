@@ -235,11 +235,13 @@ class GatedPage:
         second resolve here could land somewhere the gate never saw, if a symlink
         or directory inside an allowed location were replaced in between, and
         nothing would have checked where it landed. Same discipline as the
-        element: act on precisely what was judged.
+        element: act on precisely what was judged — including whether it was
+        admitted as a hidden input, which the gate's element check records.
         """
         return self._write(
             css_selector, gate,
-            lambda ref: self._backend.upload_file_target(ref, str(gate.admitted.path)),
+            lambda ref: self._backend.upload_file_target(
+                ref, str(gate.admitted.path), hidden=gate.control.hidden),
             f"upload_file: set {css_selector!r} on tab {self._id}")
 
     def press_key(self, css_selector: str, key: str, gate: WriteGate) -> dict:
