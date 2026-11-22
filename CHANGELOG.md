@@ -7,6 +7,8 @@ All notable changes to browden are documented here. The format follows
 
 ## [Unreleased]
 
+## [1.9.0] — 2026-11-22
+
 ### Added
 - **`upload_file` can reach a hidden file input, per rule.** Most sites hide the
   real `<input type="file">` and draw their own "Select files" button, which
@@ -721,7 +723,8 @@ Initial public release.
   service manager (systemd / launchd / Task Scheduler).
 - Apache-2.0.
 
-[Unreleased]: https://github.com/nishantsny/browden/compare/v1.8.1...HEAD
+[Unreleased]: https://github.com/nishantsny/browden/compare/v1.9.0...HEAD
+[1.9.0]: https://github.com/nishantsny/browden/compare/v1.8.1...v1.9.0
 [1.8.1]: https://github.com/nishantsny/browden/compare/v1.8.0...v1.8.1
 [1.8.0]: https://github.com/nishantsny/browden/compare/v1.7.0...v1.8.0
 [1.7.0]: https://github.com/nishantsny/browden/compare/v1.6.0...v1.7.0
