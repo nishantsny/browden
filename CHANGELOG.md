@@ -7,6 +7,8 @@ All notable changes to browden are documented here. The format follows
 
 ## [Unreleased]
 
+## [1.10.0] — 2026-11-22
+
 ### Added
 - **A Chrome left running after an upgrade is restarted on the next reaper
   tick.** apt (or any package manager) replaces the binary on disk, but the
@@ -779,7 +781,8 @@ Initial public release.
   service manager (systemd / launchd / Task Scheduler).
 - Apache-2.0.
 
-[Unreleased]: https://github.com/nishantsny/browden/compare/v1.9.0...HEAD
+[Unreleased]: https://github.com/nishantsny/browden/compare/v1.10.0...HEAD
+[1.10.0]: https://github.com/nishantsny/browden/compare/v1.9.0...v1.10.0
 [1.9.0]: https://github.com/nishantsny/browden/compare/v1.8.1...v1.9.0
 [1.8.1]: https://github.com/nishantsny/browden/compare/v1.8.0...v1.8.1
 [1.8.0]: https://github.com/nishantsny/browden/compare/v1.7.0...v1.8.0
