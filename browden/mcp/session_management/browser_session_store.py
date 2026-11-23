@@ -20,7 +20,11 @@ from collections.abc import Callable
 from ...common.logger import logger
 from ...web_navigator.interface import WebNavigatorBackend
 from ...web_navigator.tab_id import split_tab_id
-from .browser_session_manager import DEFAULT_REAP_INTERVAL_SECONDS, BrowserSessionManager
+from .browser_session_manager import (
+    DEFAULT_AUTO_RESTART_ON_CHROME_UPDATE,
+    DEFAULT_REAP_INTERVAL_SECONDS,
+    BrowserSessionManager,
+)
 
 
 class UnknownTabError(LookupError):
@@ -63,6 +67,8 @@ class BrowserSessionStore:
     def get_or_create_session(
             self, backend: WebNavigatorBackend, max_sessions: int,
             reap_interval_seconds: Callable[[], float] = lambda: DEFAULT_REAP_INTERVAL_SECONDS,
+            auto_restart_on_chrome_update: Callable[[], bool] = (
+                lambda: DEFAULT_AUTO_RESTART_ON_CHROME_UPDATE),
     ) -> BrowserSessionManager:
         """Cache (and return) the coordinator for ``backend``'s profile.
 
@@ -81,7 +87,8 @@ class BrowserSessionStore:
         ``reap_interval_seconds`` is passed through to the new session's reaper as
         a *getter* so it keeps tracking the live config (the caller reads it off
         the hot-reloaded allowlist); an already-cached session keeps the getter it
-        was built with — which is the same live one.
+        was built with — which is the same live one. ``auto_restart_on_chrome_update``
+        is passed through the same way.
         """
         key = str(backend.get_profile_dir())
         digest = self.digest_for(key)
@@ -91,7 +98,8 @@ class BrowserSessionStore:
                 raise RuntimeError(f"Cannot start a new browser session (limit of {max_sessions} reached)")
             logger.info(f"Initializing BrowserSessionManager (profile={key})")
             session = BrowserSessionManager(backend, namespace=digest,
-                                            reap_interval_seconds=reap_interval_seconds)
+                                            reap_interval_seconds=reap_interval_seconds,
+                                            auto_restart_on_chrome_update=auto_restart_on_chrome_update)
             self._sessions[digest] = session
             if not self._atexit_registered:
                 atexit.register(self._shutdown)

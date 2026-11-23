@@ -20,6 +20,10 @@ DEFAULT_MAX_TABS_PER_SESSION = 20
 # How often the idle reaper wakes. Deliberately coarse: sweeping is the only
 # cleanup pass (tools never sweep), and a tab idle for an hour can wait.
 DEFAULT_REAP_INTERVAL_SECONDS = 7200
+# Whether each reaper tick also restarts a Chrome whose installed version has
+# changed under it. On by default: a browser left running after an upgrade keeps
+# the old version's security holes for as long as it runs.
+DEFAULT_AUTO_RESTART_ON_CHROME_UPDATE = True
 
 
 class BrowdenRuntimeConfiguration:
@@ -29,8 +33,8 @@ class BrowdenRuntimeConfiguration:
     so they are held apart here:
 
     * ``infra`` — ``max_browser_sessions`` / ``max_tabs_per_session`` /
-      ``reap_interval_seconds``. Process-wide resource caps, read by the session
-      layer; they gate no access decision and belong to no single request.
+      ``reap_interval_seconds`` / ``auto_restart_on_chrome_update``. Process-wide
+      resource caps and housekeeping, read by the session layer; they gate no access decision and belong to no single request.
     * everything else — ``denylist``, ``read``, and the write actions: the rules
       that decide whether a given request may act. They are parsed into a
       :class:`BrowdenAccessRuleSet` (which documents the grammar), reachable as
@@ -74,6 +78,7 @@ class BrowdenRuntimeConfiguration:
         self.max_browser_sessions = DEFAULT_MAX_BROWSER_SESSIONS
         self.max_tabs_per_session = DEFAULT_MAX_TABS_PER_SESSION
         self.reap_interval_seconds = DEFAULT_REAP_INTERVAL_SECONDS
+        self.auto_restart_on_chrome_update = DEFAULT_AUTO_RESTART_ON_CHROME_UPDATE
         infra = sections.get("infra")
         if isinstance(infra, dict):
             self.max_browser_sessions = int(
@@ -82,6 +87,8 @@ class BrowdenRuntimeConfiguration:
                 infra.get("max_tabs_per_session", DEFAULT_MAX_TABS_PER_SESSION))
             self.reap_interval_seconds = int(
                 infra.get("reap_interval_seconds", DEFAULT_REAP_INTERVAL_SECONDS))
+            self.auto_restart_on_chrome_update = bool(
+                infra.get("auto_restart_on_chrome_update", DEFAULT_AUTO_RESTART_ON_CHROME_UPDATE))
         self._access_rules = BrowdenAccessRuleSet(sections, tranco_path)
         # Each profile's rules sit on top of the global set (base=), keyed by the
         # canonical profile path the session layer keys its Chrome sessions by.

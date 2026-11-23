@@ -44,7 +44,10 @@ from collections.abc import Callable
 
 from ...common.logger import logger
 from ...dom import query, serialize
-from ..validator.runtime_configuration import DEFAULT_REAP_INTERVAL_SECONDS
+from ..validator.runtime_configuration import (
+    DEFAULT_AUTO_RESTART_ON_CHROME_UPDATE,
+    DEFAULT_REAP_INTERVAL_SECONDS,
+)
 from ..validator.errors import SessionBusyError, ValidationError, tab_gone_envelope
 from ..validator.read_gates import FrameGate, ReadGate
 from ..validator.write_gates import UploadFileGate, WriteGate
@@ -70,16 +73,20 @@ class _AtTabCap(Exception):
 
 class BrowserSessionManager:
     def __init__(self, backend, *, namespace: str, clock=time.monotonic, start_reaper: bool = True,
-                 reap_interval_seconds: Callable[[], float] = lambda: DEFAULT_REAP_INTERVAL_SECONDS):
+                 reap_interval_seconds: Callable[[], float] = lambda: DEFAULT_REAP_INTERVAL_SECONDS,
+                 auto_restart_on_chrome_update: Callable[[], bool] = (
+                     lambda: DEFAULT_AUTO_RESTART_ON_CHROME_UPDATE)):
         # reap_interval_seconds is a getter, not a number: the reaper reads it
         # once per tick, so an ``infra.reap_interval_seconds`` edit takes effect
         # on the next wake-up like every other live-reloaded setting, without
-        # restarting the server or the session.
+        # restarting the server or the session. auto_restart_on_chrome_update is
+        # a getter for the same reason.
         self._backend = backend
         self._namespace = namespace
         self._cache = SoupCache(clock=clock)
         self._registry = TabRegistry(clock=clock)
         self._reap_interval_seconds = reap_interval_seconds
+        self._auto_restart_on_chrome_update = auto_restart_on_chrome_update
         # Serializes every driver touch in this session (tools AND cleanup).
         self._lock = asyncio.Lock()
         self._reaper_task: asyncio.Task | None = None
@@ -145,11 +152,17 @@ class BrowserSessionManager:
         what makes "focus the tab, then act on it" safe under concurrent
         requests. Waiters queue in arrival order (``asyncio.Lock`` is FIFO); one
         that is still waiting after ``timeout`` gives up instead of piling up
-        behind a wedged op. ``wait_for`` cancels the pending acquire on timeout,
-        so a timed-out waiter never leaves the lock held.
+        behind a wedged op. The timeout cancels the pending acquire, so a
+        timed-out waiter never leaves the lock held.
+
+        ``asyncio.timeout``, not ``wait_for``: on Python 3.11, ``wait_for``
+        swallows a cancel that lands in the same loop pass as the lock coming
+        free, so the cancelled caller would run its section anyway (and a
+        cancelled reaper would keep ticking forever).
         """
         try:
-            await asyncio.wait_for(self._lock.acquire(), timeout)
+            async with asyncio.timeout(timeout):
+                await self._lock.acquire()
         except TimeoutError:
             logger.warning(
                 f"Session busy: gave up waiting {timeout:g}s for the driver "
@@ -618,6 +631,12 @@ class BrowserSessionManager:
         edit lands on the next wake-up without a restart. A sweep that raises
         must never kill the loop: the session would then keep its idle tabs
         forever, so the failure is swallowed and the next tick tries again.
+
+        After the sweep, while ``infra.auto_restart_on_chrome_update`` is on, the
+        tick also restarts a Chrome whose installed version has changed (see
+        :meth:`_restart_if_chrome_updated_locked`). Only here: the at-the-cap
+        reclaim in ``new_blank_tab`` sweeps too, but restarting there would kill
+        the browser the caller is asking for a tab in.
         """
         while True:
             await asyncio.sleep(self._reap_interval_seconds())
@@ -625,3 +644,25 @@ class BrowserSessionManager:
                 await self._sweep_idle_locked()
             except Exception:
                 pass
+            if self._auto_restart_on_chrome_update():
+                try:
+                    await self._restart_if_chrome_updated_locked()
+                except Exception:
+                    pass
+
+    async def _restart_if_chrome_updated_locked(self, timeout: float = DRIVER_LOCK_TIMEOUT_SECONDS) -> None:
+        """Stop this profile's Chrome if a newer one is installed, and forget its tabs.
+
+        Takes the driver lock like the sweep, so the browser is never stopped in
+        the middle of a request, and is skipped the same best-effort way when the
+        session stays busy. The version check runs a subprocess, so it goes off
+        the loop. A stopped browser's handles name windows in a process that has
+        exited, so every tracked tab is dropped; the next driving call launches
+        the new version.
+        """
+        with contextlib.suppress(SessionBusyError):
+            async with self._driver_lock(timeout):
+                restarted = await asyncio.to_thread(self._backend.restart_if_updated)
+            if restarted:
+                for handle in self._registry.tracked_ids():
+                    self._drop(handle)

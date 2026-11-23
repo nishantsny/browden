@@ -61,3 +61,7 @@ infra:
   # closed between 1h and 1h + this interval after its last use. Lower it
   # to reclaim tabs sooner, raise it to leave a long-running window alone.
   reap_interval_seconds: 7200
+  # Each sweep also restarts a Chrome whose installed version changed since
+  # it launched (an upgrade does not replace the running browser). Its tabs
+  # close with it; the next launch runs the new version.
+  auto_restart_on_chrome_update: true

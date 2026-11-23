@@ -35,6 +35,8 @@ The expected shape (see configs/samples/read_only_on_popular_websites.yaml):
       max_browser_sessions: <positive int>
       max_tabs_per_session: <positive int>
       reap_interval_seconds: <positive int>   # how often idle tabs are swept
+      auto_restart_on_chrome_update: <bool>   # each sweep restarts a Chrome whose installed
+                                              #   version changed (default true)
 
 Any other top-level key is refused: an unknown section would be kept as rules
 no gate ever consults, so a typo like `clik:` would silently authorize nothing.
@@ -203,10 +205,14 @@ def _check_read(rules, where: str) -> None:
 
 
 def _check_infra(rules, source: str) -> None:
-    """Validate the ``infra`` block: the process-wide session/tab caps."""
+    """Validate the ``infra`` block: the process-wide session/tab caps and housekeeping."""
     if not isinstance(rules, dict):
         raise ConfigError(f"{source}: infra must be a mapping, got {type(rules).__name__}")
     for name, value in rules.items():
+        if name == "auto_restart_on_chrome_update":
+            if not isinstance(value, bool):
+                raise ConfigError(f"{source}: infra.{name} must be a boolean, got {value!r}")
+            continue
         if name not in {"max_browser_sessions", "max_tabs_per_session",
                         "reap_interval_seconds"}:
             raise ConfigError(f"{source}: unknown infra key {name}")

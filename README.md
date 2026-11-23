@@ -521,6 +521,15 @@ Key points of the flow:
   tool call — that closes tabs the agent hasn't touched in an hour and forgets
   tabs the human closed in the browser. A tab is therefore closed between 1h and
   1h + one interval after its last use; only *agent* activity counts as use.
+  The same tick also restarts a Chrome that was **updated under it**: a package
+  upgrade replaces the binary on disk but not the browser already running, which
+  keeps the old version (and its unpatched holes) until it exits. When the
+  version the running Chrome reports differs from what the binary's `--version`
+  prints, the tick stops it (never mid-request: it takes the driver lock) and
+  drops its tabs; the next launch runs the new version. Every tab of that
+  profile closes with it, along with logins held only in session cookies. Turn
+  it off with `infra.auto_restart_on_chrome_update: false`. Not on Windows,
+  where Chrome's `--version` prints nothing.
 - **The backend** is the only code that imports a browser library. It launches
   Chrome *itself* — a plain `google-chrome --user-data-dir=… --remote-debugging-
   port=…` subprocess — and *attaches* Selenium over the DevTools port. It

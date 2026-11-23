@@ -461,3 +461,103 @@ def test_list_tab_ids_returns_handles_without_switching(mock_webdriver, chrome_o
 
     assert backend.list_handles() == ["h1", "h2", "h3"]
     drv.switch_to.window.assert_not_called()  # cheap: no per-tab focus changes
+
+
+# -- restart on a Chrome update ------------------------------------------------
+# Chrome is faked at its two boundaries: the attached driver's reported
+# browserVersion and the binary's ``--version`` output (subprocess.run).
+
+class FakeVersionCall:
+    """``subprocess.run`` for ``<chrome> --version``: records argv, prints ``stdout``."""
+
+    def __init__(self, monkeypatch, stdout="Google Chrome 158.0.8127.36 \n", raises=None):
+        self.stdout = stdout
+        self.raises = raises
+        self.calls: list[list[str]] = []
+        monkeypatch.setenv("BROWDEN_CHROME_BINARY", "/fake/chrome")
+        monkeypatch.setattr(backend.subprocess, "run", self._run)
+        # The --version path is the non-Windows one; pin it so these run the
+        # same on a Windows CI runner.
+        monkeypatch.setattr(backend.sys, "platform", "linux")
+
+    def _run(self, argv, **kwargs):
+        self.calls.append(list(argv))
+        if self.raises is not None:
+            raise self.raises
+        return backend.subprocess.CompletedProcess(argv, 0, stdout=self.stdout, stderr="")
+
+
+def _running(version="150.0.7871.46"):
+    drv = _make_fake_driver(handles=("h1",))
+    drv.capabilities = {"browserVersion": version}
+    return _backend_with_driver(drv), drv
+
+
+def test_restart_if_updated_stops_a_chrome_older_than_the_installed_one(monkeypatch):
+    version = FakeVersionCall(monkeypatch)
+    b, drv = _running("150.0.7871.46")
+
+    assert b.restart_if_updated() is True
+    assert version.calls == [["/fake/chrome", "--version"]]
+    drv.quit.assert_called_once()
+    assert b._driver is None  # the next _drv() launches the installed version
+
+
+def test_restart_if_updated_leaves_the_same_version_running(monkeypatch):
+    FakeVersionCall(monkeypatch)
+    b, drv = _running("158.0.8127.36")
+
+    assert b.restart_if_updated() is False
+    drv.quit.assert_not_called()
+
+
+def test_restart_if_updated_counts_a_downgrade_too(monkeypatch):
+    FakeVersionCall(monkeypatch, stdout="Google Chrome 150.0.7871.46\n")
+    b, drv = _running("158.0.8127.36")
+
+    assert b.restart_if_updated() is True
+    drv.quit.assert_called_once()
+
+
+def test_restart_if_updated_never_launches_or_probes_without_a_browser(monkeypatch):
+    version = FakeVersionCall(monkeypatch)
+    b = _backend()  # nothing ever launched
+
+    assert b.restart_if_updated() is False
+    assert version.calls == []  # not even the --version call
+
+
+@pytest.mark.parametrize("fake", [
+    {"stdout": ""},                                      # printed nothing
+    {"stdout": "Google Chrome\n"},                       # no number in it
+    {"raises": OSError("no such file")},                 # binary gone
+    {"raises": backend.subprocess.TimeoutExpired("chrome", 10)},
+])
+def test_restart_if_updated_does_nothing_when_the_installed_version_is_unknown(monkeypatch, fake):
+    FakeVersionCall(monkeypatch, **fake)
+    b, drv = _running()
+
+    assert b.restart_if_updated() is False
+    drv.quit.assert_not_called()
+
+
+def test_restart_if_updated_does_nothing_when_the_running_version_is_unknown(monkeypatch):
+    FakeVersionCall(monkeypatch)
+    b, drv = _running()
+    drv.capabilities = {}
+
+    assert b.restart_if_updated() is False
+    drv.quit.assert_not_called()
+
+
+def test_installed_chrome_version_reads_chromium_output_too(monkeypatch):
+    FakeVersionCall(monkeypatch, stdout="Chromium 158.0.8127.36 snap\n")
+    assert backend._installed_chrome_version() == "158.0.8127.36"
+
+
+def test_installed_chrome_version_is_unknown_on_windows(monkeypatch):
+    # chrome.exe --version opens a browser window instead of printing.
+    version = FakeVersionCall(monkeypatch)
+    monkeypatch.setattr(backend.sys, "platform", "win32")
+    assert backend._installed_chrome_version() is None
+    assert version.calls == []

@@ -7,6 +7,32 @@ All notable changes to browden are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+- **A Chrome left running after an upgrade is restarted on the next reaper
+  tick.** apt (or any package manager) replaces the binary on disk, but the
+  browser browden launched keeps running the old version, with its unpatched
+  security holes, until something stops it, and the idle sweep never closes a
+  session's last tab, so that could be weeks. Each reaper tick
+  (`infra.reap_interval_seconds`, 2h by default) now compares the version the
+  running Chrome reported when Selenium attached with what the binary the next
+  launch would use prints for `--version`. When they differ it stops that
+  profile's Chrome under the driver lock, so never in the middle of a request,
+  and forgets its tabs; the next launch runs the new version. Its tabs
+  close and logins held only in session cookies are lost, once per update. A
+  version that cannot be read restarts nothing, the at-the-cap reclaim in
+  `new_blank_tab` never restarts, and on Windows (where `chrome.exe --version`
+  prints nothing) no update is ever detected. On by default; turn it off with
+  the new `infra.auto_restart_on_chrome_update: false`, hot-reloaded like the
+  other `infra` keys.
+
+### Fixed
+- **A cancel that landed as the driver lock came free was swallowed on Python
+  3.11.** `asyncio.wait_for` there returns the result instead of raising when
+  the awaited call finishes in the same loop pass as the cancel, so a cancelled
+  request ran its driver section anyway, and a cancelled reaper kept ticking
+  (which hung event-loop teardown). The driver lock now waits under
+  `asyncio.timeout`. Python 3.12+ was not affected.
+
 ## [1.9.0] — 2026-11-22
 
 ### Added
