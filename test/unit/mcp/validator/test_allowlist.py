@@ -4,6 +4,7 @@ import pytest
 
 from browden.mcp.validator import BrowdenAccessRuleSet, BrowdenRuntimeConfiguration
 from browden.mcp.validator.runtime_configuration import (
+    DEFAULT_AUTO_RESTART_ON_CHROME_UPDATE,
     DEFAULT_MAX_BROWSER_SESSIONS,
     DEFAULT_MAX_TABS_PER_SESSION,
     DEFAULT_REAP_INTERVAL_SECONDS,
@@ -402,6 +403,7 @@ def test_infra_defaults_when_the_section_is_absent():
     assert rc.max_browser_sessions == DEFAULT_MAX_BROWSER_SESSIONS
     assert rc.max_tabs_per_session == DEFAULT_MAX_TABS_PER_SESSION
     assert rc.reap_interval_seconds == DEFAULT_REAP_INTERVAL_SECONDS == 7200
+    assert rc.auto_restart_on_chrome_update is DEFAULT_AUTO_RESTART_ON_CHROME_UPDATE is True
 
 
 def test_infra_reap_interval_is_read_from_the_config():
@@ -409,6 +411,12 @@ def test_infra_reap_interval_is_read_from_the_config():
     assert rc.reap_interval_seconds == 600
     # An unset sibling keeps its default rather than following the one that was set.
     assert rc.max_tabs_per_session == DEFAULT_MAX_TABS_PER_SESSION
+
+
+def test_infra_auto_restart_on_chrome_update_can_be_turned_off():
+    rc = BrowdenRuntimeConfiguration({"infra": {"auto_restart_on_chrome_update": False}})
+    assert rc.auto_restart_on_chrome_update is False
+    assert rc.reap_interval_seconds == DEFAULT_REAP_INTERVAL_SECONDS
 
 
 # -- profile-scoped rule sets (#139) ------------------------------------------

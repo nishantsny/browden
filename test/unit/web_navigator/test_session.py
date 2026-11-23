@@ -46,6 +46,7 @@ class FakeBackend:
         self.running = True  # what is_running reports
         self.software_webgl = False  # the mode set_software_webgl last left
         self.relaunches: list[bool] = []  # modes it was asked to switch to
+        self.updated = False  # what restart_if_updated reports (and "does")
 
     def _check(self, handle):
         if handle in self.missing:
@@ -71,6 +72,10 @@ class FakeBackend:
         self.software_webgl = enabled
         self.relaunches.append(enabled)
         return self.running         # a relaunch only happens if a browser was up
+
+    def restart_if_updated(self):
+        self.calls.append("restart_if_updated")
+        return self.updated
 
     def list_tabs(self):
         self.calls.append("list_tabs")
@@ -498,6 +503,32 @@ async def test_driver_lock_gives_up_after_the_timeout():
 
 
 @pytest.mark.asyncio
+async def test_a_cancel_landing_as_the_lock_frees_up_is_not_swallowed():
+    # CPython 3.11's asyncio.wait_for returns the result instead of raising when
+    # the awaited call finishes in the same loop pass as the cancel. A waiter
+    # cancelled just as the lock came free then ran its section anyway, and a
+    # cancelled reaper kept ticking (it hung the e2e suite's loop teardown).
+    s = make_session()
+    await s._lock.acquire()  # the request ahead of the waiter
+    ran = []
+
+    async def waiter():
+        async with s._driver_lock():
+            ran.append(True)
+
+    task = asyncio.create_task(waiter())
+    for _ in range(3):
+        await asyncio.sleep(0)  # let it queue on the lock
+    s._lock.release()           # the lock comes free ...
+    task.cancel()               # ... and the cancel lands in the same pass
+
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    assert ran == []
+    assert not s._lock.locked()  # and it did not keep the lock either
+
+
+@pytest.mark.asyncio
 async def test_a_timed_out_request_surfaces_as_an_error_envelope():
     # The tool layer turns SessionBusyError into the envelope agents get back.
     from browden.mcp.server import _tool
@@ -749,6 +780,128 @@ def test_sweep_idle_skips_reconcile_when_enumeration_fails():
     s.sweep_idle()  # must not raise
 
     assert "h1" in s._registry._last_access  # reconcile skipped, entry untouched
+
+
+# -- restart on a Chrome update -----------------------------------------------
+
+def _ticks(monkeypatch, n):
+    """Let the reaper loop run ``n`` ticks, then cancel it on the next sleep."""
+    slept = {"n": 0}
+
+    async def fake_sleep(seconds):
+        slept["n"] += 1
+        if slept["n"] > n:
+            raise asyncio.CancelledError
+    monkeypatch.setattr(asyncio, "sleep", fake_sleep)
+
+
+async def _run_reaper(s):
+    with pytest.raises(asyncio.CancelledError):
+        await s._reaper_loop()
+
+
+@pytest.mark.asyncio
+async def test_reaper_restarts_an_updated_chrome_and_forgets_its_tabs(monkeypatch):
+    # The stopped browser's handles name windows in a process that has exited,
+    # so none of them may stay tracked or cached.
+    _ticks(monkeypatch, 1)
+    backend = FakeBackend()
+    backend.updated = True
+    s = make_session(backend)
+    s._registry.touch("h1")
+    s._registry.touch("h2")
+    s._cache._entries["h1"] = object()  # type: ignore[assignment]
+
+    await _run_reaper(s)
+
+    assert backend.calls.count("restart_if_updated") == 1
+    assert s._registry.tracked_ids() == []
+    assert "h1" not in s._cache._entries
+
+
+@pytest.mark.asyncio
+async def test_reaper_keeps_tabs_when_chrome_was_not_updated(monkeypatch):
+    _ticks(monkeypatch, 1)
+    backend = FakeBackend()
+    s = make_session(backend)
+    s._registry.touch("h1")
+
+    await _run_reaper(s)
+
+    assert "restart_if_updated" in backend.calls  # checked...
+    assert s._registry.tracked_ids() == ["h1"]    # ...and nothing was dropped
+
+
+@pytest.mark.asyncio
+async def test_reaper_never_checks_when_auto_restart_is_off(monkeypatch):
+    _ticks(monkeypatch, 2)
+    backend = FakeBackend()
+    backend.updated = True
+    s = BrowserSessionManager(backend, namespace="ns", start_reaper=False,
+                              auto_restart_on_chrome_update=lambda: False)
+    s._registry.touch("h1")
+
+    await _run_reaper(s)
+
+    assert "restart_if_updated" not in backend.calls
+    assert s._registry.tracked_ids() == ["h1"]
+
+
+@pytest.mark.asyncio
+async def test_reaper_re_reads_the_auto_restart_switch_every_tick(monkeypatch):
+    # A getter, like the interval: turning the key on in the allowlist lands on
+    # the next tick without restarting the server.
+    _ticks(monkeypatch, 3)
+    switch = iter([False, True, True])
+    backend = FakeBackend()
+    s = BrowserSessionManager(backend, namespace="ns", start_reaper=False,
+                              auto_restart_on_chrome_update=lambda: next(switch))
+
+    await _run_reaper(s)
+
+    assert backend.calls.count("restart_if_updated") == 2
+
+
+@pytest.mark.asyncio
+async def test_reaper_survives_a_failing_restart_check(monkeypatch):
+    _ticks(monkeypatch, 2)
+    backend = FakeBackend()
+    backend.restart_if_updated = lambda: (_ for _ in ()).throw(RuntimeError("no driver"))
+    s = make_session(backend)
+
+    await _run_reaper(s)
+
+    assert backend.calls.count("list_handles") == 2  # both ticks still swept
+
+
+@pytest.mark.asyncio
+async def test_restart_check_is_skipped_when_the_session_stays_busy():
+    # Like the sweep: never stops the browser under a request, and gives up
+    # quietly when the session stays busy (the next tick retries).
+    backend = FakeBackend()
+    backend.updated = True
+    s = make_session(backend)
+    s._registry.touch("h1")
+
+    await s._lock.acquire()  # never released: the session stays busy
+    await s._restart_if_chrome_updated_locked(timeout=0.05)  # must not raise
+
+    assert "restart_if_updated" not in backend.calls
+    assert s._registry.tracked_ids() == ["h1"]
+
+
+@pytest.mark.asyncio
+async def test_at_the_cap_reclaim_never_restarts_chrome():
+    # The reclaim runs for a caller asking for a tab in this very browser.
+    backend = FakeBackend()
+    backend.updated = True
+    backend.live = {"h1", "h2"}
+    s = make_session(backend)
+
+    with pytest.raises(RuntimeError, match="session limit"):
+        await s.new_blank_tab(max_tabs=2)
+
+    assert "restart_if_updated" not in backend.calls
 
 
 # -- per-session tab cap (max_tabs) -----------------------------------------

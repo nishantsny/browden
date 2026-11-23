@@ -330,6 +330,32 @@ async def test_new_blank_tab_hands_the_session_a_live_reap_interval(monkeypatch)
 
 
 @pytest.mark.asyncio
+async def test_new_blank_tab_hands_the_session_a_live_auto_restart_switch(monkeypatch):
+    """`infra.auto_restart_on_chrome_update` reaches the reaper as a getter too.
+
+    Turning it off must stop the next tick from restarting Chrome, without a
+    new session or a server restart, so the store must get the live value.
+    """
+    import browden.mcp.server as server
+    from browden.configs.loader import RuntimeConfigurationRefresher
+    from browden.mcp.validator import BrowdenRuntimeConfiguration
+    importlib.reload(server)
+
+    session = _fake_session(new_blank_tab={"id": "pre-h1"})
+    with patch.object(server._store, "get_or_create_session", return_value=session) as get_session:
+        monkeypatch.setattr(server, "_refresher", RuntimeConfigurationRefresher.static(
+            BrowdenRuntimeConfiguration({})))
+        await server.new_blank_tab(profile_dir=None)
+
+        enabled = get_session.call_args.kwargs["auto_restart_on_chrome_update"]
+        assert enabled() is True  # on by default
+
+        monkeypatch.setattr(server, "_refresher", RuntimeConfigurationRefresher.static(
+            BrowdenRuntimeConfiguration({"infra": {"auto_restart_on_chrome_update": False}})))
+        assert enabled() is False
+
+
+@pytest.mark.asyncio
 async def test_navigate_tool_validates_then_delegates():
     import browden.mcp.server as server
     importlib.reload(server)

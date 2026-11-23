@@ -1,4 +1,5 @@
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -366,6 +367,26 @@ def _wait_for_devtools(port: int, proc: subprocess.Popen, timeout: float = DEVTO
     raise RuntimeError(f"Chrome DevTools endpoint not ready on port {port} after {timeout}s.")
 
 
+def _installed_chrome_version() -> str | None:
+    """The version the next launch would run, from the binary's ``--version``.
+
+    None when it cannot be told: no binary found, the call fails or times out, or
+    the output carries no version number. Windows Chrome prints nothing for
+    ``--version`` (it opens a browser window instead), so on Windows this is
+    always None and an update is never detected there.
+    """
+    if os.name == "nt":
+        return None
+    try:
+        out = subprocess.run([_find_chrome_binary(), "--version"],
+                             capture_output=True, text=True, timeout=10).stdout
+    except (OSError, RuntimeError, subprocess.SubprocessError):
+        return None
+    # "Google Chrome 158.0.8127.36", "Chromium 158.0.8127.36 snap", ...
+    match = re.search(r"\d+(?:\.\d+)+", out)
+    return match.group(0) if match else None
+
+
 def _terminate(proc: subprocess.Popen | None) -> None:
     """Stop a Chrome subprocess, escalating to kill if it lingers."""
     if proc is None or proc.poll() is not None:
@@ -525,6 +546,27 @@ class SeleniumChromeBackend(WebNavigatorBackend):
                     f"(profile={self._profile_dir}); the running Chrome, if any, is relaunched")
         if not self.is_running():
             return False
+        self._teardown()
+        return True
+
+    def restart_if_updated(self) -> bool:
+        """Stop the running Chrome if the installed one is a different version. True if it did.
+
+        The running version is what Chrome reported when Selenium attached
+        (``browserVersion``), so nothing is recorded at launch. The installed one
+        is what ``--version`` of the binary the next launch would use prints.
+        Any difference counts, a downgrade too: the old process is running
+        against files that are no longer its own. Only stops the browser; the
+        next ``_drv()`` starts the new one.
+        """
+        if not self.is_running():
+            return False
+        running = self._driver.capabilities.get("browserVersion")
+        installed = _installed_chrome_version()
+        if not running or not installed or running == installed:
+            return False
+        logger.info(f"Chrome was updated from {running} to {installed} "
+                    f"(profile={self._profile_dir}); stopping the running browser")
         self._teardown()
         return True
 

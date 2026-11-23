@@ -117,6 +117,20 @@ class WebNavigatorBackend(ABC):
         """
 
     @abstractmethod
+    def restart_if_updated(self) -> bool:
+        """Stop the running browser if the installed one is a different version.
+
+        A package upgrade replaces the browser on disk but not the process
+        already running, which keeps the old version (and its unpatched security
+        holes) until something restarts it. Implementations compare the version
+        the running browser reports with the version the next launch would run,
+        and stop the running one when they differ, returning True. The next
+        driving call starts the new version. Nothing running, the same version,
+        or a version that cannot be read must do nothing and return False. All
+        of the session's tabs die with the old browser.
+        """
+
+    @abstractmethod
     def shutdown(self) -> None:
         """Quit the driver and stop the browser this backend launched.
 

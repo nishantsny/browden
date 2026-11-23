@@ -26,6 +26,8 @@ LIFECYCLE = {"get_profile_dir", "is_running", "shutdown", "list_tabs", "list_han
              # Launch-time browser configuration: replaces the browser (and so
              # every tab in it) without reading or acting on any page.
              "set_software_webgl", "software_webgl_enabled",
+             # Stops a browser left running after an upgrade; same story.
+             "restart_if_updated",
              "in_frame"}  # a bookkeeping lookup: never touches the driver
 # Frame moves are content: they decide which document every later read sees.
 CONTENT = {"page_snapshot", "target_snapshot", "document_url", "current_url", "screenshot",
