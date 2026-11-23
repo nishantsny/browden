@@ -375,7 +375,7 @@ def _installed_chrome_version() -> str | None:
     ``--version`` (it opens a browser window instead), so on Windows this is
     always None and an update is never detected there.
     """
-    if os.name == "nt":
+    if sys.platform == "win32":
         return None
     try:
         out = subprocess.run([_find_chrome_binary(), "--version"],

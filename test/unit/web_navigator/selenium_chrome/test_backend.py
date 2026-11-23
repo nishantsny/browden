@@ -476,6 +476,9 @@ class FakeVersionCall:
         self.calls: list[list[str]] = []
         monkeypatch.setenv("BROWDEN_CHROME_BINARY", "/fake/chrome")
         monkeypatch.setattr(backend.subprocess, "run", self._run)
+        # The --version path is the non-Windows one; pin it so these run the
+        # same on a Windows CI runner.
+        monkeypatch.setattr(backend.sys, "platform", "linux")
 
     def _run(self, argv, **kwargs):
         self.calls.append(list(argv))
@@ -555,6 +558,6 @@ def test_installed_chrome_version_reads_chromium_output_too(monkeypatch):
 def test_installed_chrome_version_is_unknown_on_windows(monkeypatch):
     # chrome.exe --version opens a browser window instead of printing.
     version = FakeVersionCall(monkeypatch)
-    monkeypatch.setattr(backend.os, "name", "nt")
+    monkeypatch.setattr(backend.sys, "platform", "win32")
     assert backend._installed_chrome_version() is None
     assert version.calls == []
