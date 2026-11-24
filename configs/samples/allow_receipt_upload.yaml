@@ -15,6 +15,7 @@
 #   2. read allowlist  — a URL may be READ / navigated only if it matches here.
 #   3. write actions   — `upload-file` (below); default-deny, gated per host.
 #   4. allowed_upload_locations    — which local files may be sent ANYWHERE. Independent of 3.
+#   5. size cap        — `max_upload_bytes` (default 1 MiB), or a rule's own `max_bytes`.
 #
 # See configs/samples/allowlist-read-deny.yaml for a fully-commented tour of the
 # read/deny system, and allow_grocery_cart_manipulation.yaml for `click`.
@@ -48,6 +49,12 @@ read:
 allowed_upload_locations:
   - ~/receipts
 
+# How large a file may go. Optional: the default cap applied to every
+# `upload-file` rule that sets no `max_bytes` of its own (shown at its built-in
+# value, 1 MiB — a receipt or scanned page fits easily). A rule that needs more
+# sets `max_bytes` on itself, so one video page never raises the cap for the rest.
+# max_upload_bytes: 1048576
+
 # ---- write actions --------------------------------------------------------
 # `upload-file`: set a file input. Default-deny; every gate must pass:
 #   1. host+page — the host is listed here and some rule's `path` matches the page.
@@ -62,6 +69,8 @@ allowed_upload_locations:
 #   4. allowed location — the file resolves to a regular file under
 #      `allowed_upload_locations`. The resolved path is what the browser is
 #      handed, so what was checked is what is sent.
+#   5. size — the file is no larger than the admitting rule's `max_bytes`, or
+#      `max_upload_bytes` (default 1 MiB) when the rule sets none.
 upload-file:
   secure.splitwise.com:
     # Splitwise is a hash-routed SPA: the add/edit-expense modal shares the path
@@ -99,3 +108,4 @@ upload-file:
 #      label: '(?!)'          # no visible-label match wanted
 #      field_ids: [Filedata]
 #      hidden_input: true
+#      max_bytes: 268435456   # 256 MiB: videos outgrow the 1 MiB default cap

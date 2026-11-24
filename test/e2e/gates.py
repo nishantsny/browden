@@ -28,7 +28,7 @@ def open_upload_gate(file_path) -> UploadFileGate:
     cases that build one.
     """
     admitted = AdmittedFile()
-    admitted.admit(Path(file_path))
+    admitted.admit(Path(file_path), 0)
     return UploadFileGate(check_page=lambda url: None,
                           check_element=lambda url, css_selector, found: None,
                           admitted=admitted)

@@ -13,6 +13,13 @@ from .intent import ACTIVATION_KEYS
 from .popularity import PopularityAllowlist
 from .tranco import DEFAULT_TOP_N, canonical_host
 
+# The built-in `max_upload_bytes`: the size cap on an upload whose admitting
+# upload-file rule sets no `max_bytes` of its own, when the config states none.
+# Deliberately small — the location gate is the real authorization and a receipt
+# or a scanned document fits well inside it. Anything bigger is a per-rule
+# `max_bytes`, scoped to the host + pages that rule names.
+DEFAULT_MAX_UPLOAD_BYTES = 1024 * 1024
+
 # The rule an `allow_all` set answers every write-action lookup with: any page,
 # any control, and — for press-key — every control key the gate would accept.
 # Deliberately NOT a `"*"` read override: see BrowdenAccessRuleSet's `allow_all`.
@@ -152,6 +159,16 @@ class BrowdenAccessRuleSet:
       acts — listing the host under ``upload-file`` and listing a location here. A
       profile's locations are additive over the global ones, like every other rule.
 
+    * ``max_upload_bytes`` — the largest file ``upload-file`` may send through a
+      rule that sets no ``max_bytes`` of its own::
+
+          max_upload_bytes: 1048576
+
+      Optional, defaulting to :data:`DEFAULT_MAX_UPLOAD_BYTES` (1 MiB). An
+      ``upload-file`` rule may set its own ``max_bytes`` (no ceiling), which
+      replaces this default for the uploads that rule admits. Process-wide: the
+      schema admits it only at the top level, and a profile's set inherits it.
+
     * ``allow_all: true`` — every write action on every page, and reads of every
       host the read gate would otherwise *rank*. It is the sugar for "this is a
       scratch profile: let the agent work in it", so an operator can scope down
@@ -217,6 +234,7 @@ class BrowdenAccessRuleSet:
             for action in WRITE_ACTIONS}
         allowed_upload_locations = _coerce_upload_locations(sections.get("allowed_upload_locations"))
         allow_all = bool(sections.get("allow_all")) or (base is not None and base._allow_all)
+        max_upload_bytes = sections.get("max_upload_bytes", DEFAULT_MAX_UPLOAD_BYTES)
         # Whether THIS set decided the popularity question for itself. Only an
         # explicit `tranco.enabled` here counts: under allow_all the net is
         # turned on rather than inherited, so a profile that wants the whole web
@@ -233,11 +251,15 @@ class BrowdenAccessRuleSet:
             # locations and may add its own. A profile cannot narrow one — same as
             # the write actions, where a profile only ever widens.
             allowed_upload_locations = (*base._allowed_upload_locations, *allowed_upload_locations)
+            # Process-wide, so a profile's set takes the global value (the schema
+            # refuses `max_upload_bytes` inside a profile).
+            max_upload_bytes = base._max_upload_bytes
         if allow_all and not tranco_is_explicit:
             read_cfg["tranco"] = {**(read_cfg.get("tranco") or {}), "enabled": True}
         # Kept so a set built on top of this one can union against it.
         self._allow_all = allow_all
         self._allowed_upload_locations = tuple(dict.fromkeys(allowed_upload_locations))
+        self._max_upload_bytes = max_upload_bytes
         self._deny_rules = deny_rules
         self._read_cfg = read_cfg
         self._override_rules = override_rules
@@ -307,6 +329,24 @@ class BrowdenAccessRuleSet:
         which grants *page* authority and says nothing about the filesystem.
         """
         return self._allowed_upload_locations
+
+    @property
+    def max_upload_bytes(self) -> int:
+        """The size cap on an upload whose admitting rule sets no ``max_bytes``.
+
+        The config's top-level ``max_upload_bytes``, else
+        :data:`DEFAULT_MAX_UPLOAD_BYTES`.
+        """
+        return self._max_upload_bytes
+
+    def upload_cap(self, rules: "list[PageRule]") -> int:
+        """The largest file any of ``rules`` admits: its ``max_bytes``, else the default.
+
+        ``rules`` are the upload-file rules that authorize this request; rules are
+        additive, so the most generous of them is the cap. With none, the default.
+        """
+        return max((r.max_bytes if r.max_bytes is not None else self._max_upload_bytes
+                    for r in rules), default=self._max_upload_bytes)
 
     def is_denied(self, host: str, path: str) -> bool:
         """True if ``(host, path)`` is on the denylist (refused for every action)."""

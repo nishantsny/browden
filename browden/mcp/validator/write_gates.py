@@ -21,6 +21,7 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 from .access_rule_set import BrowdenAccessRuleSet
+from .allowlist import PageRule
 from .errors import ValidationError
 from .intent import (
     ACTIVATION_KEYS,
@@ -33,12 +34,6 @@ from .intent import (
     is_uploadable_control,
     label_matches,
 )
-
-# The largest file ``upload-file`` will hand to a page. Not a config knob: it is
-# a sanity bound on an action whose real authorization is the location gate,
-# and a receipt or a scanned document is orders of magnitude smaller. A workflow
-# that needs to ship something bigger than this wants a different tool.
-MAX_UPLOAD_BYTES = 25 * 1024 * 1024
 
 
 def check_action_host(access_rules: BrowdenAccessRuleSet, action: str, url: str) -> None:
@@ -201,7 +196,8 @@ def resolve_upload_path(file_path: str) -> Path:
     return Path(file_path).expanduser().resolve()
 
 
-def validate_upload_path(allowed_upload_locations: "tuple[Path, ...]", file_path: str) -> Path:
+def validate_upload_path(allowed_upload_locations: "tuple[Path, ...]", file_path: str,
+                         *, max_upload_bytes: int) -> Path:
     """Gate 4 for ``upload-file``: the file must be a real file in an allowed location.
 
     The gate with no analogue in the other write actions, and the reason this is
@@ -216,7 +212,10 @@ def validate_upload_path(allowed_upload_locations: "tuple[Path, ...]", file_path
     is what closes the two ways out of an allowed location — ``../`` traversal in
     the path the agent passes, and a symlink *inside* one pointing anywhere on
     disk. The file must also exist, be a regular file (not a directory, FIFO or
-    device) and be under :data:`MAX_UPLOAD_BYTES`.
+    device) and be no larger than ``max_upload_bytes``. The gate passes the
+    largest cap any upload-file rule on this page could grant (see
+    :meth:`BrowdenAccessRuleSet.upload_cap`); the cap of the rule that actually
+    admits the control is checked again once gate 3 knows which rule that is.
 
     No location configured means no upload is authorized — including under
     ``allow_all``, which grants authority over *pages* and says nothing about the
@@ -260,22 +259,38 @@ def validate_upload_path(allowed_upload_locations: "tuple[Path, ...]", file_path
         size = resolved.stat().st_size
     except OSError as e:
         raise ValidationError(f"cannot read {str(resolved)!r}: {e}") from None
-    if size > MAX_UPLOAD_BYTES:
-        raise ValidationError(
-            f"{str(resolved)!r} is {size} bytes, over the {MAX_UPLOAD_BYTES}-byte "
-            f"upload cap — refusing to upload")
+    _check_upload_size(resolved, size, max_upload_bytes)
     return resolved
+
+
+def _check_upload_size(resolved: Path, size: int, max_upload_bytes: int) -> None:
+    """Refuse a file of ``size`` bytes over the effective ``max_upload_bytes`` cap."""
+    if size > max_upload_bytes:
+        raise ValidationError(
+            f"{str(resolved)!r} is {size} bytes, over the {max_upload_bytes}-byte "
+            f"upload cap — refusing to upload")
 
 
 def validate_upload_target(access_rules: BrowdenAccessRuleSet, url: str,
                            css_selector: str, found: dict) -> bool:
+    """Gates 2 and 3 for ``upload-file``; True if the input was admitted as hidden.
+
+    See :func:`_admit_upload_target`, which also reports the rules that admitted
+    the control (for the per-rule size cap).
+    """
+    return _admit_upload_target(access_rules, url, css_selector, found)[0]
+
+
+def _admit_upload_target(access_rules: BrowdenAccessRuleSet, url: str,
+                         css_selector: str, found: dict) -> "tuple[bool, list[PageRule]]":
     """Gates 2 and 3 for ``upload-file`` — file-control integrity, then label/id.
 
     ``url`` is the tab's live URL; ``found`` is the ``query_selector_all(limit=2)``
     result for ``css_selector``. Raises :class:`ValidationError` on the first
     failing gate. When the upload is authorized, returns whether the input was
     admitted *as a hidden control* — the action must then skip the backend's live
-    visibility check, which such an input would fail by design.
+    visibility check, which such an input would fail by design — and the rules
+    that admitted it, whose ``max_bytes`` decide the size cap.
 
     Gate 3 mirrors ``write-text``'s label-or-id shape because this target needs
     the id half even more often: a file input routinely carries no visible label
@@ -300,9 +315,9 @@ def validate_upload_target(access_rules: BrowdenAccessRuleSet, url: str,
 
     # Gate 2: the element must be a single, real, visible, non-decoy file input —
     # or, failing visibility alone, one the operator opted in to by id/name.
-    hidden_ok = any(r.hidden_input and field_id_matches(node, r.field_ids) for r in rules)
-    if hidden_ok and is_uploadable_control(node, allow_hidden=True):
-        return True
+    hidden_rules = [r for r in rules if r.hidden_input and field_id_matches(node, r.field_ids)]
+    if hidden_rules and is_uploadable_control(node, allow_hidden=True):
+        return True, hidden_rules
     if not is_uploadable_control(node):
         raise ValidationError(
             "selected element is not a file input (or is a "
@@ -311,13 +326,14 @@ def validate_upload_target(access_rules: BrowdenAccessRuleSet, url: str,
     # Gate 3: authorize the control against the page rules matching THIS URL —
     # by its visible label, or by the exact id/name the operator named in that
     # same rule's field_ids. Fail closed, exactly as write-text does.
-    label_ok = any(r.label is not None and field_label_matches(node, r.label) for r in rules)
-    id_ok = any(field_id_matches(node, r.field_ids) for r in rules)
-    if not (label_ok or id_ok):
+    admitting = [r for r in rules
+                 if (r.label is not None and field_label_matches(node, r.label))
+                 or field_id_matches(node, r.field_ids)]
+    if not admitting:
         raise ValidationError(
             f"file input does not match any upload-file rule for "
             f"{p.hostname or ''}{p.path or '/'} — refusing to upload")
-    return False
+    return False, admitting
 
 
 @dataclass(frozen=True)
@@ -348,13 +364,15 @@ class AdmittedFile:
     Per request, like the gate that owns it; it is never shared or reused.
     """
 
-    __slots__ = ("_path",)
+    __slots__ = ("_path", "size")
 
     def __init__(self) -> None:
         self._path: "Path | None" = None
+        self.size = 0
 
-    def admit(self, path: Path) -> None:
+    def admit(self, path: Path, size: int) -> None:
         self._path = path
+        self.size = size
 
     @property
     def path(self) -> Path:
@@ -435,10 +453,24 @@ def upload_file_gate(access_rules: BrowdenAccessRuleSet, file_path: str) -> Uplo
 
     def check_page(url: str) -> None:
         check_action_host(access_rules, "upload-file", url)
-        admitted.admit(validate_upload_path(access_rules.allowed_upload_locations, file_path))
+        # Before the DOM is read, the most any rule on this page could grant: a
+        # file over every one of their caps is refused whatever control it targets.
+        p = urlparse(url)
+        page_rules = access_rules.rules_for("upload-file", p.hostname or "", p.path,
+                                            p.query, p.fragment)
+        resolved = validate_upload_path(access_rules.allowed_upload_locations, file_path,
+                                        max_upload_bytes=access_rules.upload_cap(page_rules))
+        try:
+            size = resolved.stat().st_size
+        except OSError as e:
+            raise ValidationError(f"cannot read {str(resolved)!r}: {e}") from None
+        admitted.admit(resolved, size)
 
     def check_element(url: str, css_selector: str, found: dict) -> None:
-        control.hidden = validate_upload_target(access_rules, url, css_selector, found)
+        control.hidden, admitting = _admit_upload_target(access_rules, url, css_selector, found)
+        # Now the rules that admit THIS control are known: the file must fit the
+        # cap one of them grants (its max_bytes, else max_upload_bytes).
+        _check_upload_size(admitted.path, admitted.size, access_rules.upload_cap(admitting))
 
     return UploadFileGate(check_page=check_page, check_element=check_element,
                           admitted=admitted, control=control)

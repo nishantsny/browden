@@ -8,7 +8,7 @@ still cover the same gates end-to-end; this file pins the composition unit.
 import pytest
 
 from browden.mcp.validator import (
-    MAX_UPLOAD_BYTES,
+    DEFAULT_MAX_UPLOAD_BYTES,
     upload_file_gate,
     BrowdenAccessRuleSet,
     BrowdenRuntimeConfiguration,
@@ -36,6 +36,10 @@ _DENIED = BrowdenAccessRuleSet({
 })
 
 AMAZON = "https://www.amazon.com/dp/B0FBRRM2VQ"
+
+# The size cap handed to validate_upload_path directly (the gate passes the rule
+# set's effective one); the built-in default, so nothing here depends on config.
+_CAP = DEFAULT_MAX_UPLOAD_BYTES
 
 
 def _found(*nodes):
@@ -359,28 +363,28 @@ def allowed(tmp_path):
 
 
 def test_a_file_under_an_allowed_location_passes(allowed, tmp_path):
-    resolved = validate_upload_path(allowed, str(tmp_path / "receipts" / "lunch.png"))
+    resolved = validate_upload_path(allowed, str(tmp_path / "receipts" / "lunch.png"), max_upload_bytes=_CAP)
     assert resolved == tmp_path / "receipts" / "lunch.png"
 
 
 def test_no_roots_configured_denies_everything(tmp_path):
     (tmp_path / "f.png").write_bytes(b"x")
     with pytest.raises(ValidationError, match="no allowed_upload_locations are configured"):
-        validate_upload_path((), str(tmp_path / "f.png"))
+        validate_upload_path((), str(tmp_path / "f.png"), max_upload_bytes=_CAP)
 
 
 def test_a_file_outside_every_allowed_location_is_refused(allowed, tmp_path):
     secret = tmp_path / "id_rsa"
     secret.write_bytes(b"PRIVATE KEY")
     with pytest.raises(ValidationError, match="outside every allowed upload location"):
-        validate_upload_path(allowed, str(secret))
+        validate_upload_path(allowed, str(secret), max_upload_bytes=_CAP)
 
 
 def test_traversal_out_of_an_allowed_location_is_refused(allowed, tmp_path):
     """The path is resolved before it is compared, so `../` buys nothing."""
     (tmp_path / "id_rsa").write_bytes(b"PRIVATE KEY")
     with pytest.raises(ValidationError, match="outside every allowed upload location"):
-        validate_upload_path(allowed, str(tmp_path / "receipts" / ".." / "id_rsa"))
+        validate_upload_path(allowed, str(tmp_path / "receipts" / ".." / "id_rsa"), max_upload_bytes=_CAP)
 
 
 def test_a_symlink_inside_an_allowed_location_pointing_out_is_refused(allowed, tmp_path):
@@ -390,7 +394,7 @@ def test_a_symlink_inside_an_allowed_location_pointing_out_is_refused(allowed, t
     link = allowed[0] / "innocent.png"
     link.symlink_to(secret)
     with pytest.raises(ValidationError, match="outside every allowed upload location"):
-        validate_upload_path(allowed, str(link))
+        validate_upload_path(allowed, str(link), max_upload_bytes=_CAP)
 
 
 def test_a_symlinked_location_still_admits_its_own_files(tmp_path):
@@ -401,26 +405,26 @@ def test_a_symlinked_location_still_admits_its_own_files(tmp_path):
     link = tmp_path / "receipts"
     link.symlink_to(real)
     # The rule set resolves each location on load; this is that resolved form.
-    validate_upload_path((real.resolve(),), str(link / "lunch.png"))
+    validate_upload_path((real.resolve(),), str(link / "lunch.png"), max_upload_bytes=_CAP)
 
 
 def test_a_missing_file_is_refused(allowed, tmp_path):
     with pytest.raises(ValidationError, match="not an existing regular file"):
-        validate_upload_path(allowed, str(tmp_path / "receipts" / "nope.png"))
+        validate_upload_path(allowed, str(tmp_path / "receipts" / "nope.png"), max_upload_bytes=_CAP)
 
 
 def test_a_directory_is_refused(allowed, tmp_path):
     (tmp_path / "receipts" / "sub").mkdir()
     with pytest.raises(ValidationError, match="not an existing regular file"):
-        validate_upload_path(allowed, str(tmp_path / "receipts" / "sub"))
+        validate_upload_path(allowed, str(tmp_path / "receipts" / "sub"), max_upload_bytes=_CAP)
 
 
 def test_an_oversize_file_is_refused(allowed, tmp_path):
     big = tmp_path / "receipts" / "big.bin"
     with big.open("wb") as fh:
-        fh.truncate(MAX_UPLOAD_BYTES + 1)
+        fh.truncate(_CAP + 1)
     with pytest.raises(ValidationError, match="over the .* upload cap"):
-        validate_upload_path(allowed, str(big))
+        validate_upload_path(allowed, str(big), max_upload_bytes=_CAP)
 
 
 def test_allow_all_does_not_grant_the_filesystem():
@@ -430,7 +434,7 @@ def test_allow_all_does_not_grant_the_filesystem():
     check_action_host(scratch, "upload-file", "https://unlisted.test/form")  # page authority: yes
     assert scratch.allowed_upload_locations == ()
     with pytest.raises(ValidationError, match="no allowed_upload_locations are configured"):
-        validate_upload_path(scratch.allowed_upload_locations, "/etc/passwd")
+        validate_upload_path(scratch.allowed_upload_locations, "/etc/passwd", max_upload_bytes=_CAP)
 
 
 def test_a_path_with_a_newline_is_refused(allowed, tmp_path):
@@ -444,13 +448,13 @@ def test_a_path_with_a_newline_is_refused(allowed, tmp_path):
     secret.write_bytes(b"PRIVATE KEY")
     smuggled = allowed[0] / "lunch.png"
     with pytest.raises(ValidationError, match="control character"):
-        validate_upload_path(allowed, f"{smuggled}\n{secret}")
+        validate_upload_path(allowed, f"{smuggled}\n{secret}", max_upload_bytes=_CAP)
 
 
 def test_other_control_characters_are_refused_too(allowed):
     for ch in ("\r", "\t", "\x00", "\x7f"):
         with pytest.raises(ValidationError, match="control character"):
-            validate_upload_path(allowed, f"{allowed[0] / 'lunch.png'}{ch}")
+            validate_upload_path(allowed, f"{allowed[0] / 'lunch.png'}{ch}", max_upload_bytes=_CAP)
 
 
 def test_the_gate_carries_the_path_it_admitted(allowed):
@@ -575,3 +579,112 @@ def test_the_gate_records_a_hidden_admission_for_the_action(tmp_path):
     gate.check_page(STUDIO)
     gate.check_element(STUDIO, "input", _found(_studio_input()))
     assert gate.control.hidden is True
+
+
+# -- upload-file: the size cap (global max_upload_bytes + per-rule max_bytes) ---
+
+UPLOADS = "https://up.test/upload"
+MIB = 1024 * 1024
+
+
+def _sparse(path, size):
+    """A file of ``size`` bytes that takes no disk space (only its length matters)."""
+    with path.open("wb") as fh:
+        fh.truncate(size)
+    return path
+
+
+def _cap_rules(location, *, rule_max_bytes=None, **top):
+    rule = {"path": ["^/upload$"], "label": ".*", "field_ids": ["file"]}
+    if rule_max_bytes is not None:
+        rule["max_bytes"] = rule_max_bytes
+    return BrowdenAccessRuleSet({
+        "upload-file": {"up.test": [rule]},
+        "allowed_upload_locations": [str(location)],
+        **top,
+    })
+
+
+def _run_upload_gate(rules, path, node=None):
+    gate = upload_file_gate(rules, str(path))
+    gate.check_page(UPLOADS)
+    gate.check_element(UPLOADS, "input[name=file]", _found(node or _file_input(name="file")))
+    return gate
+
+
+def test_the_builtin_default_cap_is_one_mib(allowed):
+    rules = _cap_rules(allowed[0])
+    assert rules.max_upload_bytes == MIB == DEFAULT_MAX_UPLOAD_BYTES
+    _run_upload_gate(rules, _sparse(allowed[0] / "ok.bin", MIB))  # exactly at the cap
+    with pytest.raises(ValidationError, match=rf"is {MIB + 1} bytes, over the {MIB}-byte upload cap"):
+        _run_upload_gate(rules, _sparse(allowed[0] / "big.bin", MIB + 1))
+
+
+def test_a_file_between_the_old_25_mib_cap_and_a_configured_default_is_accepted(allowed):
+    """The live case: a 72 MB video under a raised cap; the old hard-coded 25 MiB refused it."""
+    rules = _cap_rules(allowed[0], max_upload_bytes=100 * MIB)
+    video = _sparse(allowed[0] / "video.mp4", 72_000_000)
+    assert _run_upload_gate(rules, video).admitted.path == video
+
+
+def test_a_file_over_the_configured_default_is_refused_with_that_number(allowed):
+    rules = _cap_rules(allowed[0], max_upload_bytes=4096)
+    with pytest.raises(ValidationError, match="over the 4096-byte upload cap"):
+        _run_upload_gate(rules, _sparse(allowed[0] / "big.bin", 4097))
+
+
+def test_a_rule_max_bytes_admits_a_file_between_the_default_and_its_cap(allowed):
+    rules = _cap_rules(allowed[0], rule_max_bytes=100 * MIB)
+    video = _sparse(allowed[0] / "video.mp4", 72_000_000)
+    assert _run_upload_gate(rules, video).admitted.path == video
+
+
+def test_a_file_over_the_rule_max_bytes_is_refused_naming_it(allowed):
+    rules = _cap_rules(allowed[0], rule_max_bytes=100 * MIB)
+    with pytest.raises(ValidationError, match=f"over the {100 * MIB}-byte upload cap"):
+        _run_upload_gate(rules, _sparse(allowed[0] / "huge.mp4", 100 * MIB + 1))
+
+
+def test_a_rule_max_bytes_can_be_below_the_default(allowed):
+    rules = _cap_rules(allowed[0], rule_max_bytes=10)
+    with pytest.raises(ValidationError, match="over the 10-byte upload cap"):
+        _run_upload_gate(rules, _sparse(allowed[0] / "small.bin", 11))
+
+
+def test_the_cap_is_that_of_the_rule_that_admits_the_control(allowed):
+    """Another rule on the same page with a bigger cap does not lend it to this control.
+
+    The early check (before the DOM is read) passes on the page's most generous
+    rule; the element check then holds the file to the rule that admitted it.
+    """
+    # A label no control can match, so each rule admits only the field it names.
+    big = _sparse(allowed[0] / "video.mp4", 2 * MIB)
+    strict = BrowdenAccessRuleSet({
+        "upload-file": {"up.test": [
+            {"path": ["^/upload$"], "label": "(?!)", "field_ids": ["video"], "max_bytes": 100 * MIB},
+            {"path": ["^/upload$"], "label": "(?!)", "field_ids": ["receipt"]}]},
+        "allowed_upload_locations": [str(allowed[0])],
+    })
+    _run_upload_gate(strict, big, _file_input(name="video"))
+    with pytest.raises(ValidationError, match=f"over the {MIB}-byte upload cap"):
+        _run_upload_gate(strict, big, _file_input(name="receipt"))
+
+
+def test_a_file_over_every_rule_on_the_page_is_refused_before_the_dom_is_read(allowed):
+    rules = _cap_rules(allowed[0], rule_max_bytes=2 * MIB)
+    gate = upload_file_gate(rules, str(_sparse(allowed[0] / "huge.bin", 2 * MIB + 1)))
+    with pytest.raises(ValidationError, match=f"over the {2 * MIB}-byte upload cap"):
+        gate.check_page(UPLOADS)
+
+
+def test_a_profile_rule_max_bytes_applies_in_that_profile_only(allowed):
+    configuration = BrowdenRuntimeConfiguration({
+        "allowed_upload_locations": [str(allowed[0])],
+        "upload-file": {"up.test": [{"path": ["^/upload$"], "label": ".*"}]},
+        "profiles": {"/profiles/video": {"upload-file": {"up.test": [
+            {"path": ["^/upload$"], "label": ".*", "max_bytes": 100 * MIB}]}}},
+    })
+    video = _sparse(allowed[0] / "video.mp4", 72_000_000)
+    _run_upload_gate(configuration.access_rules_for("/profiles/video"), video)
+    with pytest.raises(ValidationError, match=f"over the {MIB}-byte upload cap"):
+        _run_upload_gate(configuration.access_rules_for("/profiles/other"), video)
