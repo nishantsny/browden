@@ -500,12 +500,21 @@ async def upload_file(css_selector: str, file_path: str, id: str) -> dict:
          Most sites hide the real input and draw their own "Select files"
          button: target the hidden ``<input type="file">`` itself, never the
          button (clicking it opens the OS dialog). A hidden input passes only
-         when the matching rule sets ``hidden_input: true`` and names the input's
-         ``id``/``name`` in its ``field_ids``.
+         when the matching rule sets ``hidden_input: true`` and names the input
+         — by its ``id``/``name`` in ``field_ids``, or, for an input with
+         neither, by its exact ``accept`` attribute in ``accept`` (e.g.
+         ``accept: ['video/*']`` for ``<input type="file" accept="video/*">``;
+         whitespace around commas is ignored, nothing else is). ``accept``
+         reaches only an input with no ``id`` and no ``name``, and only when it
+         is the one such file input on the page carrying that value.
       3. That control must be authorized by a matching rule — by its visible
-         label, or by its exact ``id``/``name`` in the rule's ``field_ids``. The
-         id half matters more here than for text: a file input routinely carries
-         no visible label at all, so no label regex could ever match it.
+         label, by its exact ``id``/``name`` in the rule's ``field_ids``, or by
+         its exact ``accept`` value in the rule's ``accept``. The id half matters
+         more here than for text: a file input routinely carries no visible
+         label at all, so no label regex could ever match it. ``id``, ``name``
+         and ``accept`` are page markup rather than anything a human reads; they
+         are honoured only on a host and path the operator allow-listed for
+         ``upload-file``, and only for a value the operator wrote into the rule.
       4. ``file_path`` must resolve — through ``~``, ``..`` and every symlink —
          to an existing regular file under one of the operator's configured
          ``allowed_upload_locations``, no larger than the size cap (the largest

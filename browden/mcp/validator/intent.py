@@ -330,7 +330,7 @@ def is_uploadable_control(node: dict, *, allow_hidden: bool = False) -> bool:
     anti-decoy only. It says "is this a file picker a human could use", never
     *which* file may be handed to it — the file itself is bounded by the
     operator's allowed upload locations (see ``write_gates.validate_upload_path``) and the
-    control by the ``upload-file`` allowlist label / ``field_ids``.
+    control by the ``upload-file`` allowlist label / ``field_ids`` / ``accept``.
 
     A readonly file input is refused for the same reason a readonly text box is:
     a field the human could not fill is not one the agent may fill either.
@@ -346,8 +346,9 @@ def is_uploadable_control(node: dict, *, allow_hidden: bool = False) -> bool:
     site's real file input usually looks: the native control is hidden and the
     page draws its own "Select files" button, which opens the OS dialog that
     browden cannot drive. Only the write gate passes it, and only for an input the
-    operator named by ``id``/``name`` in a rule that opts in with
-    ``hidden_input: true``. Decoy markup, ``disabled`` and ``readonly`` still refuse.
+    operator named by ``id``/``name`` (``field_ids``) or by its exact ``accept``
+    value (``accept``) in a rule that opts in with ``hidden_input: true``. Decoy
+    markup, ``disabled`` and ``readonly`` still refuse.
 
     Default-deny: every check must pass. ``node`` is a serialized element dict.
     """
@@ -412,8 +413,64 @@ def field_id_matches(node: dict, allowed_ids: "set[str]") -> bool:
     A page could in principle put a listed ``id`` on a different field, but only a
     field on a host the operator already allow-listed for write-text — the
     identifier is a name the operator chose, not one the page volunteered.
+
+    For ``upload-file`` a file input with neither ``id`` nor ``name`` can be
+    named by its ``accept`` attribute instead — see :func:`accept_matches`, which
+    rests on the same argument.
     """
     if not node or not allowed_ids:
         return False
     attrs = node.get("attributes", {})
     return node.get("id") in allowed_ids or attrs.get("name") in allowed_ids
+
+
+def normalize_accept(value: str) -> str:
+    """Canonical spelling of an ``accept`` attribute value, for exact comparison.
+
+    Only the whitespace around each comma goes (``"image/*, .pdf"`` and
+    ``"image/*,.pdf"`` are one value); everything else — case, order, the tokens
+    themselves — is compared exactly as written. No regex and no token-subset
+    logic: the operator names the whole attribute value they saw on the page.
+    """
+    return ",".join(part.strip() for part in value.split(","))
+
+
+def accept_matches(node: dict, allowed_accepts: "frozenset[str] | set[str]") -> bool:
+    """True iff the file input's own ``accept`` attribute is one ``allowed_accepts`` lists.
+
+    The ``upload-file`` counterpart of :func:`field_id_matches`, for a file input
+    that carries no ``id`` and no ``name`` to be named by — TikTok Studio's only
+    upload control is ``<input type="file" accept="video/*" style="display: none;">``
+    behind its own "Select video" button. ``allowed_accepts`` holds values
+    already passed through :func:`normalize_accept`; the attribute is normalized
+    the same way and must equal one of them. An input with no ``accept``
+    attribute never matches, and an empty set matches nothing.
+
+    Only an input with **no** ``id`` and **no** ``name`` can match. One that has
+    either is named by ``field_ids``; letting ``accept`` reach it too would admit
+    an input the operator deliberately left out of ``field_ids`` merely because it
+    takes the same file type. An ``accept`` value the serializer truncated
+    (``attributes_truncated``) never matches either: the gate would be comparing
+    a prefix, not the value.
+
+    This only says the input carries the value. ``accept`` names a file *type*,
+    not a control, so the upload gate also requires that this input is the only
+    id-less, name-less file input on the page carrying it
+    (``write_gates._named_by_rule``).
+
+    The trust argument is the one :func:`field_id_matches` makes. Like an id,
+    ``accept`` is page markup, not something a human reads, so a page could put
+    a listed value on a different input. But it is honoured only on a host and
+    path the operator allow-listed for ``upload-file``, and only for a value the
+    operator wrote into that rule; and what may be uploaded is still bounded by
+    ``allowed_upload_locations``, independently of which input receives it.
+    """
+    if not node or not allowed_accepts:
+        return False
+    attrs = node.get("attributes", {})
+    if node.get("id") or attrs.get("name"):
+        return False
+    if "accept" in (node.get("attributes_truncated") or ()):
+        return False
+    accept = attrs.get("accept")
+    return accept is not None and normalize_accept(accept) in allowed_accepts

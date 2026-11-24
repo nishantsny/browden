@@ -25,6 +25,7 @@ from .allowlist import PageRule
 from .errors import ValidationError
 from .intent import (
     ACTIVATION_KEYS,
+    accept_matches,
     classify_anchor_target,
     field_id_matches,
     field_label_matches,
@@ -33,6 +34,7 @@ from .intent import (
     is_focusable_control,
     is_uploadable_control,
     label_matches,
+    normalize_accept,
 )
 
 
@@ -283,11 +285,39 @@ def _check_upload_size(resolved: Path, size: int, max_upload_bytes: int) -> None
             f"upload cap — refusing to upload")
 
 
-def _visibly_admitting(node: dict, rules: "list[PageRule]") -> "list[PageRule]":
-    """The rules that admit a visible file input: by its label, or its exact id/name."""
+def _visibly_admitting(node: dict, rules: "list[PageRule]",
+                       survey: "list[dict] | None") -> "list[PageRule]":
+    """The rules that admit a visible file input: by its label, its exact id/name,
+    or its exact ``accept`` value (see :func:`_named_by_rule`)."""
     return [r for r in rules
             if (r.label is not None and field_label_matches(node, r.label))
-            or field_id_matches(node, r.field_ids)]
+            or _named_by_rule(node, r, survey)]
+
+
+def _named_by_rule(node: dict, rule, survey: "list[dict] | None") -> bool:
+    """True iff ``rule`` names this file input by exact id/name or exact ``accept``.
+
+    An id or name is the operator's name for one control. An ``accept`` value
+    names a file *type*, and a page can carry several inputs of one type (a
+    public-post attachment beside a direct-message one), so ``accept`` names this
+    input only when it is the one id-less, name-less file input in the snapshot
+    (``survey``: every ``input[type=file]`` on the page) whose normalized
+    ``accept`` is that value.
+    The agent writes the selector, so "the selector matched one element" alone
+    would let it pick whichever same-typed input it liked. No survey (a caller
+    that did not take one) fails closed.
+    """
+    if field_id_matches(node, rule.field_ids):
+        return True
+    if not accept_matches(node, rule.accept) or survey is None:
+        return False
+    value = normalize_accept(node["attributes"]["accept"])
+    # Peers are the inputs this same value could reach: an input with an id or a
+    # name is never reached by accept (see accept_matches), only by field_ids.
+    peers = [n for n in survey
+             if not (n.get("id") or n.get("attributes", {}).get("name"))
+             and normalize_accept(n.get("attributes", {}).get("accept") or "") == value]
+    return len(peers) == 1
 
 
 def validate_upload_target(access_rules: BrowdenAccessRuleSet, url: str,
@@ -320,8 +350,20 @@ def _admit_upload_target(access_rules: BrowdenAccessRuleSet, url: str,
     A hidden input (YouTube Studio's ``<input name="Filedata">`` is
     ``display:none`` + ``aria-hidden`` behind a "Select files" button) passes
     gate 2 only through a rule matching this URL that sets ``hidden_input: true``
-    *and* names the input's id/name in its own ``field_ids``. That same match is
-    its gate 3, so a label regex never admits a hidden control.
+    *and* names the input in that same rule — by its id/name in ``field_ids``, or,
+    for an input with neither (TikTok Studio's ``<input type="file"
+    accept="video/*" style="display: none;">``), by its exact ``accept`` value in
+    ``accept``. That same match is its gate 3, so a label regex never admits a
+    hidden control.
+
+    ``accept`` counts wherever ``field_ids`` counts here: the hidden match above
+    and gate 3's id half. Like an id it is page markup, trusted only because the
+    operator wrote the value into a rule for this host and path (see
+    :func:`intent.accept_matches`). It reaches only an input with no id and no
+    name, and only when that input is the one such file input on the page
+    carrying the value; ``found["survey"]`` (every ``input[type=file]`` in the same
+    snapshot) is what that is judged against, and without it ``accept`` admits
+    nothing.
 
     Such a match reports the input as hidden whether or not its own attributes
     show it: a page can just as well hide it with a stylesheet class, a hidden
@@ -333,14 +375,16 @@ def _admit_upload_target(access_rules: BrowdenAccessRuleSet, url: str,
     rules = access_rules.rules_for("upload-file", p.hostname or "", p.path, p.query, p.fragment)
 
     # Gate 2: the element must be a single, real, visible, non-decoy file input —
-    # or, failing visibility alone, one the operator opted in to by id/name.
-    hidden_rules = [r for r in rules if r.hidden_input and field_id_matches(node, r.field_ids)]
+    # or, failing visibility alone, one the operator opted in to by id/name or accept.
+    survey = found.get("survey")
+    hidden_rules = [r for r in rules if r.hidden_input and _named_by_rule(node, r, survey)]
     visible_ok = is_uploadable_control(node)
     if hidden_rules and is_uploadable_control(node, allow_hidden=True):
         # Admitted as hidden. A control that also passes the visible checks may
-        # be admitted by other rules too (its label, its id); they count toward
-        # its size cap, so a bigger-cap rule is not lost to the hidden branch.
-        admitting = _visibly_admitting(node, rules) if visible_ok else []
+        # be admitted by other rules too (its label, its id or accept); they
+        # count toward its size cap, so a bigger-cap rule is not lost to the
+        # hidden branch.
+        admitting = _visibly_admitting(node, rules, survey) if visible_ok else []
         return True, list(dict.fromkeys([*hidden_rules, *admitting]))
     if not visible_ok:
         raise ValidationError(
@@ -348,9 +392,10 @@ def _admit_upload_target(access_rules: BrowdenAccessRuleSet, url: str,
             "hidden/disabled/readonly/decoy element) — refusing to upload")
 
     # Gate 3: authorize the control against the page rules matching THIS URL —
-    # by its visible label, or by the exact id/name the operator named in that
-    # same rule's field_ids. Fail closed, exactly as write-text does.
-    admitting = _visibly_admitting(node, rules)
+    # by its visible label, or by the exact id/name (field_ids) or accept value
+    # (accept) the operator named in that same rule. Fail closed, exactly as
+    # write-text does.
+    admitting = _visibly_admitting(node, rules, survey)
     if not admitting:
         raise ValidationError(
             f"file input does not match any upload-file rule for "
