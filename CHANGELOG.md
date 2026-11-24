@@ -7,6 +7,29 @@ All notable changes to browden are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+- **`upload_file` can name a file input that has no id or name, by its
+  `accept`.** TikTok Studio's upload page has exactly one file input,
+  `<input type="file" accept="video/*" style="display: none;">`, with no id,
+  name or label, behind its own "Select video" button. `hidden_input: true`
+  needed `field_ids`, and there was nothing to list, so `upload_file` refused it
+  at gate 2 ("not a file input (or is a hidden/disabled/readonly/decoy
+  element)") even under `label: '.*'`. An `upload-file` page rule may now list
+  `accept: ['video/*']`: exact values compared with the input's `accept`
+  attribute (whitespace around commas is ignored; no regex). It counts wherever
+  `field_ids` counts for `upload-file`: with `hidden_input: true` it admits the
+  hidden input, and without it, it authorizes a visible label-less one. Like an
+  id, `accept` is page markup, honoured only on a host and path allow-listed for
+  `upload-file` and only for a value the operator wrote. Since a value names a
+  file type rather than a control, it reaches only an input with no id and no
+  name, and only when that input is the one such file input on the page
+  carrying the value: two id-less `video/*` inputs refuse, whichever one the
+  selector picks. A truncated `accept` value never matches. Decoy, `disabled`
+  and `readonly` inputs still refuse, the selector must still match exactly one
+  element, and the schema rejects `accept` outside `upload-file`, anything but a
+  non-empty list of non-empty strings, an empty comma-separated part, and `*` or
+  `*/*`. `hidden_input: true` now needs `field_ids` or `accept`.
+
 ### Changed
 - **The `upload_file` size cap is now config, and its default drops from 25 MiB
   to 1 MiB.** Behaviour change: with no size setting, a file over 1 MiB

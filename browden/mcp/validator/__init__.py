@@ -4,6 +4,7 @@ from .allowlist import HostRuleMatcher, ReadPolicy
 from .errors import SessionBusyError, ValidationError, tab_gone_envelope
 from .intent import (
     ACTIVATION_KEYS,
+    accept_matches,
     classify_anchor_target,
     field_id_matches,
     field_label_matches,
@@ -46,6 +47,7 @@ from .write_gates import (
 
 __all__ = [
     "ACTIVATION_KEYS",
+    "accept_matches",
     "AdmittedControl",
     "AdmittedFile",
     "BrowdenAccessRuleSet",

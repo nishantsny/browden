@@ -222,7 +222,7 @@ verbatim; it is globally unique and routes itself to the right profile (multiple
 | `switch_to_default_content` | Return a tab's focus to its top document, checking that the top page is still readable. |
 | `click` | **A write action, off by default** — click a control on a host listed in the `click` allowlist; each host declares a **required** `label` regex the control's visible text must fully match (`.*` to allow any). No host is listed out of the box. |
 | `insert_text` | **A write action, off by default** — type text into a single visible, non-readonly text field (`<textarea>`, a text `<input>`, or a `contenteditable`) on a host listed in the separate `write-text` allowlist section; the field's visible label (placeholder / aria-label / associated `<label>`) must fully match that host's **required** `label` regex. |
-| `upload_file` | **A write action, off by default** — attach a local file to a single visible, non-readonly `<input type=file>` on a host listed in the separate `upload-file` allowlist section (a hidden one, as most sites use behind their own picker button, only when its rule sets `hidden_input: true` and names it in `field_ids`). Additionally gated by `allowed_upload_locations`: the file must resolve to a regular file under a directory you listed, so an upload can never become an arbitrary local-file read. The file must also fit the size cap: the largest cap among the rules admitting the control (a rule's `max_bytes`, else the top-level `max_upload_bytes` (**1 MiB by default**, down from the fixed 25 MiB of earlier releases)). No host and no root are listed out of the box. |
+| `upload_file` | **A write action, off by default** — attach a local file to a single visible, non-readonly `<input type=file>` on a host listed in the separate `upload-file` allowlist section (a hidden one, as most sites use behind their own picker button, only when its rule sets `hidden_input: true` and names it, by `id`/`name` in `field_ids` or, for an input with neither, by its exact `accept` attribute in `accept`). Additionally gated by `allowed_upload_locations`: the file must resolve to a regular file under a directory you listed, so an upload can never become an arbitrary local-file read. The file must also fit the size cap: the largest cap among the rules admitting the control (a rule's `max_bytes`, else the top-level `max_upload_bytes` (**1 MiB by default**, down from the fixed 25 MiB of earlier releases)). No host and no root are listed out of the box. |
 
 Frame focus sticks to the tab until you move it or the tab navigates or
 reloads. Every later call re-enters the frame only while it is still the one
@@ -362,6 +362,34 @@ a substitute for — the third:
    Any control can be explicitly enabled via `label: '.*'`. The
    denylist vetoes both too; page-injected agent-targeted decoys are always
    refused regardless of the label.
+
+   A control with no visible label can instead be named exactly: `write-text`
+   and `upload-file` rules take `field_ids` (the control's `id` or `name`), and
+   `upload-file` rules also take `accept`, the file input's exact `accept`
+   attribute, for an input that has no `id` or `name` either. Most sites hide
+   the real `<input type="file">` behind their own picker button; an
+   `upload-file` rule reaches such an input only with `hidden_input: true` plus
+   `field_ids` or `accept`. TikTok Studio's only upload control, for example, is
+   `<input type="file" accept="video/*" style="display: none;">`:
+
+   ```yaml
+   upload-file:
+     www.tiktok.com:
+       - path: ['^/tiktokstudio/upload$']
+         label: '.*'
+         hidden_input: true
+         accept: ['video/*']
+         max_bytes: 104857600   # 100 MiB; the 1 MiB default is too small for video
+   ```
+
+   `id`, `name` and `accept` are page markup a human never reads, so they are
+   honoured only on the host and path you allow-listed and only for the exact
+   value you wrote (whitespace around commas in `accept` is ignored; there is no
+   regex). An `accept` value names a file type rather than a control, so it
+   reaches only an input with no `id` and no `name`, and only when that input is
+   the one such file input on the page carrying the value; `*`, `*/*` and empty
+   comma parts are refused at load. Decoy, `disabled` and `readonly` inputs are
+   refused regardless.
 4. **allowed upload locations** — a fourth layer that exists for `upload_file` alone, because
    that action is the one that reads **your filesystem** and sends the bytes to a
    website. `allowed_upload_locations` lists the directories a file may be taken from, and is

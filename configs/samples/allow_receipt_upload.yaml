@@ -110,3 +110,27 @@ upload-file:
 #      field_ids: [Filedata]
 #      hidden_input: true
 #      max_bytes: 268435456   # 256 MiB: videos outgrow the 1 MiB default cap
+
+# A hidden file input with NO id and NO name. TikTok Studio's upload page has a
+# visible "Select video" button and, as its only file input,
+#   <input type="file" accept="video/*" style="display: none;">
+# with no id, name or label, so neither `field_ids` nor `label` can name it.
+# `accept` names it by its exact `accept` attribute instead: an exact string,
+# not a regex (whitespace around commas is ignored, so 'image/*, .pdf' and
+# 'image/*,.pdf' are the same value). Like an id it is page markup, honoured only
+# on the host+path below and only for the value written here. It counts wherever
+# `field_ids` would: with `hidden_input: true` it admits the hidden input, and
+# without it, it authorizes a visible label-less one.
+# An accept value names a file TYPE, not a control, so it admits an input only
+# when that input has no id and no name (those are named by `field_ids`) AND is
+# the only such file input on the page carrying that value; a page with two
+# id-less `video/*` inputs is refused, whichever one the selector picks. '*',
+# '*/*' and empty comma parts are refused at load. Target it with a selector
+# matching exactly one element, e.g. css_selector: input[type=file][accept="video/*"].
+#
+#  www.tiktok.com:
+#    - path: ['^/tiktokstudio/upload$']
+#      label: '.*'
+#      hidden_input: true
+#      accept: ['video/*']
+#      max_bytes: 104857600   # 100 MiB: videos outgrow the 1 MiB default cap

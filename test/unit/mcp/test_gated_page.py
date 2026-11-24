@@ -39,10 +39,18 @@ def _html(text):
 
 
 STUDIO = "https://studio.youtube.com/channel/UC123"
+TIKTOK = "https://www.tiktok.com/tiktokstudio/upload"
+TIKTOK_TWO = "https://www.tiktok.com/tiktokstudio/upload?two"
 
 PAGES = {SHOP: _html("shop"), OTHER: _html("other"), SECRET: _html("SECRET"),
          STUDIO: ("<html><body><input type='file' name='Filedata' multiple aria-hidden='true' "
-                  "style='display: none'></body></html>")}
+                  "style='display: none'></body></html>"),
+         TIKTOK: ("<html><body><button>Select video</button>"
+                  "<div id='dm'><input type='file' accept='video/*' style='display: none;'></div>"
+                  "</body></html>"),
+         TIKTOK_TWO: ("<html><body><div id='dm'><input type='file' accept='video/*' "
+                      "style='display: none;'></div><div id='post'><input type='file' "
+                      "accept='video/*' style='display: none;'></div></body></html>")}
 
 
 class _Clock:
@@ -379,6 +387,34 @@ def test_an_upload_of_a_hidden_input_tells_the_backend_it_was_admitted_hidden(cl
     _page(backend, cache).upload_file("input[name=Filedata]", upload_file_gate(rules, str(video)))
 
     assert backend.actions == [("upload", ("ref", STUDIO, "input[name=Filedata]"), str(video), True)]
+
+
+def _accept_rules(location):
+    return BrowdenAccessRuleSet({
+        "upload-file": {"www.tiktok.com": [
+            {"path": ["^/tiktokstudio/upload$"], "label": ".*", "hidden_input": True,
+             "accept": ["video/*"]}]},
+        "allowed_upload_locations": [str(location)],
+    })
+
+
+def test_an_accept_admission_is_judged_against_every_file_input_on_the_page(clock, tmp_path):
+    """The session hands the gate the page's file inputs: one id-less video input
+    is admitted (as hidden); a second one with the same accept refuses the first."""
+    location = tmp_path / "videos"
+    location.mkdir()
+    clip = location / "clip.mp4"
+    clip.write_bytes(b"mp4")
+
+    backend, cache = PageBackend(url=TIKTOK), SoupCache(clock=clock)
+    _page(backend, cache).upload_file("#dm > input", upload_file_gate(_accept_rules(location), str(clip)))
+    assert backend.actions == [("upload", ("ref", TIKTOK, "#dm > input"), str(clip), True)]
+
+    backend, cache = PageBackend(url=TIKTOK_TWO), SoupCache(clock=clock)
+    with pytest.raises(ValidationError, match="not a file input"):
+        _page(backend, cache).upload_file("#dm > input",
+                                          upload_file_gate(_accept_rules(location), str(clip)))
+    assert backend.actions == []
 
 
 def test_an_upload_is_not_re_resolved_after_the_gate_admitted_it(clock, tmp_path):

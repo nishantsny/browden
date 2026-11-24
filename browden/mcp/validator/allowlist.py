@@ -1,6 +1,7 @@
 import re
 from dataclasses import dataclass
 
+from .intent import normalize_accept
 from .popularity import PopularityAllowlist
 from .tranco import canonical_host
 
@@ -103,12 +104,17 @@ class PageRule:
     keys: "frozenset[str]" = frozenset()
     # `upload-file` only: this rule's `field_ids` also admit a file input the page
     # has hidden (display:none / hidden / aria-hidden) behind its own picker button.
-    # False everywhere else, and it never widens what `label` authorizes.
+    # False everywhere else, and it never widens what `label` authorizes. It
+    # admits by `accept` too.
     hidden_input: bool = False
     # `upload-file` only: the largest file, in bytes, this rule admits — in place
     # of the config's `max_upload_bytes` for controls it admits (no ceiling; when
     # several rules admit one control, the largest cap wins). None = the default.
     max_bytes: "int | None" = None
+    # `upload-file` only: exact `accept` attribute values (normalized by
+    # intent.normalize_accept) that name a file input carrying no id or name —
+    # counted wherever `field_ids` counts for upload-file. Empty elsewhere.
+    accept: "frozenset[str]" = frozenset()
 
     def matches_page(self, path: str, query: str = "", fragment: str = "",
                      *, full_match: bool) -> bool:
@@ -133,7 +139,7 @@ def _as_pattern_tuple(path: object) -> "tuple[re.Pattern[str], ...]":
 
 
 def _page_rule_from_mapping(rule: dict, *, want_label: bool, where: str) -> PageRule:
-    """Build one :class:`PageRule` from a mapping ``{path, match_on?, label?, field_ids?}``.
+    """Build one :class:`PageRule` from a mapping ``{path, match_on?, label?, field_ids?, accept?}``.
 
     ``paths`` (the legacy write key) and ``path`` (the page-rule key) are synonyms
     for the page selector, defaulting to any page. ``want_label`` is true for the
@@ -166,9 +172,12 @@ def _page_rule_from_mapping(rule: dict, *, want_label: bool, where: str) -> Page
     if max_bytes is not None and (not isinstance(max_bytes, int) or isinstance(max_bytes, bool)
                                   or max_bytes <= 0):
         raise ValueError(f"{where}: max_bytes must be a positive integer, got {max_bytes!r}")
+    # `accept` is upload-file's alone (the schema refuses it elsewhere). Stored
+    # normalized, so the gate compares like with like.
+    accept = frozenset(normalize_accept(str(a)) for a in (rule.get("accept") or []))
     return PageRule(patterns=_as_pattern_tuple(raw), match_on=match_on,
                     label=label, field_ids=field_ids, keys=keys, hidden_input=hidden_input,
-                    max_bytes=max_bytes)
+                    max_bytes=max_bytes, accept=accept)
 
 
 def _coerce_page_rules(spec: object, *, want_label: bool, where: str) -> list[PageRule]:

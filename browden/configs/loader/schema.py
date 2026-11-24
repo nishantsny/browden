@@ -19,8 +19,12 @@ The expected shape (see configs/samples/read_only_on_popular_websites.yaml):
                                      #   (use '.*' to allow any control on the host)
         paths: [<path regex>, ...]   # optional, defaults to [".*"]
         field_ids: [<id or name>]    # write-text / upload-file: label-less controls
-        hidden_input: <bool>         # upload-file only: field_ids also admit a file
-                                     #   input the page hid behind its own button
+        hidden_input: <bool>         # upload-file only: field_ids / accept also admit a
+                                     #   file input the page hid behind its own button
+        accept: [<accept value>]     # upload-file only: a file input with no id/name,
+                                     #   named by its exact `accept` attribute (whitespace
+                                     #   around commas ignored; no regex; no '*' / '*/*');
+                                     #   it must be the page's only such input with that value
         max_bytes: <positive int>    # upload-file only: the cap on controls this rule
                                      #   admits, in place of max_upload_bytes (no ceiling;
                                      #   the largest cap among admitting rules wins)
@@ -102,16 +106,41 @@ def _check_field_ids(fids, where: str) -> None:
         raise ConfigError(f"{where}.field_ids: must be a list of non-empty id/name strings")
 
 
+# Wildcards that name no type at all: an input carrying one takes any file, so
+# naming it by that value says nothing about which control it is.
+_ACCEPT_ANY = frozenset({"*", "*/*"})
+
+
+def _check_accept(values, where: str) -> None:
+    # Exact attribute values, never regexes: a pattern here would let one rule
+    # name every file input on the page.
+    if not isinstance(values, list) or not values or not all(isinstance(x, str) and x.strip()
+                                                             for x in values):
+        raise ConfigError(
+            f"{where}.accept: must be a non-empty list of non-empty accept values "
+            f"(e.g. ['video/*'])")
+    for value in values:
+        parts = [p.strip() for p in value.split(",")]
+        if not all(parts):
+            raise ConfigError(
+                f"{where}.accept: {value!r} has an empty comma-separated part")
+        if any(p in _ACCEPT_ANY for p in parts):
+            raise ConfigError(
+                f"{where}.accept: {value!r} accepts any file ('*' / '*/*'), so it names "
+                f"no particular input")
+
+
 def _check_hidden_input(rule: dict, where: str) -> None:
-    # The opt-in admits a hidden file input by its id/name alone, so it is
-    # meaningless without field_ids: refuse it rather than load a rule the
+    # The opt-in admits a hidden file input only by what the rule names — its
+    # id/name (field_ids) or its exact accept value (accept) — so it is
+    # meaningless without one of them: refuse it rather than load a rule the
     # operator believes is doing something.
     if not isinstance(rule["hidden_input"], bool):
         raise ConfigError(f"{where}.hidden_input: must be true or false")
-    if rule["hidden_input"] and not rule.get("field_ids"):
+    if rule["hidden_input"] and not (rule.get("field_ids") or rule.get("accept")):
         raise ConfigError(
-            f"{where}.hidden_input: needs field_ids — a hidden file input is admitted "
-            f"only by the exact id/name the rule names")
+            f"{where}.hidden_input: needs field_ids or accept — a hidden file input is "
+            f"admitted only by the exact id/name or accept value the rule names")
 
 
 def _check_positive_int(value, where: str) -> None:
@@ -133,12 +162,13 @@ def _check_keys(keys, where: str) -> None:
 
 def _check_page_rule(rule, where: str, *, want_label: bool, allow_field_ids: bool,
                      allow_keys: bool = False, allow_hidden_input: bool = False) -> None:
-    """Validate one page-rule mapping ``{path, match_on?, label?, field_ids?, keys?, hidden_input?, max_bytes?}``.
+    """Validate one page-rule mapping ``{path, match_on?, label?, field_ids?, keys?, hidden_input?, accept?, max_bytes?}``.
 
     ``want_label`` requires a ``label`` (write actions); when false a ``label`` is
     rejected as an unknown key (read overrides / denylist have none).
     ``field_ids`` is accepted for ``write-text`` and ``upload-file``; ``keys`` only
-    for ``press-key``; ``hidden_input`` and ``max_bytes`` only for ``upload-file``.
+    for ``press-key``; ``hidden_input``, ``accept`` and ``max_bytes`` only for
+    ``upload-file`` (``allow_hidden_input`` admits all three).
     """
     if not isinstance(rule, dict):
         raise ConfigError(f"{where}: each page rule must be a mapping, got {type(rule).__name__}")
@@ -150,7 +180,7 @@ def _check_page_rule(rule, where: str, *, want_label: bool, allow_field_ids: boo
     if allow_keys:
         allowed.add("keys")
     if allow_hidden_input:
-        allowed.update(("hidden_input", "max_bytes"))
+        allowed.update(("hidden_input", "accept", "max_bytes"))
     unknown = set(rule) - allowed
     if unknown:
         raise ConfigError(f"{where}: unknown keys {sorted(unknown)} (allowed: {', '.join(sorted(allowed))})")
@@ -164,6 +194,8 @@ def _check_page_rule(rule, where: str, *, want_label: bool, allow_field_ids: boo
         _check_field_ids(rule["field_ids"], where)
     if "keys" in rule:
         _check_keys(rule["keys"], where)
+    if "accept" in rule:
+        _check_accept(rule["accept"], where)
     if "hidden_input" in rule:
         _check_hidden_input(rule, where)
     if "max_bytes" in rule:
@@ -278,7 +310,8 @@ def _check_write_action(action, rules, source: str) -> None:
     # input usually has none at all, so for upload-file it is the normal handle
     # rather than an escape hatch. `keys` (the control keys a rule authorizes) is
     # press-key's alone; `click` takes neither. `hidden_input` (admit a file input
-    # the page hid behind its own picker button) and `max_bytes` (this rule's own
+    # the page hid behind its own picker button), `accept` (name a file input with
+    # no id/name by its exact accept value) and `max_bytes` (this rule's own
     # upload size cap) are upload-file's alone.
     allow_field_ids = action in ("write-text", "upload-file")
     allow_keys = (action == "press-key")
@@ -305,7 +338,7 @@ def _check_write_action(action, rules, source: str) -> None:
                 f"'paths'), or a list of page rules, got {type(rule).__name__}")
         allowed = ["paths", "label"] + (["field_ids"] if allow_field_ids else []) \
             + (["keys"] if allow_keys else []) \
-            + (["hidden_input", "max_bytes"] if allow_hidden_input else [])
+            + (["hidden_input", "accept", "max_bytes"] if allow_hidden_input else [])
         unknown = set(rule) - set(allowed)
         if unknown:
             raise ConfigError(f"{where}: unknown keys {sorted(unknown)} (allowed: {', '.join(allowed)})")
@@ -315,6 +348,8 @@ def _check_write_action(action, rules, source: str) -> None:
             _check_field_ids(rule["field_ids"], where)
         if "keys" in rule:
             _check_keys(rule["keys"], where)
+        if "accept" in rule:
+            _check_accept(rule["accept"], where)
         if "hidden_input" in rule:
             _check_hidden_input(rule, where)
         if "max_bytes" in rule:

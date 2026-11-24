@@ -191,7 +191,8 @@ class GatedPage:
 
     # -- writes -----------------------------------------------------------------
 
-    def _write(self, css_selector: str, gate: WriteGate, act, done: str) -> dict:
+    def _write(self, css_selector: str, gate: WriteGate, act, done: str,
+               survey: "str | None" = None) -> dict:
         """Gate the page and the element ``css_selector`` picks, then ``act(ref)`` on that element.
 
         The element is judged on a fresh snapshot, never the soup cache: a cached
@@ -203,16 +204,25 @@ class GatedPage:
         not rebuilt here: the next read fetches the page, by which time it has had
         a chance to react to the write. A write refused before ``act`` touched
         nothing, so it leaves the cache alone.
+
+        ``survey``, when given, is a second CSS selector run on the same parsed
+        snapshot; every element it matches is handed to the gate as
+        ``found["survey"]``, so a gate can judge the target against its peers on
+        the page (``upload_file`` uses it to check an ``accept`` value names one
+        input only).
         """
         url = self._check_live_url(gate)  # gate 1 — before the DOM is even read
         try:
             snap = self._backend.target_snapshot(css_selector)
-            page, _, _, total, _ = query.css_all(SoupCache.parse(snap.html), css_selector, 2, 0)
+            soup = SoupCache.parse(snap.html)
+            page, _, _, total, _ = query.css_all(soup, css_selector, 2, 0)
         except (InvalidSelectorError, query.InvalidSelector) as e:
             return {"error": f"invalid CSS selector: {e}", "id": self._id}
         if snap.url != url:
             gate.check_page(snap.url)  # the page moved on its own; judge where it is now
         found = {"total_count": total, "elements": [serialize.element_to_node(el) for el in page]}
+        if survey is not None:
+            found["survey"] = [serialize.element_to_node(el) for el in soup.select(survey)]
         gate.check_element(snap.url, css_selector, found)  # gates 2+, on the parsed snapshot
         # The parse and the live DOM are the same instant, so they agree unless
         # the parser and the browser read the selector differently. Fail closed.
@@ -256,7 +266,8 @@ class GatedPage:
             css_selector, gate,
             lambda ref: self._backend.upload_file_target(
                 ref, str(gate.admitted.path), hidden=gate.control.hidden),
-            f"upload_file: set {css_selector!r} on tab {self._id}")
+            f"upload_file: set {css_selector!r} on tab {self._id}",
+            survey="input[type=file]")
 
     def press_key(self, css_selector: str, key: str, gate: WriteGate) -> dict:
         return self._write(css_selector, gate, lambda ref: self._backend.press_key_target(ref, key),

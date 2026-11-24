@@ -293,9 +293,9 @@ def test_load_page_scoped_rules(tmp_path):
     ('upload-file:\n  x.com:\n    - path: [".*"]\n      label: ".*"\n      field_ids: [a]\n'
      '      hidden_input: "yes"\n', "hidden_input: must be true or false"),
     ('upload-file:\n  x.com:\n    - path: [".*"]\n      label: ".*"\n      hidden_input: true\n',
-     "hidden_input: needs field_ids"),
+     "hidden_input: needs field_ids or accept"),
     ('upload-file:\n  x.com:\n    label: ".*"\n    field_ids: []\n    hidden_input: true\n',
-     "hidden_input: needs field_ids"),
+     "hidden_input: needs field_ids or accept"),
     # max_upload_bytes (global default cap) and a rule's max_bytes: positive ints only
     ("max_upload_bytes: 0\n", r"allowlist.yaml: max_upload_bytes: must be a positive integer"),
     ("max_upload_bytes: -5\n", "max_upload_bytes: must be a positive integer"),
@@ -321,6 +321,26 @@ def test_load_page_scoped_rules(tmp_path):
     ('click:\n  x.com:\n    - path: [".*"]\n      label: ".*"\n      max_bytes: 5\n',
      "unknown keys"),
     ('write-text:\n  x.com:\n    label: ".*"\n    max_bytes: 5\n', "unknown keys"),
+    # accept is upload-file's alone, a non-empty list of non-empty strings, and
+    # satisfies hidden_input in place of field_ids
+    ('write-text:\n  x.com:\n    - path: [".*"]\n      label: ".*"\n      accept: [video/*]\n',
+     "unknown keys"),
+    ('click:\n  x.com:\n    label: ".*"\n    accept: [video/*]\n', "unknown keys"),
+    ('press-key:\n  x.com:\n    - path: [".*"]\n      label: ".*"\n      keys: [Enter]\n'
+     '      accept: [video/*]\n', "unknown keys"),
+    ('upload-file:\n  x.com:\n    label: ".*"\n    accept: []\n', "accept: must be a non-empty list"),
+    ('upload-file:\n  x.com:\n    - path: [".*"]\n      label: ".*"\n      accept: video/*\n',
+     "accept: must be a non-empty list"),
+    ('upload-file:\n  x.com:\n    label: ".*"\n    accept: [5]\n', "accept: must be a non-empty list"),
+    ('upload-file:\n  x.com:\n    label: ".*"\n    accept: [""]\n', "accept: must be a non-empty list"),
+    ('upload-file:\n  x.com:\n    label: ".*"\n    accept: []\n    hidden_input: true\n',
+     "accept: must be a non-empty list"),
+    # ...and names a type: no empty comma part, no any-file wildcard
+    ('upload-file:\n  x.com:\n    label: ".*"\n    accept: [" , "]\n', "empty comma-separated part"),
+    ('upload-file:\n  x.com:\n    label: ".*"\n    accept: ["image/*,"]\n', "empty comma-separated part"),
+    ('upload-file:\n  x.com:\n    label: ".*"\n    accept: ["*"]\n', "accepts any file"),
+    ('upload-file:\n  x.com:\n    label: ".*"\n    accept: ["*/*"]\n', "accepts any file"),
+    ('upload-file:\n  x.com:\n    label: ".*"\n    accept: ["image/*, */*"]\n', "accepts any file"),
     # infra
     ("infra:\n  max_tabs_per_session: -1\n", "must be a positive integer"),
     ("infra:\n  reap_interval_seconds: 0\n", "must be a positive integer"),
@@ -592,3 +612,47 @@ def test_hidden_input_loads_onto_the_upload_file_page_rule(tmp_path):
     rules = load_runtime_configuration(f).access_rules
     assert [r.hidden_input for r in rules.rules_for("upload-file", "studio.youtube.com", "/channel/U")] == [True]
     assert [r.hidden_input for r in rules.rules_for("upload-file", "studio.youtube.com", "/video/v")] == [False]
+
+
+def test_the_tiktok_studio_accept_rule_loads(tmp_path):
+    """The rule that unblocks TikTok Studio's id-less hidden input loads as written."""
+    f = tmp_path / "allowlist.yaml"
+    f.write_text(
+        "upload-file:\n"
+        "  www.tiktok.com:\n"
+        "    - {path: ['^/tiktokstudio/upload$'], label: '.*', hidden_input: true, accept: ['video/*']}\n")
+    rules = load_runtime_configuration(f).access_rules
+    [rule] = rules.rules_for("upload-file", "www.tiktok.com", "/tiktokstudio/upload")
+    assert rule.hidden_input is True
+    assert rule.accept == frozenset({"video/*"})
+    assert rule.field_ids == frozenset()
+    assert rules.rules_for("upload-file", "www.tiktok.com", "/tiktokstudio/upload/x") == []
+
+
+def test_the_live_tiktok_rule_with_max_bytes_loads(tmp_path):
+    """The rule in force on the live config: accept + hidden_input + its own cap."""
+    f = tmp_path / "allowlist.yaml"
+    f.write_text(
+        "upload-file:\n"
+        "  www.tiktok.com:\n"
+        "    - path: ['^/tiktokstudio/upload$']\n"
+        "      label: '.*'\n"
+        "      hidden_input: true\n"
+        "      accept: ['video/*']\n"
+        "      max_bytes: 104857600\n")
+    rules = load_runtime_configuration(f).access_rules
+    [rule] = rules.rules_for("upload-file", "www.tiktok.com", "/tiktokstudio/upload")
+    assert (rule.hidden_input, rule.accept, rule.max_bytes) == (True, frozenset({"video/*"}), 104857600)
+    assert rules.upload_cap([rule]) == 104857600
+
+
+def test_accept_values_load_normalized(tmp_path):
+    f = tmp_path / "allowlist.yaml"
+    f.write_text(
+        "upload-file:\n"
+        "  x.com:\n"
+        "    - path: ['.*']\n"
+        "      label: '(?!)'\n"
+        "      accept: ['image/* , .pdf']\n")
+    [rule] = load_runtime_configuration(f).access_rules.rules_for("upload-file", "x.com", "/")
+    assert rule.accept == frozenset({"image/*,.pdf"})

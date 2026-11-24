@@ -776,3 +776,229 @@ def test_a_rule_set_built_directly_refuses_an_invalid_max_bytes(bad):
 def test_a_rule_set_built_directly_refuses_an_invalid_max_upload_bytes(bad):
     with pytest.raises(ValueError, match="max_upload_bytes must be a positive integer"):
         BrowdenAccessRuleSet({"max_upload_bytes": bad})
+
+
+# -- upload-file: a hidden input with no id/name, named by its accept value ----
+
+TIKTOK = "https://www.tiktok.com/tiktokstudio/upload"
+
+_ACCEPT_UPLOAD_RULES = BrowdenAccessRuleSet({
+    "upload-file": {"www.tiktok.com": [{
+        "path": ["^/tiktokstudio/upload$"], "label": ".*", "hidden_input": True,
+        "accept": ["video/*"]}]},
+})
+
+
+def _tiktok_input(**extra):
+    """TikTok Studio's only upload control, as observed 2026-11-24: no id, name or label."""
+    return _file_input(accept="video/*", style="display: none;", **extra)
+
+
+def _on_page(target, *others):
+    """``found`` for a selector that matched ``target``, on a page whose file
+    inputs are ``target`` plus ``others`` (the survey the session takes)."""
+    return {**_found(target), "survey": [target, *others]}
+
+
+def test_a_hidden_id_less_input_is_admitted_by_its_accept_value():
+    assert validate_upload_target(_ACCEPT_UPLOAD_RULES, TIKTOK, "input[type=file]",
+                                  _on_page(_tiktok_input())) is True
+
+
+def test_a_hidden_id_less_input_is_refused_without_accept():
+    """The live blocker: `label: '.*'` alone never admits a hidden input."""
+    rules = BrowdenAccessRuleSet({"upload-file": {"www.tiktok.com": [{
+        "path": ["^/tiktokstudio/upload$"], "label": ".*"}]}})
+    with pytest.raises(ValidationError, match="not a file input"):
+        validate_upload_target(rules, TIKTOK, "input[type=file]", _on_page(_tiktok_input()))
+
+
+def test_a_hidden_input_with_a_different_accept_value_is_refused():
+    rules = BrowdenAccessRuleSet({"upload-file": {"www.tiktok.com": [{
+        "path": [".*"], "label": ".*", "hidden_input": True, "accept": ["image/*"]}]}})
+    with pytest.raises(ValidationError, match="not a file input"):
+        validate_upload_target(rules, TIKTOK, "input[type=file]", _on_page(_tiktok_input()))
+
+
+def test_a_hidden_input_with_no_accept_attribute_is_refused():
+    with pytest.raises(ValidationError, match="not a file input"):
+        validate_upload_target(_ACCEPT_UPLOAD_RULES, TIKTOK, "input[type=file]",
+                               _on_page(_file_input(style="display: none;")))
+
+
+def test_accept_does_not_admit_a_disabled_readonly_or_decoy_hidden_input():
+    for extra in ({"disabled": ""}, {"readonly": ""}, {"data-agent-action": "upload"}):
+        with pytest.raises(ValidationError, match="not a file input"):
+            validate_upload_target(_ACCEPT_UPLOAD_RULES, TIKTOK, "input[type=file]",
+                                   _on_page(_tiktok_input(**extra)))
+
+
+def test_accept_still_needs_exactly_one_selector_match():
+    with pytest.raises(ValidationError, match="ambiguous"):
+        validate_upload_target(_ACCEPT_UPLOAD_RULES, TIKTOK, "input[type=file]",
+                               {**_found(_tiktok_input(), _tiktok_input()),
+                                "survey": [_tiktok_input(), _tiktok_input()]})
+
+
+def test_accept_refuses_when_a_second_input_on_the_page_carries_the_same_value():
+    """accept names a file type, not a control: the agent's selector may pick
+    one of two same-typed inputs (a post attachment beside a DM one), so the
+    value must name exactly one input on the page."""
+    for peer in (_tiktok_input(), _file_input(accept="video/*")):
+        with pytest.raises(ValidationError, match="not a file input"):
+            validate_upload_target(_ACCEPT_UPLOAD_RULES, TIKTOK, "input[accept]",
+                                   _on_page(_tiktok_input(), peer))
+
+
+def test_accept_uniqueness_ignores_inputs_it_could_not_reach_anyway():
+    """Peers with other values, or with an id/name (field_ids' to name), don't count."""
+    assert validate_upload_target(
+        _ACCEPT_UPLOAD_RULES, TIKTOK, "input[accept]",
+        _on_page(_tiktok_input(), _file_input(accept="image/*"),
+                 _file_input(node_id="cover", accept="video/*"),
+                 _file_input(name="thumb", accept="video/*"))) is True
+
+
+def test_accept_without_a_survey_admits_nothing():
+    """A caller that took no page survey cannot prove uniqueness: fail closed."""
+    with pytest.raises(ValidationError, match="not a file input"):
+        validate_upload_target(_ACCEPT_UPLOAD_RULES, TIKTOK, "input[type=file]",
+                               _found(_tiktok_input()))
+
+
+def test_accept_never_reaches_an_input_that_has_an_id_or_name():
+    """An input with an id/name is field_ids' to name; one left out of field_ids
+    is not admitted because it happens to take the same file type."""
+    rules = BrowdenAccessRuleSet({"upload-file": {"x.test": [{
+        "path": [".*"], "label": "(?!)", "hidden_input": True,
+        "field_ids": ["avatar"], "accept": ["image/*"]}]}})
+    url = "https://x.test/post"
+    for named in (_file_input(node_id="post-attach", accept="image/*", style="display:none"),
+                  _file_input(name="post-attach", accept="image/*", style="display:none")):
+        with pytest.raises(ValidationError, match="not a file input"):
+            validate_upload_target(rules, url, "input", _on_page(named))
+    # ...while the field it does list is still admitted by its id.
+    assert validate_upload_target(rules, url, "input", _on_page(
+        _file_input(node_id="avatar", accept="image/*", style="display:none"))) is True
+
+
+def test_a_truncated_accept_value_never_matches():
+    """The serializer caps attribute values; a prefix is not the value."""
+    node = _tiktok_input()
+    node["attributes_truncated"] = ["accept"]
+    with pytest.raises(ValidationError, match="not a file input"):
+        validate_upload_target(_ACCEPT_UPLOAD_RULES, TIKTOK, "input", _on_page(node))
+
+
+def test_hidden_input_and_accept_must_be_in_the_same_rule():
+    """hidden_input in one rule and accept in another on the same URL admit nothing hidden."""
+    rules = BrowdenAccessRuleSet({"upload-file": {"www.tiktok.com": [
+        {"path": [".*"], "label": "(?!)", "hidden_input": True, "field_ids": ["other"]},
+        {"path": [".*"], "label": "(?!)", "accept": ["video/*"]}]}})
+    with pytest.raises(ValidationError, match="not a file input"):
+        validate_upload_target(rules, TIKTOK, "input", _on_page(_tiktok_input()))
+
+
+def test_accept_compares_exactly_modulo_whitespace_around_commas():
+    rules = BrowdenAccessRuleSet({"upload-file": {"x.test": [{
+        "path": [".*"], "label": "(?!)", "hidden_input": True, "accept": ["image/*, .pdf"]}]}})
+    url = "https://x.test/form"
+    assert validate_upload_target(rules, url, "input", _on_page(_file_input(
+        accept=" image/* ,.pdf", style="display:none"))) is True
+    for other in ("image/*", ".pdf,image/*", "IMAGE/*,.pdf", "image/.*,.pdf"):
+        with pytest.raises(ValidationError, match="not a file input"):
+            validate_upload_target(rules, url, "input", _on_page(_file_input(
+                accept=other, style="display:none")))
+
+
+def test_gate_3_authorizes_a_visible_label_less_input_by_accept():
+    """Without hidden_input, accept is gate 3's id half for a visible input."""
+    rules = BrowdenAccessRuleSet({"upload-file": {"x.test": [{
+        "path": [".*"], "label": "(?!)", "accept": ["video/*"]}]}})
+    url = "https://x.test/upload"
+    assert validate_upload_target(rules, url, "input",
+                                  _on_page(_file_input(accept="video/*"))) is False
+    with pytest.raises(ValidationError, match="does not match any upload-file rule"):
+        validate_upload_target(rules, url, "input", _on_page(_file_input(accept="image/*")))
+    # ...the uniqueness rule holds here too...
+    with pytest.raises(ValidationError, match="does not match any upload-file rule"):
+        validate_upload_target(rules, url, "input", _on_page(
+            _file_input(accept="video/*"), _file_input(accept="video/*")))
+    # ...and without hidden_input it does not reach a hidden input.
+    with pytest.raises(ValidationError, match="not a file input"):
+        validate_upload_target(rules, url, "input", _on_page(_tiktok_input()))
+
+
+def test_the_gate_records_an_accept_admission_as_hidden(tmp_path):
+    location = tmp_path / "videos"
+    location.mkdir()
+    (location / "clip.mp4").write_bytes(b"mp4")
+    rules = BrowdenAccessRuleSet({
+        "upload-file": {"www.tiktok.com": [{
+            "path": ["^/tiktokstudio/upload$"], "label": ".*", "hidden_input": True,
+            "accept": ["video/*"]}]},
+        "allowed_upload_locations": [str(location)],
+    })
+    gate = upload_file_gate(rules, str(location / "clip.mp4"))
+    gate.check_page(TIKTOK)
+    gate.check_element(TIKTOK, "input[type=file]", _on_page(_tiktok_input()))
+    assert gate.control.hidden is True
+
+
+# -- accept + the size cap: an accept admission is capped by the rules admitting it
+
+def _tiktok_cap_rules(location):
+    """The live TikTok rule, with its own 100 MiB cap."""
+    return BrowdenAccessRuleSet({
+        "upload-file": {"www.tiktok.com": [
+            {"path": ["^/tiktokstudio/upload$"], "label": ".*", "hidden_input": True,
+             "accept": ["video/*"], "max_bytes": 100 * MIB}]},
+        "allowed_upload_locations": [str(location)],
+    })
+
+
+def _run_tiktok_gate(rules, path, found):
+    gate = upload_file_gate(rules, str(path))
+    gate.check_page(TIKTOK)
+    gate.check_element(TIKTOK, "input[type=file]", found)
+    return gate
+
+
+def test_an_accept_rule_admits_a_file_under_its_own_max_bytes(allowed):
+    rules = _tiktok_cap_rules(allowed[0])
+    gate = _run_tiktok_gate(rules, _sparse(allowed[0] / "clip.mp4", 72 * MIB),
+                            _on_page(_tiktok_input()))
+    assert gate.control.hidden is True
+    _run_tiktok_gate(rules, _sparse(allowed[0] / "edge.mp4", 100 * MIB), _on_page(_tiktok_input()))
+
+
+def test_an_accept_rule_refuses_a_file_over_its_own_max_bytes(allowed):
+    rules = _tiktok_cap_rules(allowed[0])
+    with pytest.raises(ValidationError, match=rf"over the {100 * MIB}-byte upload cap"):
+        _run_tiktok_gate(rules, _sparse(allowed[0] / "long.mp4", 100 * MIB + 1),
+                         _on_page(_tiktok_input()))
+
+
+def test_an_accept_rules_cap_is_not_lent_to_a_control_it_does_not_admit(allowed):
+    """The 100 MiB accept rule sits on the page, but the avatar input is admitted
+    only by a field_ids rule with the 1 MiB default: that is its cap. (The accept
+    rule's label matches nothing here: the live rule's '.*' would admit any
+    visible input by label, and so lend it the cap by design.)"""
+    rules = BrowdenAccessRuleSet({
+        "upload-file": {"www.tiktok.com": [
+            {"path": ["^/tiktokstudio/upload$"], "label": "(?!)", "hidden_input": True,
+             "accept": ["video/*"], "max_bytes": 100 * MIB},
+            {"path": ["^/tiktokstudio/upload$"], "label": "(?!)", "field_ids": ["avatar"]}]},
+        "allowed_upload_locations": [str(allowed[0])],
+    })
+    with pytest.raises(ValidationError, match=rf"over the {MIB}-byte upload cap"):
+        _run_tiktok_gate(rules, _sparse(allowed[0] / "big.png", 2 * MIB),
+                         _on_page(_file_input(node_id="avatar"), _tiktok_input()))
+
+
+def test_an_accept_admission_refused_for_a_peer_is_not_saved_by_the_cap(allowed):
+    """A second id-less video input still refuses, whatever the file's size."""
+    rules = _tiktok_cap_rules(allowed[0])
+    with pytest.raises(ValidationError, match="not a file input"):
+        _run_tiktok_gate(rules, _sparse(allowed[0] / "small.mp4", 10),
+                         _on_page(_tiktok_input(), _tiktok_input()))
