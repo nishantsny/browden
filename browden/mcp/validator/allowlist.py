@@ -105,9 +105,9 @@ class PageRule:
     # has hidden (display:none / hidden / aria-hidden) behind its own picker button.
     # False everywhere else, and it never widens what `label` authorizes.
     hidden_input: bool = False
-    # `upload-file` only: the largest file, in bytes, this rule admits — replacing
-    # the config's `max_upload_bytes` for uploads through this rule (no ceiling).
-    # None = the default applies.
+    # `upload-file` only: the largest file, in bytes, this rule admits — in place
+    # of the config's `max_upload_bytes` for controls it admits (no ceiling; when
+    # several rules admit one control, the largest cap wins). None = the default.
     max_bytes: "int | None" = None
 
     def matches_page(self, path: str, query: str = "", fragment: str = "",
@@ -160,11 +160,12 @@ def _page_rule_from_mapping(rule: dict, *, want_label: bool, where: str) -> Page
     # Only `is True`: the schema insists on a boolean, and anything else must not
     # read as an opt-in to hidden controls.
     hidden_input = rule.get("hidden_input") is True
-    # Only a genuine positive int (the schema's shape); anything else falls back
-    # to the default cap rather than reading as some other number.
+    # A genuine positive int (the schema's shape) or absent; anything else is
+    # refused rather than read as some other number.
     max_bytes = rule.get("max_bytes")
-    if not isinstance(max_bytes, int) or isinstance(max_bytes, bool) or max_bytes <= 0:
-        max_bytes = None
+    if max_bytes is not None and (not isinstance(max_bytes, int) or isinstance(max_bytes, bool)
+                                  or max_bytes <= 0):
+        raise ValueError(f"{where}: max_bytes must be a positive integer, got {max_bytes!r}")
     return PageRule(patterns=_as_pattern_tuple(raw), match_on=match_on,
                     label=label, field_ids=field_ids, keys=keys, hidden_input=hidden_input,
                     max_bytes=max_bytes)

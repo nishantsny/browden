@@ -198,6 +198,13 @@ def resolve_upload_path(file_path: str) -> Path:
 
 def validate_upload_path(allowed_upload_locations: "tuple[Path, ...]", file_path: str,
                          *, max_upload_bytes: int) -> Path:
+    """Gate 4 for ``upload-file``; returns the resolved path. See :func:`_admit_upload_file`."""
+    return _admit_upload_file(allowed_upload_locations, file_path,
+                              max_upload_bytes=max_upload_bytes)[0]
+
+
+def _admit_upload_file(allowed_upload_locations: "tuple[Path, ...]", file_path: str,
+                       *, max_upload_bytes: int) -> "tuple[Path, int]":
     """Gate 4 for ``upload-file``: the file must be a real file in an allowed location.
 
     The gate with no analogue in the other write actions, and the reason this is
@@ -221,7 +228,8 @@ def validate_upload_path(allowed_upload_locations: "tuple[Path, ...]", file_path
     ``allow_all``, which grants authority over *pages* and says nothing about the
     filesystem.
 
-    Returns the resolved path, which is what the browser is then handed — see
+    Returns the resolved path and its size as judged. The path is what the
+    browser is then handed — see
     :class:`AdmittedFile` for why it must be this one and not a second resolve of
     the caller's spelling. What that does *not* close: the filesystem can still
     change between this check and the moment the driver reads the path, so a
@@ -229,6 +237,10 @@ def validate_upload_path(allowed_upload_locations: "tuple[Path, ...]", file_path
     there. That party could equally well just copy the file it wants into the
     location and upload it within policy, so the boundary this gate draws is
     "nothing outside the allowed locations", not "nothing an attacker chose".
+    The same holds for the size cap: it is the size *at this check*, so such a
+    party could grow the file before the browser reads it. The cap bounds
+    honest mistakes and an agent with no write access to the location, not a
+    writer of it.
     """
     # Selenium hands the path to the driver as keystrokes and splits it on "\n",
     # so a path containing one names TWO files and a `multiple` input would take
@@ -260,7 +272,7 @@ def validate_upload_path(allowed_upload_locations: "tuple[Path, ...]", file_path
     except OSError as e:
         raise ValidationError(f"cannot read {str(resolved)!r}: {e}") from None
     _check_upload_size(resolved, size, max_upload_bytes)
-    return resolved
+    return resolved, size
 
 
 def _check_upload_size(resolved: Path, size: int, max_upload_bytes: int) -> None:
@@ -269,6 +281,13 @@ def _check_upload_size(resolved: Path, size: int, max_upload_bytes: int) -> None
         raise ValidationError(
             f"{str(resolved)!r} is {size} bytes, over the {max_upload_bytes}-byte "
             f"upload cap — refusing to upload")
+
+
+def _visibly_admitting(node: dict, rules: "list[PageRule]") -> "list[PageRule]":
+    """The rules that admit a visible file input: by its label, or its exact id/name."""
+    return [r for r in rules
+            if (r.label is not None and field_label_matches(node, r.label))
+            or field_id_matches(node, r.field_ids)]
 
 
 def validate_upload_target(access_rules: BrowdenAccessRuleSet, url: str,
@@ -316,9 +335,14 @@ def _admit_upload_target(access_rules: BrowdenAccessRuleSet, url: str,
     # Gate 2: the element must be a single, real, visible, non-decoy file input —
     # or, failing visibility alone, one the operator opted in to by id/name.
     hidden_rules = [r for r in rules if r.hidden_input and field_id_matches(node, r.field_ids)]
+    visible_ok = is_uploadable_control(node)
     if hidden_rules and is_uploadable_control(node, allow_hidden=True):
-        return True, hidden_rules
-    if not is_uploadable_control(node):
+        # Admitted as hidden. A control that also passes the visible checks may
+        # be admitted by other rules too (its label, its id); they count toward
+        # its size cap, so a bigger-cap rule is not lost to the hidden branch.
+        admitting = _visibly_admitting(node, rules) if visible_ok else []
+        return True, list(dict.fromkeys([*hidden_rules, *admitting]))
+    if not visible_ok:
         raise ValidationError(
             "selected element is not a file input (or is a "
             "hidden/disabled/readonly/decoy element) — refusing to upload")
@@ -326,9 +350,7 @@ def _admit_upload_target(access_rules: BrowdenAccessRuleSet, url: str,
     # Gate 3: authorize the control against the page rules matching THIS URL —
     # by its visible label, or by the exact id/name the operator named in that
     # same rule's field_ids. Fail closed, exactly as write-text does.
-    admitting = [r for r in rules
-                 if (r.label is not None and field_label_matches(node, r.label))
-                 or field_id_matches(node, r.field_ids)]
+    admitting = _visibly_admitting(node, rules)
     if not admitting:
         raise ValidationError(
             f"file input does not match any upload-file rule for "
@@ -458,13 +480,8 @@ def upload_file_gate(access_rules: BrowdenAccessRuleSet, file_path: str) -> Uplo
         p = urlparse(url)
         page_rules = access_rules.rules_for("upload-file", p.hostname or "", p.path,
                                             p.query, p.fragment)
-        resolved = validate_upload_path(access_rules.allowed_upload_locations, file_path,
-                                        max_upload_bytes=access_rules.upload_cap(page_rules))
-        try:
-            size = resolved.stat().st_size
-        except OSError as e:
-            raise ValidationError(f"cannot read {str(resolved)!r}: {e}") from None
-        admitted.admit(resolved, size)
+        admitted.admit(*_admit_upload_file(access_rules.allowed_upload_locations, file_path,
+                                           max_upload_bytes=access_rules.upload_cap(page_rules)))
 
     def check_element(url: str, css_selector: str, found: dict) -> None:
         control.hidden, admitting = _admit_upload_target(access_rules, url, css_selector, found)

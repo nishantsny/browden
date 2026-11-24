@@ -69,8 +69,9 @@ allowed_upload_locations:
 #   4. allowed location — the file resolves to a regular file under
 #      `allowed_upload_locations`. The resolved path is what the browser is
 #      handed, so what was checked is what is sent.
-#   5. size — the file is no larger than the admitting rule's `max_bytes`, or
-#      `max_upload_bytes` (default 1 MiB) when the rule sets none.
+#   5. size — the file is no larger than the largest cap among the rules that
+#      admit the control: a rule's `max_bytes`, else `max_upload_bytes` (default
+#      1 MiB). Read at check time: a sanity bound, not a pin on the contents.
 upload-file:
   secure.splitwise.com:
     # Splitwise is a hash-routed SPA: the add/edit-expense modal shares the path

@@ -31,13 +31,16 @@ MIB = 1024 * 1024
 HTML = """<html><body>
   <p>Upload a video:</p>
   <input id="video" type="file"/>
+  <p>Attach a receipt:</p>
+  <input id="receipt" type="file"/>
   <div id="state">none</div>
   <script>
-    const input = document.getElementById('video');
     const state = document.getElementById('state');
-    input.addEventListener('change', () => {
-      const f = input.files[0];
-      state.textContent = input.files.length + ':' + f.name + ':' + f.size;
+    document.querySelectorAll('input[type=file]').forEach(input => {
+      input.addEventListener('change', () => {
+        const f = input.files[0];
+        state.textContent = input.files.length + ':' + f.name + ':' + f.size;
+      });
     });
   </script>
 </body></html>"""
@@ -115,3 +118,25 @@ async def test_a_file_over_the_rule_max_bytes_is_refused(session, location):
         await session.upload_file("#video", id=page["id"],
                                   gate=_gate(location, video, rule_max_bytes=2 * MIB))
     assert await _state(session, page["id"]) == "none"
+
+
+@pytest.mark.asyncio
+async def test_a_bigger_cap_on_another_rule_is_not_lent_to_this_control(session, location):
+    """The pre-DOM check passes (the video rule's 2 MiB cap is on this page), but
+    the receipt input is admitted only by the receipt rule, at the 1 MiB default:
+    the element check refuses, after the DOM was read, and nothing is attached."""
+    rules = BrowdenAccessRuleSet({
+        "upload-file": {"*": [
+            {"path": [".*"], "label": "(?!)", "field_ids": ["video"], "max_bytes": 2 * MIB},
+            {"path": [".*"], "label": "(?!)", "field_ids": ["receipt"]}]},
+        "allowed_upload_locations": [str(location)],
+    })
+    scan = _sparse(location / "scan.pdf", MIB + MIB // 2)
+    page = await _page(session)
+    with pytest.raises(ValidationError, match=f"over the {MIB}-byte upload cap"):
+        await session.upload_file("#receipt", id=page["id"],
+                                  gate=upload_file_gate(rules, str(scan)))
+    assert await _state(session, page["id"]) == "none"
+    # The same file into the control the bigger-cap rule admits goes through.
+    await session.upload_file("#video", id=page["id"], gate=upload_file_gate(rules, str(scan)))
+    assert await _state(session, page["id"]) == f"1:scan.pdf:{MIB + MIB // 2}"

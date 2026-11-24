@@ -21,8 +21,9 @@ The expected shape (see configs/samples/read_only_on_popular_websites.yaml):
         field_ids: [<id or name>]    # write-text / upload-file: label-less controls
         hidden_input: <bool>         # upload-file only: field_ids also admit a file
                                      #   input the page hid behind its own button
-        max_bytes: <positive int>    # upload-file only: the largest file this rule
-                                     #   admits, replacing max_upload_bytes (no ceiling)
+        max_bytes: <positive int>    # upload-file only: the cap on controls this rule
+                                     #   admits, in place of max_upload_bytes (no ceiling;
+                                     #   the largest cap among admitting rules wins)
 
     allowed_upload_locations:                 # the only directories `upload-file` may read
       - <path>                    #   from; absent/empty => every upload denied

@@ -508,9 +508,9 @@ async def upload_file(css_selector: str, file_path: str, id: str) -> dict:
          no visible label at all, so no label regex could ever match it.
       4. ``file_path`` must resolve — through ``~``, ``..`` and every symlink —
          to an existing regular file under one of the operator's configured
-         ``allowed_upload_locations``, no larger than the size cap (the admitting
-         rule's ``max_bytes``, else the config's ``max_upload_bytes``, 1 MiB by
-         default), and may contain no
+         ``allowed_upload_locations``, no larger than the size cap (the largest
+         among the rules admitting the control: a rule's ``max_bytes``, else the
+         config's ``max_upload_bytes``, 1 MiB by default), and may contain no
          control character (the driver splits a path on newlines, so one would
          name a second file). The path the gate resolves is the one the browser
          is handed; it is never resolved a second time. **With no ``allowed_upload_locations``

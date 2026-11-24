@@ -166,7 +166,10 @@ class BrowdenAccessRuleSet:
 
       Optional, defaulting to :data:`DEFAULT_MAX_UPLOAD_BYTES` (1 MiB). An
       ``upload-file`` rule may set its own ``max_bytes`` (no ceiling), which
-      replaces this default for the uploads that rule admits. Process-wide: the
+      stands in for this default on the controls that rule admits. Rules are
+      additive, so when several admit one control the largest cap wins: a
+      ``max_bytes`` raises the cap for its controls, and a small one cannot
+      tighten a control a broader rule also admits. Process-wide: the
       schema admits it only at the top level, and a profile's set inherits it.
 
     * ``allow_all: true`` — every write action on every page, and reads of every
@@ -235,6 +238,10 @@ class BrowdenAccessRuleSet:
         allowed_upload_locations = _coerce_upload_locations(sections.get("allowed_upload_locations"))
         allow_all = bool(sections.get("allow_all")) or (base is not None and base._allow_all)
         max_upload_bytes = sections.get("max_upload_bytes", DEFAULT_MAX_UPLOAD_BYTES)
+        if (not isinstance(max_upload_bytes, int) or isinstance(max_upload_bytes, bool)
+                or max_upload_bytes <= 0):
+            raise ValueError(
+                f"max_upload_bytes must be a positive integer, got {max_upload_bytes!r}")
         # Whether THIS set decided the popularity question for itself. Only an
         # explicit `tranco.enabled` here counts: under allow_all the net is
         # turned on rather than inherited, so a profile that wants the whole web

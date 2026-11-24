@@ -222,7 +222,7 @@ verbatim; it is globally unique and routes itself to the right profile (multiple
 | `switch_to_default_content` | Return a tab's focus to its top document, checking that the top page is still readable. |
 | `click` | **A write action, off by default** — click a control on a host listed in the `click` allowlist; each host declares a **required** `label` regex the control's visible text must fully match (`.*` to allow any). No host is listed out of the box. |
 | `insert_text` | **A write action, off by default** — type text into a single visible, non-readonly text field (`<textarea>`, a text `<input>`, or a `contenteditable`) on a host listed in the separate `write-text` allowlist section; the field's visible label (placeholder / aria-label / associated `<label>`) must fully match that host's **required** `label` regex. |
-| `upload_file` | **A write action, off by default** — attach a local file to a single visible, non-readonly `<input type=file>` on a host listed in the separate `upload-file` allowlist section (a hidden one, as most sites use behind their own picker button, only when its rule sets `hidden_input: true` and names it in `field_ids`). Additionally gated by `allowed_upload_locations`: the file must resolve to a regular file under a directory you listed, so an upload can never become an arbitrary local-file read. The file must also fit the size cap: the admitting rule's `max_bytes` if it sets one, else the top-level `max_upload_bytes` (**1 MiB by default**, down from the fixed 25 MiB of earlier releases). No host and no root are listed out of the box. |
+| `upload_file` | **A write action, off by default** — attach a local file to a single visible, non-readonly `<input type=file>` on a host listed in the separate `upload-file` allowlist section (a hidden one, as most sites use behind their own picker button, only when its rule sets `hidden_input: true` and names it in `field_ids`). Additionally gated by `allowed_upload_locations`: the file must resolve to a regular file under a directory you listed, so an upload can never become an arbitrary local-file read. The file must also fit the size cap: the largest cap among the rules admitting the control (a rule's `max_bytes`, else the top-level `max_upload_bytes` (**1 MiB by default**, down from the fixed 25 MiB of earlier releases)). No host and no root are listed out of the box. |
 
 Frame focus sticks to the tab until you move it or the tab navigates or
 reloads. Every later call re-enters the frame only while it is still the one
@@ -370,11 +370,16 @@ a substitute for — the third:
    leave the machine at all, independently of where it is going. A path is
    expanded and fully resolved before it is compared, so neither `../` nor a
    symlink planted inside one reaches outside it. The resolved path is what the
-   browser is handed, so the file that was checked is the file that is sent.
+   browser is handed, so the path that was checked is the path that is sent. The
+   file's *contents* are not pinned: whoever can write inside an allowed location
+   can still change the file between the check and the browser reading it.
    The file must also fit a size cap: the top-level `max_upload_bytes` (1 MiB when
-   absent), or, for uploads one `upload-file` rule admits, that rule's own
-   `max_bytes` — the way to let one page take a video without raising the cap
-   everywhere:
+   absent), or, for a control an `upload-file` rule with its own `max_bytes`
+   admits, that rule's cap — the way to let one page take a video without raising
+   the cap everywhere. Rules are additive, so when several admit the same control
+   the largest cap wins (`max_bytes` raises the cap; it cannot tighten a control
+   a broader rule also admits). The size is read when the upload is checked, so
+   it is a sanity bound, not a guarantee against a writer of the location:
 
    ```yaml
    max_upload_bytes: 1048576        # optional; the default shown

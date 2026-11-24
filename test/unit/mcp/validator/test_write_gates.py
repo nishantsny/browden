@@ -688,3 +688,91 @@ def test_a_profile_rule_max_bytes_applies_in_that_profile_only(allowed):
     _run_upload_gate(configuration.access_rules_for("/profiles/video"), video)
     with pytest.raises(ValidationError, match=f"over the {MIB}-byte upload cap"):
         _run_upload_gate(configuration.access_rules_for("/profiles/other"), video)
+
+
+def test_two_rules_admitting_the_same_control_give_it_the_larger_cap(allowed):
+    """Rules are additive: a small max_bytes cannot tighten what a broader rule admits."""
+    rules = BrowdenAccessRuleSet({
+        "upload-file": {"up.test": [
+            {"path": ["^/upload$"], "label": ".*"},                                   # default 1 MiB
+            {"path": ["^/upload$"], "label": "(?!)", "field_ids": ["file"], "max_bytes": 10}]},
+        "allowed_upload_locations": [str(allowed[0])],
+    })
+    _run_upload_gate(rules, _sparse(allowed[0] / "half.bin", MIB // 2))
+    with pytest.raises(ValidationError, match=f"over the {MIB}-byte upload cap"):
+        _run_upload_gate(rules, _sparse(allowed[0] / "big.bin", MIB + 1))
+
+
+def test_the_cap_applies_on_the_hidden_input_branch(allowed):
+    rules = BrowdenAccessRuleSet({
+        "upload-file": {"up.test": [
+            {"path": ["^/upload$"], "label": "(?!)", "field_ids": ["file"],
+             "hidden_input": True, "max_bytes": 2 * MIB}]},
+        "allowed_upload_locations": [str(allowed[0])],
+    })
+    hidden = _file_input(name="file", style="display: none;")
+    gate = _run_upload_gate(rules, _sparse(allowed[0] / "ok.mp4", 2 * MIB), hidden)
+    assert gate.control.hidden is True
+    with pytest.raises(ValidationError, match=f"over the {2 * MIB}-byte upload cap"):
+        _run_upload_gate(rules, _sparse(allowed[0] / "big.mp4", 2 * MIB + 1), hidden)
+
+
+def test_a_hidden_input_rule_on_a_hidden_control_does_not_borrow_a_label_rules_cap(allowed):
+    """A label never admits a hidden control, so a label rule's cap doesn't apply to one."""
+    rules = BrowdenAccessRuleSet({
+        "upload-file": {"up.test": [
+            {"path": ["^/upload$"], "label": "(?!)", "field_ids": ["file"], "hidden_input": True},
+            {"path": ["^/upload$"], "label": ".*", "max_bytes": 100 * MIB}]},
+        "allowed_upload_locations": [str(allowed[0])],
+    })
+    with pytest.raises(ValidationError, match=f"over the {MIB}-byte upload cap"):
+        _run_upload_gate(rules, _sparse(allowed[0] / "big.mp4", 2 * MIB),
+                         _file_input(name="file", style="display: none;"))
+
+
+def test_a_visible_control_named_by_a_hidden_input_rule_keeps_a_bigger_label_rule_cap(allowed):
+    """The hidden branch must not drop the other rules that admit a visible control."""
+    rules = BrowdenAccessRuleSet({
+        "upload-file": {"up.test": [
+            {"path": ["^/upload$"], "label": "(?!)", "field_ids": ["file"], "hidden_input": True},
+            {"path": ["^/upload$"], "label": ".*", "max_bytes": 100 * MIB}]},
+        "allowed_upload_locations": [str(allowed[0])],
+    })
+    _run_upload_gate(rules, _sparse(allowed[0] / "video.mp4", 72_000_000), _file_input(name="file"))
+
+
+def test_an_allow_all_profile_uploads_under_the_default_cap(allowed):
+    configuration = BrowdenRuntimeConfiguration({
+        "allowed_upload_locations": [str(allowed[0])],
+        "max_upload_bytes": 4096,
+        "profiles": {"/profiles/scratch": {"allow_all": True}},
+    })
+    scratch = configuration.access_rules_for("/profiles/scratch")
+    _run_upload_gate(scratch, _sparse(allowed[0] / "ok.bin", 4096))
+    with pytest.raises(ValidationError, match="over the 4096-byte upload cap"):
+        _run_upload_gate(scratch, _sparse(allowed[0] / "big.bin", 4097))
+
+
+def test_an_allow_all_profile_keeps_a_listed_rules_bigger_cap(allowed):
+    configuration = BrowdenRuntimeConfiguration({
+        "allowed_upload_locations": [str(allowed[0])],
+        "profiles": {"/profiles/scratch": {
+            "allow_all": True,
+            "upload-file": {"up.test": [{"path": ["^/upload$"], "label": ".*",
+                                         "max_bytes": 100 * MIB}]}}},
+    })
+    _run_upload_gate(configuration.access_rules_for("/profiles/scratch"),
+                     _sparse(allowed[0] / "video.mp4", 72_000_000))
+
+
+@pytest.mark.parametrize("bad", [0, -1, True, "10", 1.5])
+def test_a_rule_set_built_directly_refuses_an_invalid_max_bytes(bad):
+    with pytest.raises(ValueError, match="max_bytes must be a positive integer"):
+        BrowdenAccessRuleSet({"upload-file": {"up.test": [
+            {"path": [".*"], "label": ".*", "max_bytes": bad}]}})
+
+
+@pytest.mark.parametrize("bad", [None, 0, -1, False, "10", 1.5])
+def test_a_rule_set_built_directly_refuses_an_invalid_max_upload_bytes(bad):
+    with pytest.raises(ValueError, match="max_upload_bytes must be a positive integer"):
+        BrowdenAccessRuleSet({"max_upload_bytes": bad})
