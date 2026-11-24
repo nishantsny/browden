@@ -7,6 +7,8 @@ All notable changes to browden are documented here. The format follows
 
 ## [Unreleased]
 
+## [1.11.0] — 2026-11-24
+
 ### Added
 - **`upload_file` can name a file input that has no id or name, by its
   `accept`.** TikTok Studio's upload page has exactly one file input,
@@ -822,7 +824,8 @@ Initial public release.
   service manager (systemd / launchd / Task Scheduler).
 - Apache-2.0.
 
-[Unreleased]: https://github.com/nishantsny/browden/compare/v1.10.0...HEAD
+[Unreleased]: https://github.com/nishantsny/browden/compare/v1.11.0...HEAD
+[1.11.0]: https://github.com/nishantsny/browden/compare/v1.10.0...v1.11.0
 [1.10.0]: https://github.com/nishantsny/browden/compare/v1.9.0...v1.10.0
 [1.9.0]: https://github.com/nishantsny/browden/compare/v1.8.1...v1.9.0
 [1.8.1]: https://github.com/nishantsny/browden/compare/v1.8.0...v1.8.1
