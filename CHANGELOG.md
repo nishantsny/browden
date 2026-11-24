@@ -7,6 +7,24 @@ All notable changes to browden are documented here. The format follows
 
 ## [Unreleased]
 
+### Changed
+- **The `upload_file` size cap is now config, and its default drops from 25 MiB
+  to 1 MiB.** Behaviour change: with no size setting, a file over 1 MiB
+  (1048576 bytes) that uploaded before is now refused with the same
+  "over the N-byte upload cap" message. The cap was a hard-coded 25 MiB, so a
+  72 MB video could not be attached anywhere, whatever the config said. The new
+  top-level `max_upload_bytes: <positive int>` sets the default for every
+  `upload-file` rule, and a rule may set its own `max_bytes: <positive int>`
+  (no ceiling), which stands in for the default on the controls that rule
+  admits, so one video page gets a big cap while receipts stay small. A rule's
+  cap holds only for a control that rule admits: another rule on the same page
+  cannot lend it a bigger one. When several rules admit the same control the
+  largest cap wins (rules are additive), so `max_bytes` raises a cap and cannot
+  tighten one. The size is read when the upload is checked; it bounds mistakes,
+  not a party that can write inside an allowed upload location. `max_upload_bytes` is process-wide and refused inside a
+  `profiles` entry; a profile raises the cap through `max_bytes` on its own
+  rules. Both keys refuse a bool, zero, a negative, a float or a string at load.
+
 ## [1.10.0] — 2026-11-22
 
 ### Added

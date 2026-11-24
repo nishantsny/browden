@@ -21,15 +21,21 @@ The expected shape (see configs/samples/read_only_on_popular_websites.yaml):
         field_ids: [<id or name>]    # write-text / upload-file: label-less controls
         hidden_input: <bool>         # upload-file only: field_ids also admit a file
                                      #   input the page hid behind its own button
+        max_bytes: <positive int>    # upload-file only: the cap on controls this rule
+                                     #   admits, in place of max_upload_bytes (no ceiling;
+                                     #   the largest cap among admitting rules wins)
 
     allowed_upload_locations:                 # the only directories `upload-file` may read
       - <path>                    #   from; absent/empty => every upload denied
+
+    max_upload_bytes: <positive int>  # size cap for an upload-file rule that sets no
+                                      #   max_bytes; absent => 1048576 (1 MiB)
 
     profiles:                     # per-browser-profile rule sets (additive over
       <profile dir>:              #   the global ones above)
         description: <string>     # what this profile is for; list_profiles returns it verbatim
         allow_all: <bool>         # every action in THIS profile; Tranco stays on
-        <any of the sections above except infra/profiles>
+        <any of the sections above except infra/profiles/max_upload_bytes>
 
     infra:
       max_browser_sessions: <positive int>
@@ -51,7 +57,8 @@ from pathlib import Path
 from ...mcp.validator.allowlist import WRITE_ACTIONS
 
 # Top-level sections that are not write actions, each checked by its own branch.
-_OTHER_SECTIONS = ("denylist", "read", "infra", "profiles", "allowed_upload_locations")
+_OTHER_SECTIONS = ("denylist", "read", "infra", "profiles", "allowed_upload_locations",
+                   "max_upload_bytes")
 
 
 class ConfigError(ValueError):
@@ -107,6 +114,12 @@ def _check_hidden_input(rule: dict, where: str) -> None:
             f"only by the exact id/name the rule names")
 
 
+def _check_positive_int(value, where: str) -> None:
+    # bool is an int subclass — reject it explicitly so `max_bytes: true` fails.
+    if not isinstance(value, int) or isinstance(value, bool) or value <= 0:
+        raise ConfigError(f"{where}: must be a positive integer (bytes), got {value!r}")
+
+
 def _check_keys(keys, where: str) -> None:
     # A shape check only: the control-key allowlist (validator.ACTIVATION_KEYS) is
     # enforced at action time by the press-key gate, which refuses any non-control
@@ -120,12 +133,12 @@ def _check_keys(keys, where: str) -> None:
 
 def _check_page_rule(rule, where: str, *, want_label: bool, allow_field_ids: bool,
                      allow_keys: bool = False, allow_hidden_input: bool = False) -> None:
-    """Validate one page-rule mapping ``{path, match_on?, label?, field_ids?, keys?, hidden_input?}``.
+    """Validate one page-rule mapping ``{path, match_on?, label?, field_ids?, keys?, hidden_input?, max_bytes?}``.
 
     ``want_label`` requires a ``label`` (write actions); when false a ``label`` is
     rejected as an unknown key (read overrides / denylist have none).
     ``field_ids`` is accepted for ``write-text`` and ``upload-file``; ``keys`` only
-    for ``press-key``; ``hidden_input`` only for ``upload-file``.
+    for ``press-key``; ``hidden_input`` and ``max_bytes`` only for ``upload-file``.
     """
     if not isinstance(rule, dict):
         raise ConfigError(f"{where}: each page rule must be a mapping, got {type(rule).__name__}")
@@ -137,7 +150,7 @@ def _check_page_rule(rule, where: str, *, want_label: bool, allow_field_ids: boo
     if allow_keys:
         allowed.add("keys")
     if allow_hidden_input:
-        allowed.add("hidden_input")
+        allowed.update(("hidden_input", "max_bytes"))
     unknown = set(rule) - allowed
     if unknown:
         raise ConfigError(f"{where}: unknown keys {sorted(unknown)} (allowed: {', '.join(sorted(allowed))})")
@@ -153,6 +166,8 @@ def _check_page_rule(rule, where: str, *, want_label: bool, allow_field_ids: boo
         _check_keys(rule["keys"], where)
     if "hidden_input" in rule:
         _check_hidden_input(rule, where)
+    if "max_bytes" in rule:
+        _check_positive_int(rule["max_bytes"], f"{where}.max_bytes")
 
 
 def _check_host_paths(rules, where: str) -> None:
@@ -263,7 +278,8 @@ def _check_write_action(action, rules, source: str) -> None:
     # input usually has none at all, so for upload-file it is the normal handle
     # rather than an escape hatch. `keys` (the control keys a rule authorizes) is
     # press-key's alone; `click` takes neither. `hidden_input` (admit a file input
-    # the page hid behind its own picker button) is upload-file's alone.
+    # the page hid behind its own picker button) and `max_bytes` (this rule's own
+    # upload size cap) are upload-file's alone.
     allow_field_ids = action in ("write-text", "upload-file")
     allow_keys = (action == "press-key")
     allow_hidden_input = (action == "upload-file")
@@ -288,7 +304,8 @@ def _check_write_action(action, rules, source: str) -> None:
                 f"{where}: rule must be a mapping with a required 'label' (and optional "
                 f"'paths'), or a list of page rules, got {type(rule).__name__}")
         allowed = ["paths", "label"] + (["field_ids"] if allow_field_ids else []) \
-            + (["keys"] if allow_keys else []) + (["hidden_input"] if allow_hidden_input else [])
+            + (["keys"] if allow_keys else []) \
+            + (["hidden_input", "max_bytes"] if allow_hidden_input else [])
         unknown = set(rule) - set(allowed)
         if unknown:
             raise ConfigError(f"{where}: unknown keys {sorted(unknown)} (allowed: {', '.join(allowed)})")
@@ -300,6 +317,8 @@ def _check_write_action(action, rules, source: str) -> None:
             _check_keys(rule["keys"], where)
         if "hidden_input" in rule:
             _check_hidden_input(rule, where)
+        if "max_bytes" in rule:
+            _check_positive_int(rule["max_bytes"], f"{where}.max_bytes")
         _check_label(rule, where)
 
 
@@ -314,9 +333,10 @@ def _check_profiles(rules, source: str) -> None:
     operator believes is in force.
 
     The body is validated by the *same* :func:`_check_section` as a top-level
-    one, minus the two keys that make no sense inside a profile: ``infra`` is
-    process-wide (one Chrome cap can't differ per profile) and ``profiles``
-    doesn't nest. Both are rejected rather than ignored — a cap written where it
+    one, minus the keys that make no sense inside a profile: ``infra`` and
+    ``max_upload_bytes`` are process-wide (one Chrome cap can't differ per
+    profile; a profile that needs bigger uploads sets ``max_bytes`` on its own
+    ``upload-file`` rules) and ``profiles`` doesn't nest. Both are rejected rather than ignored — a cap written where it
     has no effect is a misunderstanding worth surfacing at load.
     """
     if not isinstance(rules, dict):
@@ -345,7 +365,7 @@ def _check_profiles(rules, source: str) -> None:
         if not isinstance(body, dict):
             raise ConfigError(f"{where}: must be a mapping of rules, got {type(body).__name__}")
         for key, section in body.items():
-            if key in ("infra", "profiles"):
+            if key in ("infra", "profiles", "max_upload_bytes"):
                 raise ConfigError(
                     f"{where}: {key!r} is not allowed inside a profile — it is "
                     f"process-wide; move it to the top level")
@@ -382,6 +402,9 @@ def _check_section(key, rules, *, source: str) -> None:
         return
     if key == "allowed_upload_locations":
         _check_upload_locations(rules, source)
+        return
+    if key == "max_upload_bytes":
+        _check_positive_int(rules, f"{source}: max_upload_bytes")
         return
     if key == "allow_all":
         # Only meaningful inside a profile: "allow everything" is a thing you say

@@ -9,6 +9,7 @@ from browden.configs.loader import (
     load_runtime_configuration,
     resolve_allowlist_path,
 )
+from browden.mcp.validator import DEFAULT_MAX_UPLOAD_BYTES
 from browden.mcp.validator.allowlist import WRITE_ACTIONS
 
 
@@ -216,7 +217,7 @@ def test_load_page_scoped_rules(tmp_path):
     ('clik:\n  amazon.com:\n    label: ".*"\n', "unknown section 'clik'"),
     ('insert_text:\n  amazon.com:\n    label: ".*"\n', "unknown section 'insert_text'"),
     ("5: {}\n", "unknown section 5"),
-    ("bogus: {}\n", r"allowed: allowed_upload_locations, click, denylist, infra, press-key, profiles, read, upload-file, write-text\)"),
+    ("bogus: {}\n", r"allowed: allowed_upload_locations, click, denylist, infra, max_upload_bytes, press-key, profiles, read, upload-file, write-text\)"),
     # write action
     ('click:\n  amazon.com:\n    paths: [".*"]\n    typo: x\n', "unknown keys"),
     ('click:\n  amazon.com:\n    label: 7\n', "label: must be a regex string"),
@@ -295,6 +296,31 @@ def test_load_page_scoped_rules(tmp_path):
      "hidden_input: needs field_ids"),
     ('upload-file:\n  x.com:\n    label: ".*"\n    field_ids: []\n    hidden_input: true\n',
      "hidden_input: needs field_ids"),
+    # max_upload_bytes (global default cap) and a rule's max_bytes: positive ints only
+    ("max_upload_bytes: 0\n", r"allowlist.yaml: max_upload_bytes: must be a positive integer"),
+    ("max_upload_bytes: -5\n", "max_upload_bytes: must be a positive integer"),
+    ("max_upload_bytes: true\n", "max_upload_bytes: must be a positive integer"),
+    ("max_upload_bytes: '1048576'\n", "max_upload_bytes: must be a positive integer"),
+    ("max_upload_bytes: 1.5\n", "max_upload_bytes: must be a positive integer"),
+    ("max_upload_bytes: null\n", "max_upload_bytes: must be a positive integer"),
+    ("profiles:\n  ~/p:\n    max_upload_bytes: 5\n",
+     "'max_upload_bytes' is not allowed inside a profile"),
+    ('upload-file:\n  x.com:\n    - path: [".*"]\n      label: ".*"\n      max_bytes: 0\n',
+     r"upload-file\.x\.com\[0\]\.max_bytes: must be a positive integer"),
+    ('upload-file:\n  x.com:\n    - path: [".*"]\n      label: ".*"\n      max_bytes: -1\n',
+     "max_bytes: must be a positive integer"),
+    ('upload-file:\n  x.com:\n    - path: [".*"]\n      label: ".*"\n      max_bytes: false\n',
+     "max_bytes: must be a positive integer"),
+    ('upload-file:\n  x.com:\n    - path: [".*"]\n      label: ".*"\n      max_bytes: "10MB"\n',
+     "max_bytes: must be a positive integer"),
+    ('upload-file:\n  x.com:\n    - path: [".*"]\n      label: ".*"\n      max_bytes: 2.0\n',
+     "max_bytes: must be a positive integer"),
+    ('upload-file:\n  x.com:\n    label: ".*"\n    max_bytes: 0\n',
+     r"upload-file\.x\.com\.max_bytes: must be a positive integer"),
+    # max_bytes is upload-file's alone
+    ('click:\n  x.com:\n    - path: [".*"]\n      label: ".*"\n      max_bytes: 5\n',
+     "unknown keys"),
+    ('write-text:\n  x.com:\n    label: ".*"\n    max_bytes: 5\n', "unknown keys"),
     # infra
     ("infra:\n  max_tabs_per_session: -1\n", "must be a positive integer"),
     ("infra:\n  reap_interval_seconds: 0\n", "must be a positive integer"),
@@ -346,6 +372,66 @@ def test_a_profile_adds_allowed_upload_locations_over_the_global_ones(tmp_path):
                                         Path("~/invoices").expanduser().resolve()}
     # The global set is untouched by what a profile added.
     assert configuration.access_rules.allowed_upload_locations == (Path("~/receipts").expanduser().resolve(),)
+
+
+def test_max_upload_bytes_defaults_to_one_mib_when_absent(tmp_path):
+    f = tmp_path / "allowlist.yaml"
+    f.write_text("allowed_upload_locations: ['~/receipts']\nprofiles:\n  ~/p: {}\n")
+    configuration = load_runtime_configuration(f)
+    assert DEFAULT_MAX_UPLOAD_BYTES == 1024 * 1024
+    assert configuration.access_rules.max_upload_bytes == DEFAULT_MAX_UPLOAD_BYTES
+    assert configuration.access_rules_for(Path("~/p").expanduser()).max_upload_bytes \
+        == DEFAULT_MAX_UPLOAD_BYTES
+
+
+def test_a_global_max_upload_bytes_applies_to_every_profile(tmp_path):
+    f = tmp_path / "allowlist.yaml"
+    f.write_text("max_upload_bytes: 5000000\nprofiles:\n  ~/p: {}\n")
+    configuration = load_runtime_configuration(f)
+    assert configuration.access_rules.max_upload_bytes == 5_000_000
+    assert configuration.access_rules_for(Path("~/p").expanduser()).max_upload_bytes == 5_000_000
+
+
+def test_a_rule_max_bytes_replaces_the_default_for_that_rule_only(tmp_path):
+    f = tmp_path / "allowlist.yaml"
+    f.write_text(
+        "max_upload_bytes: 2048\n"
+        "upload-file:\n"
+        "  www.tiktok.com:\n"
+        "    - path: ['^/tiktokstudio/upload$']\n"
+        "      label: '.*'\n"
+        "      max_bytes: 104857600\n"
+        "  secure.splitwise.com:\n"
+        "    label: '.*'\n")
+    rules = load_runtime_configuration(f).access_rules
+    big = rules.rules_for("upload-file", "www.tiktok.com", "/tiktokstudio/upload")
+    assert [r.max_bytes for r in big] == [104_857_600]
+    assert rules.upload_cap(big) == 104_857_600
+    plain = rules.rules_for("upload-file", "secure.splitwise.com", "/")
+    assert rules.upload_cap(plain) == 2048            # no max_bytes: the global default
+
+
+def test_a_profile_rule_carries_its_own_max_bytes(tmp_path):
+    """A profile raises the cap the only way there is: max_bytes on its own rules."""
+    f = tmp_path / "allowlist.yaml"
+    f.write_text(
+        "upload-file:\n"
+        "  up.test:\n"
+        "    label: '.*'\n"
+        "profiles:\n"
+        "  ~/p:\n"
+        "    upload-file:\n"
+        "      up.test:\n"
+        "        - path: ['^/video$']\n"
+        "          label: '.*'\n"
+        "          max_bytes: 50000000\n")
+    configuration = load_runtime_configuration(f)
+    scoped = configuration.access_rules_for(Path("~/p").expanduser())
+    assert scoped.upload_cap(scoped.rules_for("upload-file", "up.test", "/video")) == 50_000_000
+    # The global set (and so every other profile) keeps the default on that page.
+    glob = configuration.access_rules
+    assert glob.upload_cap(glob.rules_for("upload-file", "up.test", "/video")) \
+        == DEFAULT_MAX_UPLOAD_BYTES
 
 
 def test_load_profile_scoped_rules(tmp_path):

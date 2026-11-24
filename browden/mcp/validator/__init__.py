@@ -1,5 +1,5 @@
 """Re-export validator symbols for convenient access."""
-from .access_rule_set import BrowdenAccessRuleSet
+from .access_rule_set import DEFAULT_MAX_UPLOAD_BYTES, BrowdenAccessRuleSet
 from .allowlist import HostRuleMatcher, ReadPolicy
 from .errors import SessionBusyError, ValidationError, tab_gone_envelope
 from .intent import (
@@ -27,7 +27,6 @@ from .read_gates import (
     validate_url,
 )
 from .write_gates import (
-    MAX_UPLOAD_BYTES,
     AdmittedControl,
     AdmittedFile,
     UploadFileGate,
@@ -53,7 +52,7 @@ __all__ = [
     "BrowdenRuntimeConfiguration",
     "FrameGate",
     "HostRuleMatcher",
-    "MAX_UPLOAD_BYTES",
+    "DEFAULT_MAX_UPLOAD_BYTES",
     "PopularityAllowlist",
     "ReadGate",
     "ReadPolicy",

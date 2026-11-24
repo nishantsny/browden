@@ -41,6 +41,7 @@ of the control being acted on, each evaluated default-deny:
 | scheme | `file://` and plaintext `http://` reach only hosts you name explicitly | https only |
 | `click`, `write-text`, `press-key`, `upload-file` | per host: which paths, and a regex the control's **visible label** must fully match | deny |
 | `allowed_upload_locations` | the only directories a file may be read from to send to a site | nothing uploadable |
+| `max_upload_bytes` | the largest file an `upload-file` rule sends unless the rule sets its own `max_bytes` (no ceiling) | 1 MiB (1048576 bytes) |
 
 There are no coarse modes to choose between. Read-only *is* the default — name no write
 section and every write action default-denies — and you widen it one action, one host, one
@@ -221,7 +222,7 @@ verbatim; it is globally unique and routes itself to the right profile (multiple
 | `switch_to_default_content` | Return a tab's focus to its top document, checking that the top page is still readable. |
 | `click` | **A write action, off by default** — click a control on a host listed in the `click` allowlist; each host declares a **required** `label` regex the control's visible text must fully match (`.*` to allow any). No host is listed out of the box. |
 | `insert_text` | **A write action, off by default** — type text into a single visible, non-readonly text field (`<textarea>`, a text `<input>`, or a `contenteditable`) on a host listed in the separate `write-text` allowlist section; the field's visible label (placeholder / aria-label / associated `<label>`) must fully match that host's **required** `label` regex. |
-| `upload_file` | **A write action, off by default** — attach a local file to a single visible, non-readonly `<input type=file>` on a host listed in the separate `upload-file` allowlist section (a hidden one, as most sites use behind their own picker button, only when its rule sets `hidden_input: true` and names it in `field_ids`). Additionally gated by `allowed_upload_locations`: the file must resolve to a regular file under a directory you listed, so an upload can never become an arbitrary local-file read. No host and no root are listed out of the box. |
+| `upload_file` | **A write action, off by default** — attach a local file to a single visible, non-readonly `<input type=file>` on a host listed in the separate `upload-file` allowlist section (a hidden one, as most sites use behind their own picker button, only when its rule sets `hidden_input: true` and names it in `field_ids`). Additionally gated by `allowed_upload_locations`: the file must resolve to a regular file under a directory you listed, so an upload can never become an arbitrary local-file read. The file must also fit the size cap: the largest cap among the rules admitting the control (a rule's `max_bytes`, else the top-level `max_upload_bytes` (**1 MiB by default**, down from the fixed 25 MiB of earlier releases)). No host and no root are listed out of the box. |
 
 Frame focus sticks to the tab until you move it or the tab navigates or
 reloads. Every later call re-enters the frame only while it is still the one
@@ -369,7 +370,25 @@ a substitute for — the third:
    leave the machine at all, independently of where it is going. A path is
    expanded and fully resolved before it is compared, so neither `../` nor a
    symlink planted inside one reaches outside it. The resolved path is what the
-   browser is handed, so the file that was checked is the file that is sent.
+   browser is handed, so the path that was checked is the path that is sent. The
+   file's *contents* are not pinned: whoever can write inside an allowed location
+   can still change the file between the check and the browser reading it.
+   The file must also fit a size cap: the top-level `max_upload_bytes` (1 MiB when
+   absent), or, for a control an `upload-file` rule with its own `max_bytes`
+   admits, that rule's cap — the way to let one page take a video without raising
+   the cap everywhere. Rules are additive, so when several admit the same control
+   the largest cap wins (`max_bytes` raises the cap; it cannot tighten a control
+   a broader rule also admits). The size is read when the upload is checked, so
+   it is a sanity bound, not a guarantee against a writer of the location:
+
+   ```yaml
+   max_upload_bytes: 1048576        # optional; the default shown
+   upload-file:
+     www.tiktok.com:
+       - path: ['^/tiktokstudio/upload$']
+         label: '.*'
+         max_bytes: 104857600       # 100 MiB, for this rule only
+   ```
 
 
 To refresh the Tranco snapshot, use `python3 setup/fetch_tranco.py` and restart the MCP server.
